@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block title %}Import Students{% endblock %}
+
+{% block content %}
+<div class="page-header" style="max-width: 640px; margin: 0 auto 1.5rem;">
+    <div class="page-title-group">
+        <h2>Bulk Student Enrollment (CSV)</h2>
+        <p>Enroll multiple students from a spreadsheet or school roster</p>
+    </div>
+    <div class="header-actions">
+        <a href="{% url 'student_template_download' %}" class="btn-secondary">
+            Download Sample CSV
+        </a>
+    </div>
+</div>
+
+<div class="form-card">
+    <form method="POST" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <div class="form-group">
+            <label class="form-label">Select CSV File *</label>
+            <input type="file" name="csv_file" accept=".csv" class="form-input" required>
+        </div>
+
+        <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem; margin: 1.25rem 0; font-size: 0.82rem;">
+            <strong style="display: block; margin-bottom: 0.35rem; color: var(--text-main);">CSV Column Format:</strong>
+            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">Headers required in Row 1:</p>
+            <code style="display: block; background: #ffffff; padding: 0.5rem 0.65rem; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; font-size: 0.8rem; margin-bottom: 0.65rem;">
+                first_name,last_name,student_class,bus_name,canteen_enrolled
+            </code>
+            <ul style="padding-left: 1.1rem; color: var(--text-muted); line-height: 1.5;">
+                <li><strong>first_name & last_name</strong>: e.g. Kwesi, Arthur</li>
+                <li><strong>student_class</strong>: e.g. Class 1A, Class 2B</li>
+                <li><strong>bus_name</strong>: Exact route name (e.g. Tema Bus) or blank for walkers</li>
+                <li><strong>canteen_enrolled</strong>: yes or no</li>
+            </ul>
+        </div>
+
+        <div class="form-actions">
+            <a href="{% url 'student_list' %}" class="btn-secondary">Cancel</a>
+            <button type="submit" class="btn-primary">Upload & Import</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

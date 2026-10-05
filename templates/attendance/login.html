@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block title %}Sign In | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div style="min-height: calc(75vh - 80px); display: flex; align-items: center; justify-content: center; padding: 2rem 0;">
+    <div class="form-card" style="width: 100%; max-width: 400px; margin: 0; box-shadow: var(--shadow-sm);">
+        <div style="text-align: center; margin-bottom: 1.75rem;">
+            <div class="brand-logo-icon" style="margin: 0 auto 0.75rem auto; width: 36px; height: 36px;">
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </div>
+            <h2 style="font-size: 1.15rem; font-weight: 600; color: var(--text-main);">Sign In</h2>
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem;">
+                Staff portal for student attendance and fee management
+            </p>
+        </div>
+
+        <form method="POST" action="{% url 'login' %}">
+            {% csrf_token %}
+
+            <div class="form-group">
+                <label class="form-label" for="id_username">Username</label>
+                <input type="text" name="username" id="id_username" class="form-input" placeholder="e.g. teacher or admin" required autofocus>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="id_password">Password</label>
+                <input type="password" name="password" id="id_password" class="form-input" placeholder="••••••••" required>
+            </div>
+
+            <div style="margin-top: 1.5rem;">
+                <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; padding: 0.65rem;">
+                    Sign In
+                </button>
+            </div>
+        </form>
+
+        <!-- Quick Demo Role Logins -->
+        <div style="margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle); text-align: center;">
+            <div style="font-size: 0.72rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 0.65rem;">
+                Demo Credentials
+            </div>
+            <div style="display: flex; gap: 0.4rem; justify-content: center; flex-wrap: wrap;">
+                <button type="button" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="fillLogin('admin', 'admin123')">
+                    Admin
+                </button>
+                <button type="button" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="fillLogin('teacher', 'teacher123')">
+                    Teacher
+                </button>
+                <button type="button" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="fillLogin('bursar', 'bursar123')">
+                    Accountant
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function fillLogin(u, p) {
+    document.getElementById('id_username').value = u;
+    document.getElementById('id_password').value = p;
+}
+</script>
+{% endblock %}

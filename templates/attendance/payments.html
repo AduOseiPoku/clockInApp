@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+
+{% block title %}Payments{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>Fee Payments Ledger</h2>
+        <p>Transaction records of transport and canteen collections</p>
+    </div>
+    <div class="header-actions">
+        <a href="{% url 'payment_create' %}" class="btn-primary">
+            + Record Payment
+        </a>
+    </div>
+</div>
+
+<!-- Ledger Summary Cards -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Filtered Total</span>
+        </div>
+        <div class="stat-value">{{ CURRENCY_SYMBOL }}{{ total_amount|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>{{ payment_count }} receipt{{ payment_count|pluralize }}</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Intake</span>
+        </div>
+        <div class="stat-value" style="color: var(--primary);">{{ CURRENCY_SYMBOL }}{{ today_total|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>Collected today</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Bus</span>
+        </div>
+        <div class="stat-value" style="color: #0284c7;">{{ CURRENCY_SYMBOL }}{{ today_bus_total|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>Transit receipts today</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Canteen</span>
+        </div>
+        <div class="stat-value" style="color: #059669;">{{ CURRENCY_SYMBOL }}{{ today_canteen_total|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>Lunch meals today</span>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<form method="GET" action="{% url 'payment_list' %}" class="control-bar">
+    <div class="search-input-wrapper">
+        <span class="search-icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+        </span>
+        <input type="text" name="q" value="{{ search }}" placeholder="Search by student or receipt #..." class="search-input">
+    </div>
+
+    <!-- Quick Date Filter Presets -->
+    <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
+        <a href="{% url 'payment_list' %}{% if fee_type %}?fee_type={{ fee_type }}{% endif %}" 
+           class="btn-secondary" 
+           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if not date_preset and not date_str %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           All Time
+        </a>
+        <a href="{% url 'payment_list' %}?preset=today{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+           class="btn-secondary" 
+           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if date_preset == 'today' %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           Today
+        </a>
+        <a href="{% url 'payment_list' %}?preset=yesterday{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+           class="btn-secondary" 
+           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if date_preset == 'yesterday' %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           Yesterday
+        </a>
+        <a href="{% url 'payment_list' %}?preset=week{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+           class="btn-secondary" 
+           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if date_preset == 'week' %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           Last 7 Days
+        </a>
+    </div>
+
+    <!-- Mobile Filter Toggle Button -->
+    <button type="button" class="filter-drawer-toggle" onclick="document.getElementById('mobile-payment-filters').classList.toggle('show-mobile')">
+        <span>⚙️ Filter Payments {% if search or fee_type or student_class or date_str or date_preset %}<span class="stat-badge stat-badge-success" style="margin-left:0.35rem;">Active</span>{% endif %}</span>
+        <span>▼</span>
+    </button>
+
+    <div id="mobile-payment-filters" class="filter-group {% if search or fee_type or student_class or date_str or date_preset %}show-mobile{% endif %}">
+        {% if date_preset %}
+            <input type="hidden" name="preset" value="{{ date_preset }}">
+        {% endif %}
+        <input type="date" name="date" value="{{ date_str }}" class="filter-select" style="min-width: 130px;" onchange="this.form.submit()" title="Filter by specific date">
+
+        <select name="fee_type" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Fee Types</option>
+            <option value="BUS" {% if fee_type == 'BUS' %}selected{% endif %}>Bus Fee</option>
+            <option value="CANTEEN" {% if fee_type == 'CANTEEN' %}selected{% endif %}>Canteen Fee</option>
+        </select>
+
+        <select name="class" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Classes</option>
+            {% for c in classes %}
+                <option value="{{ c }}" {% if student_class == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+
+        {% if search or fee_type or student_class or date_str or date_preset %}
+            <a href="{% url 'payment_list' %}" class="btn-reset">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+<!-- Payments Table (Desktop View) -->
+<div class="table-card desktop-only">
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Receipt #</th>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Fee Type</th>
+                    <th>Method</th>
+                    <th>Period</th>
+                    <th style="text-align: right;">Amount</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in payments %}
+                    <tr>
+                        <td>
+                            <span>{{ p.payment_date|date:"M d, Y" }}</span>
+                        </td>
+                        <td>
+                            <code style="font-size: 0.78rem; color: var(--text-muted);">{{ p.receipt_number|default:"—" }}</code>
+                        </td>
+                        <td>
+                            <div class="student-cell">
+                                <div class="student-avatar" style="width: 24px; height: 24px; font-size: 0.7rem;">{{ p.student.initials }}</div>
+                                <span style="font-weight: 600;">{{ p.student.full_name }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="class-badge">{{ p.student.student_class }}</span>
+                        </td>
+                        <td>
+                            {% if p.fee_type == 'BUS' %}
+                                <span class="fee-badge fee-badge-paid">Bus Fee</span>
+                            {% else %}
+                                <span class="fee-badge fee-badge-paid">Canteen Fee</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">
+                                {{ p.get_payment_method_display }}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">{{ p.period }}</span>
+                        </td>
+                        <td style="text-align: right;">
+                            <span style="font-weight: 600; color: var(--success-text);">
+                                +{{ CURRENCY_SYMBOL }}{{ p.amount|floatformat:2 }}
+                            </span>
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            <a href="{% url 'payment_receipt' p.id %}" class="btn-table-action">
+                                Receipt
+                            </a>
+                            <a href="{% url 'payment_delete' p.id %}" class="btn-table-action" style="color: var(--danger-text);">
+                                Delete
+                            </a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="9" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                            <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No payment records found</div>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Use "+ Record Payment" to register parent payments.</p>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Touch-Friendly Payment Cards (Mobile View) -->
+<div class="student-cards-list mobile-only">
+    {% for p in payments %}
+        <div class="student-card-item">
+            <div class="student-card-top">
+                <div class="student-card-meta">
+                    <div class="student-avatar" style="width:28px; height:28px; font-size:0.75rem;">{{ p.student.initials }}</div>
+                    <div>
+                        <div class="student-name">{{ p.student.full_name }}</div>
+                        <div class="student-sub">
+                            <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ p.student.student_class }}</span>
+                            <span style="color:var(--text-muted); font-size:0.72rem; margin-left:0.25rem;">{{ p.payment_date|date:"M d, Y" }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:1.1rem; font-weight:700; color:var(--success-text);">
+                        +{{ CURRENCY_SYMBOL }}{{ p.amount|floatformat:2 }}
+                    </div>
+                    {% if p.fee_type == 'BUS' %}
+                        <span class="fee-badge fee-badge-paid" style="font-size:0.68rem;">Bus Fee</span>
+                    {% else %}
+                        <span class="fee-badge fee-badge-paid" style="font-size:0.68rem;">Canteen Fee</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="student-card-fees" style="justify-content:space-between;">
+                <div>
+                    <span style="color:var(--text-muted); font-weight:600;">Receipt:</span>
+                    <code>{{ p.receipt_number|default:"Auto" }}</code>
+                </div>
+                <div>
+                    <span style="color:var(--text-muted); font-weight:600;">Method:</span>
+                    <span>{{ p.get_payment_method_display }}</span>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
+                <a href="{% url 'payment_receipt' p.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
+                    📄 View Receipt Voucher
+                </a>
+                <a href="{% url 'payment_delete' p.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
+                    🗑️
+                </a>
+            </div>
+        </div>
+    {% empty %}
+        <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <div style="font-size: 0.95rem; font-weight: 600;">No payment records found</div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Use the center "+ Pay" button to record payments.</p>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

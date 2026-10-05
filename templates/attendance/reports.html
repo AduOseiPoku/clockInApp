@@ -1,0 +1,295 @@
+{% extends 'base.html' %}
+
+{% block title %}Attendance & Fee Reports{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>Attendance & Fee Reconciliation</h2>
+        <p>Morning student arrival rates and dynamic fee balance summaries</p>
+    </div>
+    <div class="header-actions">
+        <form method="GET" action="{% url 'reports' %}" class="date-selector-pill">
+            <label for="report-date" style="font-size:0.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Date</label>
+            <input type="date" id="report-date" name="date" value="{{ date_str }}" onchange="this.form.submit()">
+        </form>
+        <a href="{% url 'export_attendance_csv' %}?date={{ date_str }}" class="btn-secondary">
+            Attendance CSV
+        </a>
+        <a href="{% url 'export_debtors_csv' %}?period={{ period }}" class="btn-secondary">
+            Debtors CSV
+        </a>
+        <button type="button" class="btn-secondary" onclick="window.print()">
+            Print Report
+        </button>
+    </div>
+</div>
+
+<!-- Key Highlights -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Daily Attendance</span>
+        </div>
+        <div class="stat-value">{{ overall_attendance_pct }}%</div>
+        <div class="stat-footer">
+            <span>{{ total_school_present }} present of {{ total_school_students }} enrolled</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Daily Cashier Revenue</span>
+        </div>
+        <div class="stat-value" style="color: var(--primary);">{{ currency }}{{ grand_total_col|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>of {{ currency }}{{ grand_total_exp|floatformat:2 }} expected for {{ target_date|date:"M d" }}</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Bus Fee Outstanding</span>
+        </div>
+        <div class="stat-value" style="color: var(--danger-text);">{{ currency }}{{ total_bus_bal|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>{{ currency }}{{ total_bus_col|floatformat:2 }} collected of {{ currency }}{{ total_bus_exp|floatformat:2 }}</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Canteen Fee Outstanding</span>
+        </div>
+        <div class="stat-value" style="color: var(--danger-text);">{{ currency }}{{ canteen_balance|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>{{ currency }}{{ canteen_collected|floatformat:2 }} collected of {{ currency }}{{ canteen_expected|floatformat:2 }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- 1. Daily Attendance by Class -->
+<div style="margin-bottom: 2rem;">
+    <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-main);">
+        Morning Student Attendance by Class
+    </h3>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Class</th>
+                        <th>Enrolled</th>
+                        <th>Present</th>
+                        <th>Absent</th>
+                        <th>Attendance Rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cr in class_reports %}
+                        <tr>
+                            <td>
+                                <span class="class-badge">{{ cr.class_name }}</span>
+                            </td>
+                            <td><strong>{{ cr.total }}</strong></td>
+                            <td>
+                                <span style="font-weight: 600; color: var(--success-text);">{{ cr.present }}</span>
+                            </td>
+                            <td>
+                                {% if cr.absent > 0 %}
+                                    <span class="text-danger" style="font-weight: 600;">{{ cr.absent }}</span>
+                                {% else %}
+                                    <span class="text-muted">{{ cr.absent }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.65rem;">
+                                    <span style="font-weight: 600; min-width: 42px;">{{ cr.pct }}%</span>
+                                    <progress class="attendance-progress" value="{{ cr.pct }}" max="100" title="{{ cr.pct }}% Present"></progress>
+                                </div>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">No classes found.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 2. Dynamic Bus Fee Collection by Bus Route -->
+<div style="margin-bottom: 2rem;">
+    <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-main);">
+        Daily Bus Fee Collections by Route ({{ target_date|date:"M d, Y" }})
+    </h3>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Route Name</th>
+                        <th>Route Rate</th>
+                        <th>Riders</th>
+                        <th>Expected</th>
+                        <th>Collected</th>
+                        <th>Outstanding</th>
+                        <th>Collection %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for br in bus_reports %}
+                        <tr>
+                            <td>
+                                <strong>{{ br.bus.name }}</strong>
+                            </td>
+                            <td>
+                                <span class="bus-rate-tag">{{ currency }}{{ br.rate|floatformat:2 }}</span>
+                            </td>
+                            <td>{{ br.riders_count }}</td>
+                            <td><span>{{ currency }}{{ br.expected|floatformat:2 }}</span></td>
+                            <td>
+                                <span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ br.collected|floatformat:2 }}</span>
+                            </td>
+                            <td>
+                                {% if br.balance > 0 %}
+                                    <span class="text-danger" style="font-weight: 600;">
+                                        {{ currency }}{{ br.balance|floatformat:2 }}
+                                    </span>
+                                {% else %}
+                                    <span class="text-success" style="font-weight: 600;">
+                                        {{ currency }}{{ br.balance|floatformat:2 }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="stat-badge {% if br.collection_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}">
+                                    {{ br.collection_pct }}%
+                                </span>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No buses configured.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr style="background: var(--surface-subtle); font-weight: 600;">
+                        <td colspan="3">Fleet Total</td>
+                        <td>{{ currency }}{{ total_bus_exp|floatformat:2 }}</td>
+                        <td style="color: var(--success-text);">{{ currency }}{{ total_bus_col|floatformat:2 }}</td>
+                        <td style="color: var(--danger-text);">{{ currency }}{{ total_bus_bal|floatformat:2 }}</td>
+                        <td>—</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 3. Canteen Fee Reconciliation -->
+<div style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+        <h3 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-main);">
+            Daily Canteen Fee Reconciliation ({{ target_date|date:"M d, Y" }})
+        </h3>
+        <a href="{% url 'school_settings' %}" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.65rem;">
+            ⚙️ Change Daily Rate ({{ currency }}{{ canteen_rate|floatformat:2 }}/day)
+        </a>
+    </div>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Enrolled Students</th>
+                        <th>Rate</th>
+                        <th>Expected</th>
+                        <th>Collected</th>
+                        <th>Outstanding</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>School Lunch / Canteen</strong></td>
+                        <td>{{ canteen_enrolled_count }}</td>
+                        <td>{{ currency }}{{ canteen_rate|floatformat:2 }}</td>
+                        <td><span>{{ currency }}{{ canteen_expected|floatformat:2 }}</span></td>
+                        <td><span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ canteen_collected|floatformat:2 }}</span></td>
+                        <td><span style="color: var(--danger-text); font-weight: 600;">{{ currency }}{{ canteen_balance|floatformat:2 }}</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 4. Combined Daily Cashier Reconciliation -->
+<div style="margin-bottom: 2rem;">
+    <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-main);">
+        Combined Daily Cashier Summary ({{ target_date|date:"M d, Y" }})
+    </h3>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th style="text-align: right;">Daily Expected</th>
+                        <th style="text-align: right;">Daily Collected</th>
+                        <th style="text-align: right;">Daily Balance</th>
+                        <th style="text-align: right;">Collection %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Bus Transportation</strong></td>
+                        <td style="text-align: right;">{{ currency }}{{ total_bus_exp|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">{{ currency }}{{ total_bus_col|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--danger-text); font-weight: 600;">{{ currency }}{{ total_bus_bal|floatformat:2 }}</td>
+                        <td style="text-align: right;">
+                            {% if total_bus_exp > 0 %}
+                                {% widthratio total_bus_col total_bus_exp 100 %}%
+                            {% else %}
+                                100%
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Canteen Meal Plan</strong></td>
+                        <td style="text-align: right;">{{ currency }}{{ canteen_expected|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">{{ currency }}{{ canteen_collected|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--danger-text); font-weight: 600;">{{ currency }}{{ canteen_balance|floatformat:2 }}</td>
+                        <td style="text-align: right;">
+                            {% if canteen_expected > 0 %}
+                                {% widthratio canteen_collected canteen_expected 100 %}%
+                            {% else %}
+                                100%
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr style="background: var(--surface-subtle); font-weight: 700; font-size: 0.95rem;">
+                        <td>Grand Total</td>
+                        <td style="text-align: right;">{{ currency }}{{ grand_total_exp|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text);">{{ currency }}{{ grand_total_col|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--danger-text);">{{ currency }}{{ grand_total_bal|floatformat:2 }}</td>
+                        <td style="text-align: right;">
+                            {% if grand_total_exp > 0 %}
+                                {% widthratio grand_total_col grand_total_exp 100 %}%
+                            {% else %}
+                                100%
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

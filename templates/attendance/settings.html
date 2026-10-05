@@ -1,0 +1,191 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 680px; margin: 0 auto; width: 100%;">
+    <div class="page-header" style="margin-bottom: 1.25rem;">
+        <div class="page-title-group">
+            <h2>{{ title }}</h2>
+            <p>Configure the default daily canteen meal rate, school branding, and academic billing period</p>
+        </div>
+    </div>
+
+    <!-- Active Canteen Billing Snapshot -->
+    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 1.25rem;">
+        <div class="stat-card" style="border-left: 4px solid var(--primary);">
+            <div class="stat-header">
+                <span class="stat-title">Active Daily Canteen Fee</span>
+            </div>
+            <div class="stat-value" style="color: var(--primary);">
+                {{ CURRENCY_SYMBOL }}{{ current_canteen|floatformat:2 }}
+            </div>
+            <div class="stat-footer">
+                <span>Per student / day</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-header">
+                <span class="stat-title">Enrolled Students</span>
+            </div>
+            <div class="stat-value">
+                {{ enrolled_canteen_count }}
+            </div>
+            <div class="stat-footer">
+                <span>Taking school lunch</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-header">
+                <span class="stat-title">Daily Expected Lunch</span>
+            </div>
+            <div class="stat-value" style="color: var(--success-text);">
+                {{ CURRENCY_SYMBOL }}{{ daily_canteen_expected|floatformat:2 }}
+            </div>
+            <div class="stat-footer">
+                <span>Intake per school day</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Form -->
+    <div class="form-card" style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.5rem; box-shadow: var(--shadow-sm);">
+        <form method="POST">
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+                <div style="background: #fee2e2; border: 1px solid #f87171; color: #991b1b; padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; font-size: 0.85rem; font-weight: 500;">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            <!-- Section 1: Canteen Meal Plan Billing -->
+            <div style="margin-bottom: 1.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem;">
+                    <span style="font-size: 1.25rem;">🍱</span>
+                    <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        Canteen Meal Plan Daily Rate
+                    </h3>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.default_canteen_fee.id_for_label }}" style="font-weight: 600;">
+                        Default Daily Lunch Fee ({{ CURRENCY_SYMBOL }}/day) *
+                    </label>
+                    <div style="position: relative;">
+                        {{ form.default_canteen_fee }}
+                    </div>
+                    <small class="form-hint" style="margin-top: 0.35rem; display: block;">
+                        {{ form.default_canteen_fee.help_text }}
+                    </small>
+                    {% if form.default_canteen_fee.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                            {{ form.default_canteen_fee.errors }}
+                        </div>
+                    {% endif %}
+
+                    <!-- Quick Preset Buttons -->
+                    <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Quick presets:</span>
+                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="8.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
+                            {{ CURRENCY_SYMBOL }}8.00
+                        </button>
+                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="10.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
+                            {{ CURRENCY_SYMBOL }}10.00
+                        </button>
+                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="12.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
+                            {{ CURRENCY_SYMBOL }}12.00
+                        </button>
+                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="15.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
+                            {{ CURRENCY_SYMBOL }}15.00
+                        </button>
+                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="20.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
+                            {{ CURRENCY_SYMBOL }}20.00
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 2: School Branding & Ledger Info -->
+            <div style="margin-bottom: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem;">
+                    <span style="font-size: 1.25rem;">🏫</span>
+                    <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        School Information & Period
+                    </h3>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.school_name.id_for_label }}" style="font-weight: 600;">
+                        School Name *
+                    </label>
+                    {{ form.school_name }}
+                    <small class="form-hint">{{ form.school_name.help_text }}</small>
+                    {% if form.school_name.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                            {{ form.school_name.errors }}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0.85rem;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="{{ form.current_period.id_for_label }}" style="font-weight: 600;">
+                            Current Academic Period *
+                        </label>
+                        {{ form.current_period }}
+                        <small class="form-hint">{{ form.current_period.help_text }}</small>
+                        {% if form.current_period.errors %}
+                            <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                                {{ form.current_period.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="{{ form.currency_symbol.id_for_label }}" style="font-weight: 600;">
+                            Currency Symbol *
+                        </label>
+                        {{ form.currency_symbol }}
+                        <small class="form-hint">{{ form.currency_symbol.help_text }}</small>
+                        {% if form.currency_symbol.errors %}
+                            <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                                {{ form.currency_symbol.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Action Buttons -->
+            <div style="display: flex; justify-content: flex-end; gap: 0.65rem; border-top: 1px solid var(--border-subtle); padding-top: 1.15rem; margin-top: 1.25rem;">
+                <a href="{% url 'dashboard' %}" class="btn-secondary">
+                    Cancel
+                </a>
+                <button type="submit" class="btn-primary" style="min-width: 140px;">
+                    Save Settings
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const canteenInput = document.getElementById('id_default_canteen_fee');
+    const presetButtons = document.querySelectorAll('.btn-preset-canteen');
+
+    presetButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const amt = btn.dataset.amt;
+            if (canteenInput && amt) {
+                canteenInput.value = amt;
+                canteenInput.focus();
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

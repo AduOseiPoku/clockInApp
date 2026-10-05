@@ -1,0 +1,792 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Responsive Mobile-First Dimensions for Payment Form */
+.payment-page-container {
+    max-width: 680px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.payment-form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.form-grid-2col,
+.form-grid-3col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.85rem;
+    margin-bottom: 1.15rem;
+}
+
+.fee-breakdown-box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-subtle);
+    padding: 1.15rem;
+    margin-bottom: 1.25rem;
+}
+
+.fee-cards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+}
+
+.fee-item-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.95rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.fee-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+.fee-card-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+.fee-card-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+}
+
+.fee-rate-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    background: var(--surface-subtle);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.fee-balance-row {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.fee-quick-actions {
+    display: flex;
+    gap: 0.45rem;
+    margin-top: 0.45rem;
+}
+
+.fee-quick-actions button {
+    min-height: 38px;
+    font-weight: 600;
+}
+
+.total-charge-banner {
+    margin-top: 1rem;
+    padding: 0.85rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.payment-actions-bar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-subtle);
+}
+
+/* Touch-friendly inputs */
+.payment-form-card .form-input,
+.payment-form-card .form-select,
+.payment-form-card textarea {
+    width: 100%;
+    min-height: 42px;
+}
+
+/* =========================================================
+   Mobile Breakpoint Optimizations (under 640px)
+   ========================================================= */
+@media (max-width: 640px) {
+    .payment-page-container {
+        padding: 0 0.25rem;
+    }
+
+    .payment-form-card {
+        padding: 1rem 0.85rem;
+        border-radius: var(--radius-sm);
+    }
+
+    /* Stack 2-column and 3-column inputs into full-width vertical inputs */
+    .form-grid-2col,
+    .form-grid-3col {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+        margin-bottom: 1rem;
+    }
+
+    /* Stack Bus and Canteen cards into 1 column on phones */
+    .fee-cards-grid {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    .fee-breakdown-box {
+        padding: 0.85rem 0.75rem;
+    }
+
+    .fee-item-card {
+        padding: 0.85rem;
+    }
+
+    /* Quick action buttons on mobile */
+    .fee-quick-actions button {
+        min-height: 42px; /* standard 42-44px touch target */
+        font-size: 0.82rem;
+    }
+
+    /* Mobile total charge banner */
+    .total-charge-banner {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+        gap: 0.5rem;
+        padding: 0.85rem;
+    }
+
+    .total-charge-banner .total-charge-box {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 0.4rem;
+        border-top: 1px dashed var(--border);
+    }
+
+    #live-total-display {
+        font-size: 1.35rem !important;
+    }
+
+    /* Mobile full-width stacked action buttons */
+    .payment-actions-bar {
+        flex-direction: column;
+        gap: 0.65rem;
+    }
+
+    .payment-actions-bar .btn-primary,
+    .payment-actions-bar .btn-secondary {
+        width: 100%;
+        min-height: 46px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.95rem;
+        padding: 0.75rem 1rem;
+    }
+
+    /* Ensure iOS Safari does not zoom on form focus */
+    .payment-form-card .form-input,
+    .payment-form-card .form-select,
+    .payment-form-card textarea {
+        font-size: 16px !important;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="payment-page-container">
+    <div class="page-header" style="margin-bottom: 1.25rem;">
+        <div class="page-title-group">
+            <h2 style="font-size: 1.35rem;">{{ title }}</h2>
+            <p style="font-size: 0.82rem;">Record daily Bus fee, daily Canteen fee, or both fees together in a single transaction</p>
+        </div>
+    </div>
+
+    <div class="payment-form-card">
+        <form method="POST" id="payment-form">
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+                <div style="background: #fee2e2; border: 1px solid #f87171; color: #991b1b; padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; font-size: 0.85rem; font-weight: 500;">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            <!-- Payment Date & Daily Rate Indicators -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-subtle); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 1.15rem; gap: 1rem; flex-wrap: wrap;">
+                <div>
+                    <label class="form-label" for="{{ form.payment_date.id_for_label }}" style="margin-bottom: 0.15rem; font-weight: 700; font-size: 0.85rem;">Payment Date</label>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">Fees will be applied and credited for this target date</div>
+                </div>
+                <div style="min-width: 170px;">
+                    {{ form.payment_date }}
+                    {% if form.payment_date.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.8rem; margin-top: 0.25rem;">{{ form.payment_date.errors }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Three-Step Class, Student & Bus Route Selection -->
+            <div class="form-grid-3col">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.student_class.id_for_label }}">1. Class *</label>
+                    {{ form.student_class }}
+                    <small class="form-hint">Filter students by class</small>
+                    {% if form.student_class.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.8rem; margin-top: 0.25rem;">{{ form.student_class.errors }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.student.id_for_label }}">2. Student *</label>
+                    {{ form.student }}
+                    <small id="student-helper-text" class="form-hint">Select a class first</small>
+                    {% if form.student.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.8rem; margin-top: 0.25rem;">{{ form.student.errors }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.bus.id_for_label }}">3. Bus Route</label>
+                    {{ form.bus }}
+                    <small id="bus-helper-text" class="form-hint">Select route to enable full bus fee</small>
+                    {% if form.bus.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.8rem; margin-top: 0.25rem;">{{ form.bus.errors }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Dual Fee Payment Box -->
+            <div class="fee-breakdown-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.85rem;">
+                    <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.45rem;">
+                        <span>Daily Fee Breakdown & Prepay</span>
+                        <span style="font-size: 0.72rem; font-weight: 500; background: var(--surface); border: 1px solid var(--border); padding: 0.15rem 0.5rem; border-radius: 9999px; color: var(--text-muted);">Daily or multi-day credit</span>
+                    </h4>
+                    <div id="quick-fill-all" style="display: none;">
+                        <button type="button" id="btn-pay-all-balances" style="background: none; border: none; color: var(--primary); font-size: 0.78rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0.25rem 0;">
+                            Fill All Unpaid Balances
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Responsive Fee Cards Grid (2 cols on desktop, 1 col on mobile) -->
+                <div class="fee-cards-grid">
+                    <!-- Bus Fee Card -->
+                    <div class="fee-item-card">
+                        <div>
+                            <div class="fee-card-header">
+                                <div>
+                                    <div class="fee-card-title">Bus Transportation</div>
+                                    <div id="card-bus-route" class="fee-card-sub">Route: —</div>
+                                </div>
+                                <span id="card-bus-badge" class="fee-rate-badge">—</span>
+                            </div>
+
+                            <div class="fee-balance-row">
+                                <span>Current Balance:</span>
+                                <strong id="card-bus-balance" style="color: var(--danger-text);">{{ CURRENCY_SYMBOL }}0.00</strong>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0.45rem;">
+                                <label class="form-label" for="{{ form.bus_amount.id_for_label }}" style="font-size: 0.78rem;">Bus Amount ({{ CURRENCY_SYMBOL }})</label>
+                                {{ form.bus_amount }}
+                                {% if form.bus_amount.errors %}
+                                    <div style="color: var(--danger-text); font-size: 0.78rem; margin-top: 0.2rem;">{{ form.bus_amount.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="fee-quick-actions" style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem;">
+                            <button type="button" id="btn-bus-1day" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
+                                1 Day
+                            </button>
+                            <button type="button" id="btn-bus-5days" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
+                                5 Days
+                            </button>
+                            <button type="button" id="btn-bus-full" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
+                                Balance
+                            </button>
+                            <button type="button" id="btn-bus-zero" class="btn-secondary" style="min-width: 42px; padding: 0.35rem 0.5rem; font-size: 0.78rem;">
+                                {{ CURRENCY_SYMBOL }}0
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Canteen Fee Card -->
+                    <div class="fee-item-card">
+                        <div>
+                            <div class="fee-card-header">
+                                <div>
+                                    <div class="fee-card-title">Canteen Meal Plan</div>
+                                    <div id="card-canteen-status" class="fee-card-sub">Status: —</div>
+                                </div>
+                                <span id="card-canteen-badge" class="fee-rate-badge">—</span>
+                            </div>
+
+                            <div class="fee-balance-row">
+                                <span>Current Balance:</span>
+                                <strong id="card-canteen-balance" style="color: var(--danger-text);">{{ CURRENCY_SYMBOL }}0.00</strong>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0.45rem;">
+                                <label class="form-label" for="{{ form.canteen_amount.id_for_label }}" style="font-size: 0.78rem;">Canteen Amount ({{ CURRENCY_SYMBOL }})</label>
+                                {{ form.canteen_amount }}
+                                {% if form.canteen_amount.errors %}
+                                    <div style="color: var(--danger-text); font-size: 0.78rem; margin-top: 0.2rem;">{{ form.canteen_amount.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="fee-quick-actions" style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem;">
+                            <button type="button" id="btn-canteen-1day" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
+                                1 Day
+                            </button>
+                            <button type="button" id="btn-canteen-5days" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
+                                5 Days
+                            </button>
+                            <button type="button" id="btn-canteen-full" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
+                                Balance
+                            </button>
+                            <button type="button" id="btn-canteen-zero" class="btn-secondary" style="min-width: 42px; padding: 0.35rem 0.5rem; font-size: 0.78rem;">
+                                {{ CURRENCY_SYMBOL }}0
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Real-time Grand Total Banner -->
+                <div class="total-charge-banner">
+                    <div style="font-size: 0.82rem; color: var(--text-muted);">
+                        <span id="total-summary-text">Select student and enter fee amounts</span>
+                    </div>
+                    <div class="total-charge-box">
+                        <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 600; color: var(--text-muted); margin-right: 0.5rem;">Total to Charge</div>
+                        <div id="live-total-display" style="font-size: 1.25rem; font-weight: 700; color: var(--primary);">
+                            {{ CURRENCY_SYMBOL }}0.00
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {{ form.period }}
+            {{ form.payment_method }}
+            {{ form.receipt_number }}
+            {{ form.notes }}
+
+            <div class="payment-actions-bar">
+                <a href="{% url 'payment_list' %}" class="btn-secondary">Cancel</a>
+                <button type="submit" id="btn-submit-payment" class="btn-primary">
+                    Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script id="students-by-class-data" type="application/json">{{ students_by_class_json|safe }}</script>
+<script id="buses-data" type="application/json">{{ buses_json|safe }}</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const studentsDataEl = document.getElementById('students-by-class-data');
+    const studentsByClass = studentsDataEl ? JSON.parse(studentsDataEl.textContent || '{}') : {};
+    const busesDataEl = document.getElementById('buses-data');
+    const busesList = busesDataEl ? JSON.parse(busesDataEl.textContent || '[]') : [];
+    const busesById = {};
+    busesList.forEach(b => { busesById[String(b.id)] = b; });
+
+    const classSelect = document.getElementById('id_student_class');
+    const studentSelect = document.getElementById('id_student');
+    const busSelect = document.getElementById('id_bus');
+    const busAmountInput = document.getElementById('id_bus_amount');
+    const canteenAmountInput = document.getElementById('id_canteen_amount');
+    const helperText = document.getElementById('student-helper-text');
+    const busHelperText = document.getElementById('bus-helper-text');
+
+    const cardBusRoute = document.getElementById('card-bus-route');
+    const cardBusBadge = document.getElementById('card-bus-badge');
+    const cardBusBalance = document.getElementById('card-bus-balance');
+    const btnBus1Day = document.getElementById('btn-bus-1day');
+    const btnBus5Days = document.getElementById('btn-bus-5days');
+    const btnBusFull = document.getElementById('btn-bus-full');
+    const btnBusZero = document.getElementById('btn-bus-zero');
+
+    const cardCanteenStatus = document.getElementById('card-canteen-status');
+    const cardCanteenBadge = document.getElementById('card-canteen-badge');
+    const cardCanteenBalance = document.getElementById('card-canteen-balance');
+    const btnCanteen1Day = document.getElementById('btn-canteen-1day');
+    const btnCanteen5Days = document.getElementById('btn-canteen-5days');
+    const btnCanteenFull = document.getElementById('btn-canteen-full');
+    const btnCanteenZero = document.getElementById('btn-canteen-zero');
+
+    const quickFillAll = document.getElementById('quick-fill-all');
+    const btnPayAllBalances = document.getElementById('btn-pay-all-balances');
+    const liveTotalDisplay = document.getElementById('live-total-display');
+    const totalSummaryText = document.getElementById('total-summary-text');
+
+    const initialStudentId = "{{ initial_student_id }}";
+    const initialClassId = "{{ initial_class_id }}";
+    const currency = "{{ CURRENCY_SYMBOL }}";
+
+    let currentStudent = null;
+    let currentStudentActiveBusBalance = 0;
+    let currentStudentActiveCanteenBalance = 0;
+
+    function formatMoney(val) {
+        return `${currency}${parseFloat(val || 0).toFixed(2)}`;
+    }
+
+    function calculateTotal() {
+        const b = parseFloat(busAmountInput.value) || 0;
+        const c = parseFloat(canteenAmountInput.value) || 0;
+        const sum = b + c;
+
+        liveTotalDisplay.textContent = formatMoney(sum);
+
+        if (sum === 0) {
+            liveTotalDisplay.style.color = 'var(--text-muted)';
+            totalSummaryText.textContent = 'Enter Bus and/or Canteen amount';
+        } else {
+            liveTotalDisplay.style.color = 'var(--primary)';
+            if (b > 0 && c > 0) {
+                totalSummaryText.textContent = `Bus: ${formatMoney(b)} + Canteen: ${formatMoney(c)}`;
+            } else if (b > 0) {
+                totalSummaryText.textContent = `Bus Fee only (${formatMoney(b)})`;
+            } else {
+                totalSummaryText.textContent = `Canteen Fee only (${formatMoney(c)})`;
+            }
+        }
+    }
+
+    function syncBusFee(forceAmount = true) {
+        const selectedBusId = busSelect ? busSelect.value : '';
+
+        if (selectedBusId && busesById[selectedBusId]) {
+            const b = busesById[selectedBusId];
+            const busFee = b.fee;
+            const busPaid = (currentStudent && currentStudent.bus_paid) ? currentStudent.bus_paid : 0;
+            const busBal = Math.max(0, busFee - busPaid);
+
+            // Amount to fill when clicking "Pay Full":
+            // If student owes an outstanding balance > 0, charge that balance.
+            // If student already paid for today (balance is 0), charge the full daily route fee!
+            const fullAmountToCharge = busBal > 0 ? busBal : busFee;
+            currentStudentActiveBusBalance = fullAmountToCharge;
+
+            cardBusRoute.textContent = `Route: ${b.name}`;
+            cardBusBadge.textContent = `${formatMoney(busFee)} / day`;
+            cardBusBadge.style.background = '#e0f2fe';
+            cardBusBadge.style.color = '#0369a1';
+
+            if (currentStudent && busPaid > 0 && busBal === 0) {
+                cardBusBalance.innerHTML = `<span style="color:var(--success-text); font-weight:600;">Paid (${formatMoney(busPaid)})</span>`;
+            } else if (currentStudent && busPaid > 0) {
+                cardBusBalance.innerHTML = `<span style="color:var(--danger-text); font-weight:700;">${formatMoney(busBal)}</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(busPaid)} paid)</span>`;
+            } else {
+                cardBusBalance.textContent = formatMoney(fullAmountToCharge);
+                cardBusBalance.style.color = 'var(--danger-text)';
+            }
+
+            btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
+            if (busHelperText) {
+                busHelperText.textContent = `${b.name} (${formatMoney(busFee)}) active`;
+                busHelperText.style.color = 'var(--text-muted)';
+            }
+
+            if (forceAmount || !busAmountInput.value || parseFloat(busAmountInput.value) === 0) {
+                busAmountInput.value = fullAmountToCharge.toFixed(2);
+            }
+        } else {
+            currentStudentActiveBusBalance = 0;
+            cardBusRoute.textContent = currentStudent ? 'Route: Walker (No Bus)' : 'Route: —';
+            cardBusBadge.textContent = currentStudent ? 'Walker' : '—';
+            cardBusBadge.style.background = 'var(--surface-subtle)';
+            cardBusBadge.style.color = 'var(--text-muted)';
+            cardBusBalance.textContent = formatMoney(0);
+            cardBusBalance.style.color = 'var(--text-muted)';
+            btnBusFull.textContent = 'Pay Full';
+
+            if (busHelperText) {
+                busHelperText.textContent = currentStudent ? 'Walker / No bus assigned' : 'Select route to enable full bus fee';
+                busHelperText.style.color = 'var(--text-muted)';
+            }
+
+            if (forceAmount) {
+                busAmountInput.value = '0.00';
+            }
+        }
+        calculateTotal();
+    }
+
+    function updateStudentDropdown(classId, preserveStudentId = null) {
+        studentSelect.innerHTML = '<option value="">-- Select Student --</option>';
+
+        if (!classId || !studentsByClass[classId] || studentsByClass[classId].length === 0) {
+            studentSelect.disabled = true;
+            helperText.textContent = classId ? 'No students enrolled in this class' : 'Select a class first';
+            clearStudentCards();
+            return;
+        }
+
+        studentSelect.disabled = false;
+        helperText.textContent = `${studentsByClass[classId].length} students in class`;
+
+        studentsByClass[classId].forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            if (preserveStudentId && String(s.id) === String(preserveStudentId)) {
+                opt.selected = true;
+            }
+            studentSelect.appendChild(opt);
+        });
+
+        updateStudentDetails();
+    }
+
+    function clearStudentCards() {
+        currentStudent = null;
+        currentStudentActiveBusBalance = 0;
+        currentStudentActiveCanteenBalance = 0;
+        if (busSelect) busSelect.value = '';
+        if (busHelperText) {
+            busHelperText.textContent = 'Select student or route first';
+            busHelperText.style.color = 'var(--text-muted)';
+        }
+
+        cardBusRoute.textContent = 'Route: —';
+        cardBusBadge.textContent = '—';
+        cardBusBadge.style.background = 'var(--surface-subtle)';
+        cardBusBadge.style.color = 'var(--text-muted)';
+        cardBusBalance.textContent = formatMoney(0);
+        busAmountInput.value = '0.00';
+        btnBusFull.textContent = 'Pay Full';
+
+        cardCanteenStatus.textContent = 'Status: —';
+        cardCanteenBadge.textContent = '—';
+        cardCanteenBadge.style.background = 'var(--surface-subtle)';
+        cardCanteenBadge.style.color = 'var(--text-muted)';
+        cardCanteenBalance.textContent = formatMoney(0);
+        canteenAmountInput.value = '0.00';
+        btnCanteenFull.textContent = 'Pay Full';
+
+        quickFillAll.style.display = 'none';
+        calculateTotal();
+    }
+
+    function updateStudentDetails() {
+        const classId = classSelect.value;
+        const studentId = studentSelect.value;
+
+        if (!classId || !studentId || !studentsByClass[classId]) {
+            clearStudentCards();
+            return;
+        }
+
+        const student = studentsByClass[classId].find(s => String(s.id) === String(studentId));
+        if (!student) {
+            clearStudentCards();
+            return;
+        }
+
+        currentStudent = student;
+        quickFillAll.style.display = 'block';
+
+        // 1. Bus Selection & Fee Sync
+        if (busSelect) {
+            busSelect.value = student.bus_id ? String(student.bus_id) : '';
+        }
+        syncBusFee(false);
+
+        // 2. Canteen Card
+        const canteenFee = (student && student.canteen_fee) ? student.canteen_fee : 10.0;
+        const canteenBal = (student && student.canteen_balance) ? student.canteen_balance : 0;
+        const canteenFullAmount = canteenBal > 0 ? canteenBal : canteenFee;
+        currentStudentActiveCanteenBalance = canteenFullAmount;
+
+        cardCanteenBalance.textContent = formatMoney(student.canteen_balance);
+        if (student.canteen_enrolled) {
+            cardCanteenStatus.textContent = 'Status: Enrolled in meal plan';
+            cardCanteenBadge.textContent = `${formatMoney(student.canteen_fee)} / day`;
+            cardCanteenBadge.style.background = '#ecfdf5';
+            cardCanteenBadge.style.color = '#047857';
+            btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFullAmount)})`;
+        } else {
+            cardCanteenStatus.textContent = 'Status: Opted out';
+            cardCanteenBadge.textContent = 'Opted Out';
+            cardCanteenBadge.style.background = 'var(--surface-subtle)';
+            cardCanteenBadge.style.color = 'var(--text-muted)';
+            btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFee)})`;
+        }
+
+        // Auto-fill suggested canteen amount if field is empty or 0
+        if (!canteenAmountInput.value || parseFloat(canteenAmountInput.value) === 0) {
+            if (student.canteen_balance > 0) {
+                canteenAmountInput.value = student.canteen_balance.toFixed(2);
+            } else if (student.canteen_enrolled) {
+                canteenAmountInput.value = canteenFee.toFixed(2);
+            } else {
+                canteenAmountInput.value = '0.00';
+            }
+        }
+
+        calculateTotal();
+    }
+
+    // Bus Route Dropdown Change Handler
+    if (busSelect) {
+        busSelect.addEventListener('change', () => {
+            syncBusFee(true);
+        });
+    }
+
+    // Quick Action Handlers
+    if (btnBus1Day) {
+        btnBus1Day.addEventListener('click', () => {
+            const selectedBusId = busSelect ? busSelect.value : '';
+            if (selectedBusId && busesById[selectedBusId]) {
+                const b = busesById[selectedBusId];
+                busAmountInput.value = (parseFloat(b.fee) * 1).toFixed(2);
+                calculateTotal();
+            } else if (busSelect) {
+                busSelect.focus();
+                if (busHelperText) {
+                    busHelperText.textContent = 'Please choose a Bus Route above first!';
+                    busHelperText.style.color = 'var(--danger-text)';
+                }
+            }
+        });
+    }
+
+    if (btnBus5Days) {
+        btnBus5Days.addEventListener('click', () => {
+            const selectedBusId = busSelect ? busSelect.value : '';
+            if (selectedBusId && busesById[selectedBusId]) {
+                const b = busesById[selectedBusId];
+                busAmountInput.value = (parseFloat(b.fee) * 5).toFixed(2);
+                calculateTotal();
+            } else if (busSelect) {
+                busSelect.focus();
+                if (busHelperText) {
+                    busHelperText.textContent = 'Please choose a Bus Route above first!';
+                    busHelperText.style.color = 'var(--danger-text)';
+                }
+            }
+        });
+    }
+
+    btnBusFull.addEventListener('click', () => {
+        const selectedBusId = busSelect ? busSelect.value : '';
+        if (selectedBusId && busesById[selectedBusId]) {
+            const b = busesById[selectedBusId];
+            const fullAmount = currentStudentActiveBusBalance > 0 ? currentStudentActiveBusBalance : b.fee;
+            busAmountInput.value = fullAmount.toFixed(2);
+            calculateTotal();
+        } else {
+            if (busSelect) {
+                busSelect.focus();
+                if (busHelperText) {
+                    busHelperText.textContent = 'Please choose a Bus Route above first!';
+                    busHelperText.style.color = 'var(--danger-text)';
+                }
+            }
+        }
+    });
+
+    btnBusZero.addEventListener('click', () => {
+        busAmountInput.value = '0.00';
+        calculateTotal();
+    });
+
+    if (btnCanteen1Day) {
+        btnCanteen1Day.addEventListener('click', () => {
+            const fee = (currentStudent && currentStudent.canteen_fee) ? currentStudent.canteen_fee : 10.0;
+            canteenAmountInput.value = (fee * 1).toFixed(2);
+            calculateTotal();
+        });
+    }
+
+    if (btnCanteen5Days) {
+        btnCanteen5Days.addEventListener('click', () => {
+            const fee = (currentStudent && currentStudent.canteen_fee) ? currentStudent.canteen_fee : 10.0;
+            canteenAmountInput.value = (fee * 5).toFixed(2);
+            calculateTotal();
+        });
+    }
+
+    btnCanteenFull.addEventListener('click', () => {
+        const fullCanteen = currentStudentActiveCanteenBalance > 0 ? currentStudentActiveCanteenBalance : 10.0;
+        canteenAmountInput.value = fullCanteen.toFixed(2);
+        calculateTotal();
+    });
+
+    btnCanteenZero.addEventListener('click', () => {
+        canteenAmountInput.value = '0.00';
+        calculateTotal();
+    });
+
+    btnPayAllBalances.addEventListener('click', () => {
+        const selectedBusId = busSelect ? busSelect.value : '';
+        if (selectedBusId && busesById[selectedBusId]) {
+            const b = busesById[selectedBusId];
+            busAmountInput.value = (currentStudentActiveBusBalance > 0 ? currentStudentActiveBusBalance : b.fee).toFixed(2);
+        }
+        const fullCanteen = currentStudentActiveCanteenBalance > 0 ? currentStudentActiveCanteenBalance : 10.0;
+        canteenAmountInput.value = fullCanteen.toFixed(2);
+        calculateTotal();
+    });
+
+    busAmountInput.addEventListener('input', calculateTotal);
+    canteenAmountInput.addEventListener('input', calculateTotal);
+
+    classSelect.addEventListener('change', () => {
+        updateStudentDropdown(classSelect.value);
+    });
+
+    studentSelect.addEventListener('change', () => {
+        updateStudentDetails();
+    });
+
+    // Handle initial state or pre-selected student from URL
+    if (initialClassId) {
+        classSelect.value = initialClassId;
+        updateStudentDropdown(initialClassId, initialStudentId);
+    } else if (classSelect.value) {
+        updateStudentDropdown(classSelect.value, studentSelect.value);
+    } else {
+        studentSelect.disabled = true;
+    }
+
+    calculateTotal();
+});
+</script>
+{% endblock %}

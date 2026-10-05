@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block title %}Confirm Deletion | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="max-width: 580px; margin: 0 auto;">
+    <div class="page-title-group">
+        <h2 style="color: var(--danger);">Confirm Deletion</h2>
+        <p>This action cannot be undone.</p>
+    </div>
+</div>
+
+<div class="form-card" style="max-width: 580px;">
+    <div style="font-size: 1.05rem; margin-bottom: 1.5rem;">
+        Are you sure you want to delete <strong>{{ object_name }}</strong>?
+    </div>
+
+    <form method="POST">
+        {% csrf_token %}
+        <div class="form-actions" style="margin-top: 0; padding-top: 0; border-top: none;">
+            <a href="{% url cancel_url %}" class="btn-secondary">Cancel</a>
+            <button type="submit" class="btn-danger">Yes, Delete</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

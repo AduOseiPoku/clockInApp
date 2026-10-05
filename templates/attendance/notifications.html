@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+
+{% block title %}Notifications Log{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>Parent Notification Log</h2>
+        <p>Real-time audit record of automated arrival alerts and payment notices</p>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Total Dispatched</span>
+        </div>
+        <div class="stat-value">{{ total_alerts }}</div>
+        <div class="stat-footer">
+            <span>Parent messages</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Arrival Alerts</span>
+        </div>
+        <div class="stat-value">{{ clockin_alerts }}</div>
+        <div class="stat-footer">
+            <span>Clock-in notifications</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Fee Notices</span>
+        </div>
+        <div class="stat-value">{{ fee_alerts }}</div>
+        <div class="stat-footer">
+            <span>Payment updates</span>
+        </div>
+    </div>
+</div>
+
+<div class="table-card">
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Type</th>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Message</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                    <tr>
+                        <td style="white-space: nowrap; font-size: 0.8rem; color: var(--text-muted);">
+                            {{ log.sent_at|date:"M d, Y · h:i A" }}
+                        </td>
+                        <td>
+                            {% if log.notification_type == 'CLOCK_IN' %}
+                                <span class="fee-badge fee-badge-paid">Arrival</span>
+                            {% else %}
+                                <span class="fee-badge fee-badge-unpaid">Fee Notice</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <strong>{{ log.student.full_name }}</strong>
+                        </td>
+                        <td>
+                            <span class="class-badge">{{ log.student.student_class }}</span>
+                        </td>
+                        <td style="font-size: 0.82rem; color: var(--text-main); max-width: 420px;">
+                            {{ log.message }}
+                        </td>
+                        <td>
+                            <span class="stat-badge stat-badge-success">{{ log.status }}</span>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                            <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No alerts logged</div>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Arrival alerts log automatically when students clock in.</p>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

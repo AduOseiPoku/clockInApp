@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+
+{% block title %}Bus Routes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>Bus Fleet & Routes</h2>
+        <p>Manage transport routes, driver details, and fee structures</p>
+    </div>
+    <div class="header-actions">
+        <a href="{% url 'bus_create' %}" class="btn-primary">
+            + Add Bus Route
+        </a>
+    </div>
+</div>
+
+<!-- Fleet Overview Cards -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Active Routes</span>
+        </div>
+        <div class="stat-value">{{ total_buses }}</div>
+        <div class="stat-footer">
+            <span>Operating routes</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Expected Revenue</span>
+        </div>
+        <div class="stat-value">{{ currency }}{{ total_fleet_expected|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>Assigned riders total</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Revenue Collected</span>
+        </div>
+        <div class="stat-value">{{ currency }}{{ total_fleet_collected|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span class="stat-badge stat-badge-success">{{ period }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Buses Table (Desktop View) -->
+<div class="table-card desktop-only">
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Route Name</th>
+                    <th>Daily Fee</th>
+                    <th>Riders</th>
+                    <th>Route Coverage</th>
+                    <th>Expected</th>
+                    <th>Collected</th>
+                    <th>Driver & Plate</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in bus_data %}
+                    <tr>
+                        <td>
+                            <div>
+                                <strong style="color: var(--text-main);">{{ item.bus.name }}</strong>
+                                {% if not item.bus.is_active %}
+                                    <span style="font-size:0.75rem; color: var(--danger-text); font-weight:600;">(Inactive)</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <strong>{{ currency }}{{ item.bus.fee|floatformat:2 }}</strong>
+                        </td>
+                        <td>
+                            <span class="class-badge">{{ item.student_count }} Riders</span>
+                        </td>
+                        <td style="color: var(--text-muted); max-width: 250px;">
+                            {{ item.bus.route_description|default:"—" }}
+                        </td>
+                        <td>
+                            <span>{{ currency }}{{ item.expected_revenue|floatformat:2 }}</span>
+                        </td>
+                        <td>
+                            <div>
+                                <span style="font-weight: 600; color: var(--success-text);">{{ currency }}{{ item.collected_revenue|floatformat:2 }}</span>
+                                <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: 0.25rem;">({{ item.collection_pct }}%)</span>
+                            </div>
+                        </td>
+                        <td>
+                            <div style="font-size: 0.8rem;">
+                                <div>{{ item.bus.driver_name|default:"Unassigned" }}</div>
+                                <div style="color: var(--text-muted); font-size: 0.75rem;">{{ item.bus.driver_phone }} {% if item.bus.plate_number %}· {{ item.bus.plate_number }}{% endif %}</div>
+                            </div>
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            <a href="{% url 'bus_update' item.bus.id %}" class="btn-table-action">Edit</a>
+                            <a href="{% url 'bus_delete' item.bus.id %}" class="btn-table-action" style="color: var(--danger-text);">Delete</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                            <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No bus routes configured</div>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Click "+ Add Bus Route" above to create routes.</p>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Touch-Friendly Bus Cards (Mobile View) -->
+<div class="student-cards-list mobile-only">
+    {% for item in bus_data %}
+        <div class="student-card-item">
+            <div class="student-card-top">
+                <div>
+                    <div style="font-size:1rem; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:0.4rem;">
+                        <span>🚌 {{ item.bus.name }}</span>
+                        {% if not item.bus.is_active %}
+                            <span style="font-size:0.7rem; color:var(--danger-text); font-weight:600;">(Inactive)</span>
+                        {% endif %}
+                    </div>
+                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem;">
+                        {{ item.bus.route_description|default:"No route details" }}
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <span class="class-badge" style="font-size:0.72rem; padding:0.15rem 0.45rem;">{{ item.student_count }} Riders</span>
+                </div>
+            </div>
+
+            <div class="student-card-fees" style="justify-content:space-between;">
+                <div>
+                    <span style="color:var(--text-muted); font-weight:600;">Daily Fee:</span>
+                    <strong>{{ currency }}{{ item.bus.fee|floatformat:2 }}</strong>
+                </div>
+                <div>
+                    <span style="color:var(--text-muted); font-weight:600;">Collected:</span>
+                    <strong style="color:var(--success-text);">{{ currency }}{{ item.collected_revenue|floatformat:2 }}</strong> ({{ item.collection_pct }}%)
+                </div>
+            </div>
+
+            <div style="font-size:0.78rem; color:var(--text-muted); background:var(--surface); padding:0.4rem 0.6rem; border-radius:4px; border:1px solid var(--border-subtle);">
+                👤 <strong>{{ item.bus.driver_name|default:"Unassigned Driver" }}</strong> &bull; {{ item.bus.driver_phone|default:"No Phone" }} {% if item.bus.plate_number %} &bull; <code>{{ item.bus.plate_number }}</code>{% endif %}
+            </div>
+
+            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
+                <a href="{% url 'bus_update' item.bus.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
+                    ✏️ Edit Route
+                </a>
+                <a href="{% url 'bus_delete' item.bus.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
+                    🗑️
+                </a>
+            </div>
+        </div>
+    {% empty %}
+        <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <div style="font-size: 0.95rem; font-weight: 600;">No bus routes configured</div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Click "+ Add Bus Route" to create routes.</p>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

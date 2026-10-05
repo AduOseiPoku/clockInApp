@@ -1,0 +1,345 @@
+{% extends 'base.html' %}
+
+{% block title %}Attendance Dashboard{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>Attendance & Fee Verification</h2>
+        <p>Morning student arrival attendance and live fee verification</p>
+    </div>
+    <div class="header-actions">
+        <form id="filter-form" method="GET" action="{% url 'dashboard' %}" class="date-selector-pill">
+            <label for="date-picker" style="font-size:0.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Date</label>
+            <input type="date" id="date-picker" name="date" value="{{ date_str }}">
+        </form>
+    </div>
+</div>
+
+<!-- Real-Time Metrics Cards -->
+<div class="stats-grid">
+    <!-- Today's Total Revenue -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Revenue</span>
+        </div>
+        <div id="stat-daily-revenue" class="stat-value" style="color:var(--primary);">{{ currency }}{{ stats.daily_total_collected|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>{{ stats.total_students }} active students</span>
+            <span class="stat-badge stat-badge-info">Daily</span>
+        </div>
+    </div>
+
+    <!-- Clocked-In Attendance -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Clocked In Today</span>
+        </div>
+        <div id="stat-clocked-count" class="stat-value">{{ stats.clocked_in_count }} / {{ stats.total_students }}</div>
+        <div class="stat-footer">
+            <span id="stat-clocked-pct" class="stat-badge stat-badge-success">{{ stats.clocked_in_pct }}% Present</span>
+            <span>Arrival target: 100%</span>
+        </div>
+    </div>
+
+    <!-- Bus Fee Paid Ratio -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Bus Fare</span>
+        </div>
+        <div id="stat-bus-count" class="stat-value">
+            {{ stats.bus_paid_count }} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ {{ stats.bus_students_count }}</span>
+        </div>
+        <div class="stat-footer">
+            <span id="stat-bus-pct" class="stat-badge {% if stats.bus_paid_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}">
+                {{ stats.bus_paid_pct }}% Paid
+            </span>
+            <span id="stat-bus-collected">{{ currency }}{{ stats.total_bus_collected|floatformat:2 }} collected</span>
+        </div>
+    </div>
+
+    <!-- Canteen Fee Paid Ratio -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Lunch</span>
+        </div>
+        <div id="stat-canteen-count" class="stat-value">
+            {{ stats.canteen_paid_count }} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ {{ stats.canteen_students_count }}</span>
+        </div>
+        <div class="stat-footer">
+            <span id="stat-canteen-pct" class="stat-badge {% if stats.canteen_paid_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}">
+                {{ stats.canteen_paid_pct }}% Paid
+            </span>
+            <span id="stat-canteen-collected">{{ currency }}{{ stats.total_canteen_collected|floatformat:2 }} collected</span>
+        </div>
+    </div>
+</div>
+
+<!-- Controls & Filter Toolbar -->
+<form method="GET" action="{% url 'dashboard' %}" class="control-bar">
+    <input type="hidden" name="date" value="{{ date_str }}">
+    
+    <!-- Instant Search -->
+    <div class="search-input-wrapper">
+        <span class="search-icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+        </span>
+        <input type="text" name="q" value="{{ search_query }}" placeholder="Search students by name..." class="search-input">
+    </div>
+
+    <!-- Mobile Filter Toggle Button -->
+    <button type="button" class="filter-drawer-toggle" id="btn-toggle-filters" onclick="document.getElementById('mobile-filter-group').classList.toggle('show-mobile')">
+        <span>⚙️ Filter Options {% if class_filter or bus_filter or fee_filter or clockin_filter %}<span class="stat-badge stat-badge-success" style="margin-left:0.35rem;">Active</span>{% endif %}</span>
+        <span id="filter-chevron">▼</span>
+    </button>
+
+    <!-- Filters -->
+    <div id="mobile-filter-group" class="filter-group {% if class_filter or bus_filter or fee_filter or clockin_filter %}show-mobile{% endif %}">
+        <!-- Class Filter -->
+        <select name="class" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Classes</option>
+            {% for c in available_classes %}
+                <option value="{{ c }}" {% if class_filter == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+
+        <!-- Dynamic Bus Filter -->
+        <select name="bus" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Buses</option>
+            {% for b in buses %}
+                <option value="{{ b.id }}" {% if bus_filter == b.id|stringformat:"s" %}selected{% endif %}>
+                    {{ b.name }} ({{ currency }}{{ b.fee }})
+                </option>
+            {% endfor %}
+            <option value="none" {% if bus_filter == 'none' %}selected{% endif %}>Walkers / No Bus</option>
+        </select>
+
+        <!-- Fee Status Filter -->
+        <select name="fee_status" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Fees</option>
+            <option value="unpaid_bus" {% if fee_filter == 'unpaid_bus' %}selected{% endif %}>Unpaid Bus Fee</option>
+            <option value="unpaid_canteen" {% if fee_filter == 'unpaid_canteen' %}selected{% endif %}>Unpaid Canteen Fee</option>
+            <option value="any_unpaid" {% if fee_filter == 'any_unpaid' %}selected{% endif %}>Any Unpaid Fee</option>
+            <option value="fully_paid" {% if fee_filter == 'fully_paid' %}selected{% endif %}>Fully Paid</option>
+        </select>
+
+        <!-- Attendance Filter -->
+        <select name="clockin_status" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Attendance</option>
+            <option value="not_clocked_in" {% if clockin_filter == 'not_clocked_in' %}selected{% endif %}>Not Clocked In</option>
+            <option value="clocked_in" {% if clockin_filter == 'clocked_in' %}selected{% endif %}>Clocked In</option>
+        </select>
+
+        {% if search_query or class_filter or bus_filter or fee_filter or clockin_filter %}
+            <a href="{% url 'dashboard' %}?date={{ date_str }}" class="btn-reset">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+<!-- Student Attendance Table (Desktop View) -->
+<div class="table-card desktop-only">
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Student</th>
+                    <th>Class</th>
+                    <th>Bus Route</th>
+                    <th>Bus Fee</th>
+                    <th>Canteen Fee</th>
+                    <th style="text-align: center;">Morning Arrival</th>
+                    <th style="text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in student_items %}
+                    <tr id="student-row-{{ item.student.id }}" data-clocked-in="{% if item.is_clocked_in %}true{% else %}false{% endif %}">
+                        <!-- Student Identity -->
+                        <td>
+                            <div class="student-cell">
+                                <div class="student-avatar">{{ item.student.initials }}</div>
+                                <div>
+                                    <div class="student-name">{{ item.student.full_name }}</div>
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- Class -->
+                        <td>
+                            <span class="class-badge">{{ item.student.student_class }}</span>
+                        </td>
+
+                        <!-- Assigned Bus Route & Rate -->
+                        <td>
+                            {% if item.student.bus %}
+                                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                                    <strong>{{ item.student.bus.name }}</strong>
+                                    <span class="bus-rate-tag">{{ currency }}{{ item.student.bus.fee|floatformat:2 }}</span>
+                                </div>
+                            {% else %}
+                                <span class="text-muted" style="font-size: 0.8rem;">Walker</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Bus Fee Status -->
+                        <td id="bus-fee-cell-{{ item.student.id }}">
+                            {% if not item.student.bus %}
+                                <span class="fee-badge fee-badge-none">No Bus</span>
+                            {% elif item.is_bus_paid %}
+                                <span class="fee-badge fee-badge-paid">Paid ({{ currency }}{{ item.bus_req|floatformat:2 }}){% if item.bus_credit_days > 0 %} <small style="font-size:0.68rem;opacity:0.85;">({{ item.bus_credit_days }}d credit)</small>{% endif %}</span>
+                            {% else %}
+                                <span class="fee-badge fee-badge-unpaid">Owes {{ currency }}{{ item.bus_balance|floatformat:2 }}</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Canteen Fee Status -->
+                        <td id="canteen-fee-cell-{{ item.student.id }}">
+                            {% if not item.student.canteen_enrolled %}
+                                <span class="fee-badge fee-badge-none">Opted Out</span>
+                            {% elif item.is_canteen_paid %}
+                                <span class="fee-badge fee-badge-paid">Paid ({{ currency }}{{ item.canteen_req|floatformat:2 }}){% if item.canteen_credit_days > 0 %} <small style="font-size:0.68rem;opacity:0.85;">({{ item.canteen_credit_days }}d credit)</small>{% endif %}</span>
+                            {% else %}
+                                <span class="fee-badge fee-badge-unpaid">Owes {{ currency }}{{ item.canteen_balance|floatformat:2 }}</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 1-Click Clock-In Action -->
+                        <td id="clockin-action-cell-{{ item.student.id }}" style="text-align: center;">
+                            {% if item.is_clocked_in %}
+                                <div class="clocked-in-badge">
+                                    <span>✓ {{ item.clock_in.clock_in_time|time:"h:i A" }}</span>
+                                    <button type="button" class="btn-undo-clockin" data-student-id="{{ item.student.id }}" data-action="undo" title="Undo clock-in">
+                                        ✕
+                                    </button>
+                                </div>
+                            {% else %}
+                                <button type="button" class="btn-clock-in" data-student-id="{{ item.student.id }}" data-action="clock_in">
+                                    Clock In
+                                </button>
+                            {% endif %}
+                        </td>
+
+                        <!-- Quick Pay Action -->
+                        <td style="text-align: right;">
+                            <button type="button" class="btn-quick-pay" 
+                                    data-student-id="{{ item.student.id }}" 
+                                    data-student-name="{{ item.student.full_name }}"
+                                    data-has-bus="{% if item.student.bus %}true{% else %}false{% endif %}"
+                                    data-bus-paid="{% if item.is_bus_paid %}true{% else %}false{% endif %}"
+                                    data-bus-req="{{ item.bus_req }}"
+                                    data-bus-bal="{{ item.bus_balance }}"
+                                    data-has-canteen="{% if item.student.canteen_enrolled %}true{% else %}false{% endif %}"
+                                    data-canteen-paid="{% if item.is_canteen_paid %}true{% else %}false{% endif %}"
+                                    data-canteen-req="{{ item.canteen_req }}"
+                                    data-canteen-bal="{{ item.canteen_balance }}"
+                                    data-fee-type="{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
+                                    data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}">
+                                Pay
+                            </button>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                            <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No students found</div>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Try adjusting your class, bus, or fee filters.</p>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Touch-Friendly Student Arrival Cards (Mobile View) -->
+<div class="student-cards-list mobile-only">
+    {% for item in student_items %}
+        <div id="mobile-student-card-{{ item.student.id }}" class="student-card-item" data-clocked-in="{% if item.is_clocked_in %}true{% else %}false{% endif %}">
+            <div class="student-card-top">
+                <div class="student-card-meta">
+                    <div class="student-avatar">{{ item.student.initials }}</div>
+                    <div>
+                        <div class="student-name">{{ item.student.full_name }}</div>
+                        <div class="student-sub">
+                            <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ item.student.student_class }}</span>
+                            {% if item.student.bus %}
+                                <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚌 {{ item.student.bus.name }}</span>
+                            {% else %}
+                                <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚶 Walker</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <button type="button" class="btn-quick-pay" 
+                            data-student-id="{{ item.student.id }}" 
+                            data-student-name="{{ item.student.full_name }}"
+                            data-has-bus="{% if item.student.bus %}true{% else %}false{% endif %}"
+                            data-bus-paid="{% if item.is_bus_paid %}true{% else %}false{% endif %}"
+                            data-bus-req="{{ item.bus_req }}"
+                            data-bus-bal="{{ item.bus_balance }}"
+                            data-has-canteen="{% if item.student.canteen_enrolled %}true{% else %}false{% endif %}"
+                            data-canteen-paid="{% if item.is_canteen_paid %}true{% else %}false{% endif %}"
+                            data-canteen-req="{{ item.canteen_req }}"
+                            data-canteen-bal="{{ item.canteen_balance }}"
+                            data-fee-type="{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
+                            data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}"
+                            style="min-height:36px; padding:0 0.75rem; font-size:0.78rem;">
+                        💳 Pay
+                    </button>
+                </div>
+            </div>
+
+            <!-- Fees Summary Badges -->
+            <div class="student-card-fees">
+                <div id="mobile-bus-fee-{{ item.student.id }}">
+                    <span style="font-weight:600; color:var(--text-muted);">Bus:</span>
+                    {% if not item.student.bus %}
+                        <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">None</span>
+                    {% elif item.is_bus_paid %}
+                        <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.bus_req|floatformat:2 }}){% if item.bus_credit_days > 0 %} <small>({{ item.bus_credit_days }}d)</small>{% endif %}</span>
+                    {% else %}
+                        <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.bus_balance|floatformat:2 }}</span>
+                    {% endif %}
+                </div>
+                <div id="mobile-canteen-fee-{{ item.student.id }}">
+                    <span style="font-weight:600; color:var(--text-muted);">Canteen:</span>
+                    {% if not item.student.canteen_enrolled %}
+                        <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">Opt Out</span>
+                    {% elif item.is_canteen_paid %}
+                        <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.canteen_req|floatformat:2 }}){% if item.canteen_credit_days > 0 %} <small>({{ item.canteen_credit_days }}d)</small>{% endif %}</span>
+                    {% else %}
+                        <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.canteen_balance|floatformat:2 }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Large Touch Action Button (44px min height) -->
+            <div class="student-card-actions">
+                <div id="mobile-clockin-action-{{ item.student.id }}" style="width: 100%;">
+                    {% if item.is_clocked_in %}
+                        <div class="clocked-in-badge" style="width: 100%; min-height: 44px; justify-content: center; gap: 0.75rem; font-size: 0.88rem;">
+                            <span>✓ Clocked In at {{ item.clock_in.clock_in_time|time:"h:i A" }}</span>
+                            <button type="button" class="btn-undo-clockin" data-student-id="{{ item.student.id }}" data-action="undo" title="Undo clock-in" style="font-size: 1rem; padding: 0 0.5rem;">
+                                ✕
+                            </button>
+                        </div>
+                    {% else %}
+                        <button type="button" class="btn-clock-in" data-student-id="{{ item.student.id }}" data-action="clock_in" style="width: 100%; min-height: 44px; font-size: 0.88rem;">
+                            ✓ Clock In Arrival
+                        </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% empty %}
+        <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <div style="font-size: 0.95rem; font-weight: 600;">No students found</div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Try adjusting your class or bus filters.</p>
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

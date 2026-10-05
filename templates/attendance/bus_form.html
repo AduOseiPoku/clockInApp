@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="max-width: 680px; margin: 0 auto;">
+    <div class="page-title-group">
+        <h2>{{ title }}</h2>
+        <p>Set the bus route name, driver info, and the specific route fee rate.</p>
+    </div>
+</div>
+
+<div class="form-card">
+    <form method="POST">
+        {% csrf_token %}
+
+        <div class="form-group">
+            <label class="form-label" for="{{ form.name.id_for_label }}">Bus Name *</label>
+            {{ form.name }}
+            <small style="color: var(--text-muted); font-size: 0.8rem;">e.g. <strong>Tema Bus</strong>, <strong>Madina Bus</strong>, <strong>Spintex Bus</strong></small>
+            {% if form.name.errors %}
+                <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.25rem;">{{ form.name.errors }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="{{ form.fee.id_for_label }}">Daily Route Fee ({{ CURRENCY_SYMBOL }}) *</label>
+            {{ form.fee }}
+            <small style="color: var(--text-muted); font-size: 0.8rem;">The daily fee billed to each student assigned to this route.</small>
+            {% if form.fee.errors %}
+                <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.25rem;">{{ form.fee.errors }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="{{ form.route_description.id_for_label }}">Route Description / Stops</label>
+            {{ form.route_description }}
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+                <label class="form-label" for="{{ form.driver_name.id_for_label }}">Driver Name</label>
+                {{ form.driver_name }}
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="{{ form.driver_phone.id_for_label }}">Driver Phone</label>
+                {{ form.driver_phone }}
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="{{ form.plate_number.id_for_label }}">Vehicle Registration Plate</label>
+            {{ form.plate_number }}
+        </div>
+
+        <div class="form-group">
+            <label class="form-checkbox-wrapper">
+                {{ form.is_active }}
+                <span class="form-label" style="margin-bottom: 0;">Active Route</span>
+            </label>
+        </div>
+
+        <div class="form-actions">
+            <a href="{% url 'bus_list' %}" class="btn-secondary">Cancel</a>
+            <button type="submit" class="btn-primary">Save Bus Route</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
