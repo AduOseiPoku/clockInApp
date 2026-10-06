@@ -19,7 +19,8 @@
 
 <!-- Real-Time Metrics Cards -->
 <div class="stats-grid">
-    <!-- Today's Total Revenue -->
+    <!-- Today's Total Revenue (Only for Staff with Financial Authority) -->
+    {% if user.profile and user.profile.can_view_revenue %}
     <div class="stat-card">
         <div class="stat-header">
             <span class="stat-title">Today's Revenue</span>
@@ -30,6 +31,7 @@
             <span class="stat-badge stat-badge-info">Daily</span>
         </div>
     </div>
+    {% endif %}
 
     <!-- Clocked-In Attendance -->
     <div class="stat-card">
@@ -55,7 +57,11 @@
             <span id="stat-bus-pct" class="stat-badge {% if stats.bus_paid_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}">
                 {{ stats.bus_paid_pct }}% Paid
             </span>
+            {% if user.profile and user.profile.can_view_revenue %}
             <span id="stat-bus-collected">{{ currency }}{{ stats.total_bus_collected|floatformat:2 }} collected</span>
+            {% else %}
+            <span>Bus Riders</span>
+            {% endif %}
         </div>
     </div>
 
@@ -71,7 +77,11 @@
             <span id="stat-canteen-pct" class="stat-badge {% if stats.canteen_paid_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}">
                 {{ stats.canteen_paid_pct }}% Paid
             </span>
+            {% if user.profile and user.profile.can_view_revenue %}
             <span id="stat-canteen-collected">{{ currency }}{{ stats.total_canteen_collected|floatformat:2 }} collected</span>
+            {% else %}
+            <span>Canteen Enrolled</span>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -224,6 +234,7 @@
 
                         <!-- Quick Pay Action -->
                         <td style="text-align: right;">
+                            {% if user.profile and user.profile.can_record_payments %}
                             <button type="button" class="btn-quick-pay" 
                                     data-student-id="{{ item.student.id }}" 
                                     data-student-name="{{ item.student.full_name }}"
@@ -239,6 +250,9 @@
                                     data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}">
                                 Pay
                             </button>
+                            {% else %}
+                            <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Review Only</span>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}
@@ -273,6 +287,7 @@
                         </div>
                     </div>
                 </div>
+                {% if user.profile and user.profile.can_record_payments %}
                 <div>
                     <button type="button" class="btn-quick-pay" 
                             data-student-id="{{ item.student.id }}" 
@@ -291,6 +306,7 @@
                         💳 Pay
                     </button>
                 </div>
+                {% endif %}
             </div>
 
             <!-- Fees Summary Badges -->

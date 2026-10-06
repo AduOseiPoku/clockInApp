@@ -41,6 +41,13 @@ urlpatterns = [
     # Parent Notifications Audit Trail
     path('notifications/', views.notifications_view, name='notifications'),
 
+    # Teacher & Staff Account Management (Principal Only)
+    path('teachers/', views.teacher_list_view, name='teacher_list'),
+    path('teachers/add/', views.teacher_create_view, name='teacher_create'),
+    path('teachers/<int:pk>/edit/', views.teacher_update_view, name='teacher_update'),
+    path('teachers/<int:pk>/reset-password/', views.teacher_password_reset_view, name='teacher_password_reset'),
+    path('teachers/<int:pk>/toggle-status/', views.teacher_toggle_status_view, name='teacher_toggle_status'),
+
     # System & School Billing Settings
     path('settings/', views.school_settings_view, name='school_settings'),
 ]

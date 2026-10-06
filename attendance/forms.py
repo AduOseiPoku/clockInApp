@@ -2,7 +2,8 @@ from decimal import Decimal
 from django import forms
 from django.utils import timezone
 from django.conf import settings
-from .models import Bus, Student, FeePayment, ClockInRecord, SchoolClass
+from django.contrib.auth import get_user_model
+from .models import Bus, Student, FeePayment, ClockInRecord, SchoolClass, UserProfile
 
 class BusForm(forms.ModelForm):
     class Meta:
@@ -174,4 +175,192 @@ class SchoolSettingsForm(forms.Form):
         }),
         help_text="Currency symbol displayed throughout the application."
     )
+
+
+class TeacherCreationForm(forms.Form):
+    username = forms.CharField(
+        max_length=150,
+        required=True,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g. kofi_mensah', 'autocomplete': 'off'})
+    )
+    first_name = forms.CharField(
+        max_length=150,
+        required=True,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name'})
+    )
+    last_name = forms.CharField(
+        max_length=150,
+        required=True,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Last Name'})
+    )
+    email = forms.EmailField(
+        required=False,
+        widget=forms.EmailInput(attrs={'class': 'form-input', 'placeholder': 'teacher@school.edu'})
+    )
+    phone_number = forms.CharField(
+        max_length=30,
+        required=False,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': '+233 24 000 0000'})
+    )
+    assigned_class = forms.CharField(
+        max_length=50,
+        required=False,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        help_text="Class this teacher is responsible for (clock-in roster will default to this class)"
+    )
+    password = forms.CharField(
+        required=True,
+        widget=forms.PasswordInput(attrs={'class': 'form-input', 'placeholder': 'Initial password', 'id': 'id_password'}),
+        help_text="Initial temporary password for the teacher"
+    )
+    confirm_password = forms.CharField(
+        required=True,
+        widget=forms.PasswordInput(attrs={'class': 'form-input', 'placeholder': 'Confirm password', 'id': 'id_confirm_password'})
+    )
+    is_active = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={'class': 'form-checkbox'})
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        class_choices = [('', '-- No Specific Class (Floating Teacher) --')]
+        class_names = set(SchoolClass.objects.filter(is_active=True).values_list('name', flat=True))
+        class_names.update(Student.objects.filter(is_active=True).values_list('student_class', flat=True))
+        for sc in sorted(class_names):
+            if sc:
+                class_choices.append((sc, sc))
+        self.fields['assigned_class'].widget.choices = class_choices
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        User = get_user_model()
+        if User.objects.filter(username__iexact=username).exists():
+            raise forms.ValidationError("A user account with this username already exists.")
+        return username
+
+    def clean(self):
+        cleaned_data = super().clean()
+        password = cleaned_data.get('password')
+        confirm_password = cleaned_data.get('confirm_password')
+        if password and confirm_password and password != confirm_password:
+            self.add_error('confirm_password', "Passwords do not match.")
+        return cleaned_data
+
+    def save(self):
+        User = get_user_model()
+        username = self.cleaned_data['username']
+        password = self.cleaned_data['password']
+        email = self.cleaned_data.get('email', '')
+        first_name = self.cleaned_data.get('first_name', '')
+        last_name = self.cleaned_data.get('last_name', '')
+        is_active = self.cleaned_data.get('is_active', True)
+        phone_number = self.cleaned_data.get('phone_number', '')
+        assigned_class = self.cleaned_data.get('assigned_class', '')
+
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+            is_active=is_active,
+            is_staff=True
+        )
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = UserProfile.ROLE_TEACHER
+        profile.phone_number = phone_number
+        profile.assigned_class = assigned_class
+        profile.save()
+        return user
+
+
+class TeacherUpdateForm(forms.Form):
+    first_name = forms.CharField(
+        max_length=150,
+        required=True,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name'})
+    )
+    last_name = forms.CharField(
+        max_length=150,
+        required=True,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Last Name'})
+    )
+    email = forms.EmailField(
+        required=False,
+        widget=forms.EmailInput(attrs={'class': 'form-input', 'placeholder': 'teacher@school.edu'})
+    )
+    phone_number = forms.CharField(
+        max_length=30,
+        required=False,
+        widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': '+233 24 000 0000'})
+    )
+    assigned_class = forms.CharField(
+        max_length=50,
+        required=False,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        help_text="Class this teacher is responsible for"
+    )
+    is_active = forms.BooleanField(
+        required=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-checkbox'})
+    )
+
+    def __init__(self, *args, user_obj=None, **kwargs):
+        self.user_obj = user_obj
+        super().__init__(*args, **kwargs)
+        class_choices = [('', '-- No Specific Class (Floating Teacher) --')]
+        class_names = set(SchoolClass.objects.filter(is_active=True).values_list('name', flat=True))
+        class_names.update(Student.objects.filter(is_active=True).values_list('student_class', flat=True))
+        if user_obj and hasattr(user_obj, 'profile') and user_obj.profile.assigned_class:
+            class_names.add(user_obj.profile.assigned_class)
+        for sc in sorted(class_names):
+            if sc:
+                class_choices.append((sc, sc))
+        self.fields['assigned_class'].widget.choices = class_choices
+
+    def save(self):
+        user = self.user_obj
+        user.first_name = self.cleaned_data['first_name']
+        user.last_name = self.cleaned_data['last_name']
+        user.email = self.cleaned_data.get('email', '')
+        user.is_active = self.cleaned_data.get('is_active', True)
+        user.save()
+
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.phone_number = self.cleaned_data.get('phone_number', '')
+        profile.assigned_class = self.cleaned_data.get('assigned_class', '')
+        profile.save()
+        return user
+
+
+class TeacherPasswordResetForm(forms.Form):
+    new_password = forms.CharField(
+        required=True,
+        widget=forms.PasswordInput(attrs={'class': 'form-input', 'placeholder': 'New password', 'id': 'id_new_password'}),
+        help_text="Enter a new password for this teacher"
+    )
+    confirm_password = forms.CharField(
+        required=True,
+        widget=forms.PasswordInput(attrs={'class': 'form-input', 'placeholder': 'Confirm new password', 'id': 'id_confirm_password'})
+    )
+
+    def __init__(self, *args, user_obj=None, **kwargs):
+        self.user_obj = user_obj
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        p1 = cleaned_data.get('new_password')
+        p2 = cleaned_data.get('confirm_password')
+        if p1 and p2 and p1 != p2:
+            self.add_error('confirm_password', "Passwords do not match.")
+        return cleaned_data
+
+    def save(self):
+        user = self.user_obj
+        user.set_password(self.cleaned_data['new_password'])
+        user.save()
+        return user
 

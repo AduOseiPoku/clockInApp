@@ -9,12 +9,14 @@
         <p>Manage student enrollment, class rosters, and bus route assignments</p>
     </div>
     <div class="header-actions">
+        {% if user.profile.is_principal %}
         <a href="{% url 'student_import' %}" class="btn-secondary">
             Bulk CSV Import
         </a>
         <a href="{% url 'student_create' %}" class="btn-primary">
             + Enroll Student
         </a>
+        {% endif %}
     </div>
 </div>
 
@@ -113,15 +115,19 @@
                             {% endif %}
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
+                            {% if user.profile and user.profile.can_record_payments %}
                             <a href="{% url 'payment_create' %}?student_id={{ student.id }}" class="btn-table-action">
                                 Record Fee
                             </a>
+                            {% endif %}
+                            {% if user.profile.is_principal %}
                             <a href="{% url 'student_update' student.id %}" class="btn-table-action">
                                 Edit
                             </a>
                             <a href="{% url 'student_delete' student.id %}" class="btn-table-action" style="color: var(--danger-text);">
                                 Delete
                             </a>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}
@@ -173,6 +179,7 @@
                 </div>
             </div>
 
+            {% if user.profile.is_principal %}
             <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
                 <a href="{% url 'student_update' student.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
                     ✏️ Edit
@@ -181,6 +188,7 @@
                     🗑️ Delete
                 </a>
             </div>
+            {% endif %}
         </div>
     {% empty %}
         <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">

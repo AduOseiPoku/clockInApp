@@ -9,9 +9,11 @@
         <p>Transaction records of transport and canteen collections</p>
     </div>
     <div class="header-actions">
+        {% if user.profile and user.profile.can_record_payments %}
         <a href="{% url 'payment_create' %}" class="btn-primary">
             + Record Payment
         </a>
+        {% endif %}
     </div>
 </div>
 
@@ -72,23 +74,19 @@
     <!-- Quick Date Filter Presets -->
     <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
         <a href="{% url 'payment_list' %}{% if fee_type %}?fee_type={{ fee_type }}{% endif %}" 
-           class="btn-secondary" 
-           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if not date_preset and not date_str %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           class="btn-secondary filter-preset-btn {% if not date_preset and not date_str %}active{% endif %}">
            All Time
         </a>
         <a href="{% url 'payment_list' %}?preset=today{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
-           class="btn-secondary" 
-           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if date_preset == 'today' %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           class="btn-secondary filter-preset-btn {% if date_preset == 'today' %}active{% endif %}">
            Today
         </a>
         <a href="{% url 'payment_list' %}?preset=yesterday{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
-           class="btn-secondary" 
-           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if date_preset == 'yesterday' %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           class="btn-secondary filter-preset-btn {% if date_preset == 'yesterday' %}active{% endif %}">
            Yesterday
         </a>
         <a href="{% url 'payment_list' %}?preset=week{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
-           class="btn-secondary" 
-           style="padding: 0.35rem 0.65rem; font-size: 0.78rem; text-decoration: none; {% if date_preset == 'week' %}background: var(--primary); color: #fff; border-color: var(--primary); font-weight: 600;{% endif %}">
+           class="btn-secondary filter-preset-btn {% if date_preset == 'week' %}active{% endif %}">
            Last 7 Days
         </a>
     </div>
@@ -183,16 +181,18 @@
                             <a href="{% url 'payment_receipt' p.id %}" class="btn-table-action">
                                 Receipt
                             </a>
+                            {% if user.profile and user.profile.can_delete_payments %}
                             <a href="{% url 'payment_delete' p.id %}" class="btn-table-action" style="color: var(--danger-text);">
                                 Delete
                             </a>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
                         <td colspan="9" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
                             <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No payment records found</div>
-                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Use "+ Record Payment" to register parent payments.</p>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">No fee collection records found for this period.</p>
                         </td>
                     </tr>
                 {% endfor %}
@@ -243,15 +243,17 @@
                 <a href="{% url 'payment_receipt' p.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
                     📄 View Receipt Voucher
                 </a>
+                {% if user.profile and user.profile.can_delete_payments %}
                 <a href="{% url 'payment_delete' p.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
                     🗑️
                 </a>
+                {% endif %}
             </div>
         </div>
     {% empty %}
         <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
             <div style="font-size: 0.95rem; font-weight: 600;">No payment records found</div>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Use the center "+ Pay" button to record payments.</p>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">No payment transactions recorded for this period.</p>
         </div>
     {% endfor %}
 </div>

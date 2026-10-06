@@ -16,8 +16,10 @@ from django.db import transaction
 from django.db.models import Q, Sum, Count
 from django.conf import settings
 
+from django.contrib.auth import get_user_model
 from .models import Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass, SchoolSetting, get_default_canteen_fee
-from .forms import BusForm, StudentForm, FeePaymentForm, SchoolSettingsForm
+from .forms import BusForm, StudentForm, FeePaymentForm, SchoolSettingsForm, TeacherCreationForm, TeacherUpdateForm, TeacherPasswordResetForm
+from .decorators import principal_required, finance_required, payment_recording_required, login_required_ajax
 
 def get_stats_data(target_date=None, period=None):
     """
@@ -149,6 +151,7 @@ def get_stats_data(target_date=None, period=None):
         'daily_total_expected': daily_total_expected,
     }
 
+@login_required
 @ensure_csrf_cookie
 def dashboard_view(request):
     """
@@ -167,6 +170,12 @@ def dashboard_view(request):
 
     period = request.GET.get('period', getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026'))
     class_filter = request.GET.get('class', '')
+    
+    # Auto-default to teacher's assigned class if set and not explicitly filtered
+    user_profile = getattr(request.user, 'profile', None)
+    if not class_filter and user_profile and user_profile.role == UserProfile.ROLE_TEACHER and user_profile.assigned_class:
+        class_filter = user_profile.assigned_class
+
     bus_filter = request.GET.get('bus', '')
     fee_filter = request.GET.get('fee_status', '')
     clockin_filter = request.GET.get('clockin_status', '')
@@ -364,6 +373,7 @@ def dashboard_view(request):
     return render(request, 'attendance/dashboard.html', context)
 
 
+@login_required_ajax
 @require_POST
 def toggle_clock_in_api(request):
     """
@@ -439,6 +449,7 @@ def toggle_clock_in_api(request):
         return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
 
+@payment_recording_required
 @require_POST
 def quick_payment_api(request):
     """
@@ -565,6 +576,7 @@ def quick_payment_api(request):
 # ==========================================
 # BUS MANAGEMENT VIEWS
 # ==========================================
+@finance_required
 def bus_list_view(request):
     """Admin Bus Management: list all buses with dynamic fees and assigned student stats."""
     buses = Bus.objects.all().order_by('name')
@@ -605,6 +617,7 @@ def bus_list_view(request):
     return render(request, 'attendance/buses.html', context)
 
 
+@principal_required
 def bus_create_view(request):
     """Add a new Bus route with dynamic fee."""
     if request.method == 'POST':
@@ -618,6 +631,7 @@ def bus_create_view(request):
     return render(request, 'attendance/bus_form.html', {'form': form, 'title': 'Add New Bus Route'})
 
 
+@principal_required
 def bus_update_view(request, pk):
     """Edit Bus details or adjust fee amount."""
     bus = get_object_or_404(Bus, pk=pk)
@@ -632,6 +646,7 @@ def bus_update_view(request, pk):
     return render(request, 'attendance/bus_form.html', {'form': form, 'bus': bus, 'title': f"Edit {bus.name}"})
 
 
+@principal_required
 def bus_delete_view(request, pk):
     """Delete a bus route."""
     bus = get_object_or_404(Bus, pk=pk)
@@ -650,6 +665,7 @@ def bus_delete_view(request, pk):
 # ==========================================
 # STUDENT MANAGEMENT VIEWS
 # ==========================================
+@finance_required
 def student_list_view(request):
     """Student roster listing with bus assignments and canteen status."""
     class_filter = request.GET.get('class', '')
@@ -687,6 +703,7 @@ def student_list_view(request):
     return render(request, 'attendance/students.html', context)
 
 
+@principal_required
 def student_create_view(request):
     """Enroll a new student."""
     if request.method == 'POST':
@@ -700,6 +717,7 @@ def student_create_view(request):
     return render(request, 'attendance/student_form.html', {'form': form, 'title': 'Enroll New Student'})
 
 
+@principal_required
 def student_update_view(request, pk):
     """Edit student details or bus/canteen assignment."""
     student = get_object_or_404(Student, pk=pk)
@@ -714,6 +732,7 @@ def student_update_view(request, pk):
     return render(request, 'attendance/student_form.html', {'form': form, 'student': student, 'title': f"Edit {student.full_name}"})
 
 
+@principal_required
 def student_delete_view(request, pk):
     """Deactivate or remove student."""
     student = get_object_or_404(Student, pk=pk)
@@ -732,6 +751,7 @@ def student_delete_view(request, pk):
 # ==========================================
 # FEE PAYMENTS VIEWS
 # ==========================================
+@finance_required
 def payment_list_view(request):
     """Payments ledger showing history of bus and canteen fee payments."""
     payments = FeePayment.objects.select_related('student', 'student__bus').order_by('-payment_date', '-created_at')
@@ -794,6 +814,7 @@ def payment_list_view(request):
     return render(request, 'attendance/payments.html', context)
 
 
+@payment_recording_required
 def payment_create_view(request):
     """Form to record a daily or advance fee payment."""
     student_id = request.GET.get('student_id')
@@ -925,6 +946,7 @@ def payment_create_view(request):
     return render(request, 'attendance/payment_form.html', context)
 
 
+@finance_required
 def payment_delete_view(request, pk):
     """Delete a payment record."""
     payment = get_object_or_404(FeePayment, pk=pk)
@@ -942,6 +964,7 @@ def payment_delete_view(request, pk):
 # ==========================================
 # REPORTS & RECONCILIATION
 # ==========================================
+@finance_required
 def reports_view(request):
     """Daily Attendance & Fee Reconciliation Report."""
     date_str = request.GET.get('date')
@@ -1051,7 +1074,12 @@ def login_view(request):
             login(request, user)
             role_display = user.profile.get_role_display() if hasattr(user, 'profile') else 'Staff'
             messages.success(request, f"Welcome back, {user.username}! Signed in as {role_display}.")
-            next_url = request.GET.get('next') or 'dashboard'
+            next_url = request.GET.get('next')
+            if not next_url:
+                if hasattr(user, 'profile') and user.profile.role == UserProfile.ROLE_ACCOUNTANT:
+                    next_url = 'payment_list'
+                else:
+                    next_url = 'dashboard'
             return redirect(next_url)
         else:
             messages.error(request, "Invalid username or password.")
@@ -1071,6 +1099,7 @@ def logout_view(request):
 # ==========================================
 # BULK STUDENT IMPORT & EXPORT
 # ==========================================
+@principal_required
 def student_template_download(request):
     """Download a CSV template for bulk student enrollment."""
     response = HttpResponse(content_type='text/csv')
@@ -1084,6 +1113,7 @@ def student_template_download(request):
     return response
 
 
+@principal_required
 def student_import_view(request):
     """Bulk import students from a CSV file."""
     if request.method == 'POST' and request.FILES.get('csv_file'):
@@ -1144,6 +1174,7 @@ def student_import_view(request):
     return render(request, 'attendance/student_import.html')
 
 
+@finance_required
 def export_attendance_csv(request):
     """Export daily attendance roster to CSV."""
     date_str = request.GET.get('date')
@@ -1173,6 +1204,7 @@ def export_attendance_csv(request):
     return response
 
 
+@finance_required
 def export_debtors_csv(request):
     """Export list of students with outstanding daily bus or canteen fees to CSV."""
     date_str = request.GET.get('date')
@@ -1226,6 +1258,7 @@ def export_debtors_csv(request):
 # ==========================================
 # PRINTABLE RECEIPT VOUCHER
 # ==========================================
+@login_required
 def payment_receipt_view(request, pk):
     """Printable / PDF-style receipt voucher for a recorded fee payment."""
     payment = get_object_or_404(FeePayment.objects.select_related('student', 'student__bus', 'recorded_by'), pk=pk)
@@ -1286,6 +1319,7 @@ def payment_receipt_view(request, pk):
 # ==========================================
 # NOTIFICATIONS AUDIT LOG
 # ==========================================
+@principal_required
 def notifications_view(request):
     """View parent notification alert history."""
     logs = NotificationLog.objects.select_related('student', 'student__bus').order_by('-sent_at')[:100]
@@ -1305,6 +1339,7 @@ def notifications_view(request):
 # ==========================================
 # SCHOOL SETTINGS & CANTEEN RATE CONFIGURATION
 # ==========================================
+@principal_required
 def school_settings_view(request):
     """View and update system-wide school billing and default canteen settings."""
     current_canteen = get_default_canteen_fee()
@@ -1346,3 +1381,162 @@ def school_settings_view(request):
         'daily_canteen_expected': daily_canteen_expected,
     }
     return render(request, 'attendance/settings.html', context)
+
+
+# ==========================================
+# TEACHER ACCOUNT MANAGEMENT (PRINCIPAL ONLY)
+# ==========================================
+@principal_required
+def teacher_list_view(request):
+    """
+    Principal dashboard to view and manage all teacher accounts.
+    """
+    User = get_user_model()
+    search_query = request.GET.get('q', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+
+    teachers_qs = User.objects.filter(profile__role=UserProfile.ROLE_TEACHER).select_related('profile').order_by('first_name', 'username')
+
+    if search_query:
+        teachers_qs = teachers_qs.filter(
+            Q(username__icontains=search_query) |
+            Q(first_name__icontains=search_query) |
+            Q(last_name__icontains=search_query) |
+            Q(email__icontains=search_query) |
+            Q(profile__assigned_class__icontains=search_query)
+        )
+
+    if status_filter == 'active':
+        teachers_qs = teachers_qs.filter(is_active=True)
+    elif status_filter == 'inactive':
+        teachers_qs = teachers_qs.filter(is_active=False)
+
+    total_teachers = User.objects.filter(profile__role=UserProfile.ROLE_TEACHER).count()
+    active_teachers = User.objects.filter(profile__role=UserProfile.ROLE_TEACHER, is_active=True).count()
+    assigned_classes_count = User.objects.filter(profile__role=UserProfile.ROLE_TEACHER).exclude(profile__assigned_class='').values('profile__assigned_class').distinct().count()
+
+    # Check for newly created or reset teacher in session to display credential banner
+    created_info = request.session.pop('created_teacher_info', None)
+    reset_info = request.session.pop('reset_teacher_info', None)
+
+    context = {
+        'teachers': teachers_qs,
+        'search': search_query,
+        'status_filter': status_filter,
+        'total_teachers': total_teachers,
+        'active_teachers': active_teachers,
+        'assigned_classes_count': assigned_classes_count,
+        'created_info': created_info,
+        'reset_info': reset_info,
+    }
+    return render(request, 'attendance/teachers.html', context)
+
+
+@principal_required
+def teacher_create_view(request):
+    """
+    Allow Principal to create a new teacher account and set an initial password.
+    """
+    if request.method == 'POST':
+        form = TeacherCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            initial_password = form.cleaned_data['password']
+            messages.success(
+                request,
+                f"✓ Teacher account created for {user.get_full_name() or user.username} (@{user.username})."
+            )
+            request.session['created_teacher_info'] = {
+                'username': user.username,
+                'full_name': user.get_full_name() or user.username,
+                'password': initial_password,
+                'assigned_class': user.profile.assigned_class if hasattr(user, 'profile') else '',
+            }
+            return redirect('teacher_list')
+    else:
+        form = TeacherCreationForm()
+
+    return render(request, 'attendance/teacher_form.html', {
+        'form': form,
+        'title': 'Add New Teacher',
+        'is_edit': False,
+    })
+
+
+@principal_required
+def teacher_update_view(request, pk):
+    """
+    Update an existing teacher's profile (name, email, phone, assigned class, active status).
+    """
+    User = get_user_model()
+    teacher = get_object_or_404(User.objects.filter(profile__role=UserProfile.ROLE_TEACHER).select_related('profile'), pk=pk)
+
+    if request.method == 'POST':
+        form = TeacherUpdateForm(request.POST, user_obj=teacher)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"✓ Teacher '{teacher.username}' updated successfully.")
+            return redirect('teacher_list')
+    else:
+        initial_data = {
+            'first_name': teacher.first_name,
+            'last_name': teacher.last_name,
+            'email': teacher.email,
+            'is_active': teacher.is_active,
+            'phone_number': teacher.profile.phone_number if hasattr(teacher, 'profile') else '',
+            'assigned_class': teacher.profile.assigned_class if hasattr(teacher, 'profile') else '',
+        }
+        form = TeacherUpdateForm(initial=initial_data, user_obj=teacher)
+
+    return render(request, 'attendance/teacher_form.html', {
+        'form': form,
+        'teacher': teacher,
+        'title': f"Edit Teacher: {teacher.get_full_name() or teacher.username}",
+        'is_edit': True,
+    })
+
+
+@principal_required
+def teacher_password_reset_view(request, pk):
+    """
+    Allow Principal to set a new password for a teacher.
+    """
+    User = get_user_model()
+    teacher = get_object_or_404(User.objects.filter(profile__role=UserProfile.ROLE_TEACHER), pk=pk)
+
+    if request.method == 'POST':
+        form = TeacherPasswordResetForm(request.POST, user_obj=teacher)
+        if form.is_valid():
+            form.save()
+            new_password = form.cleaned_data['new_password']
+            messages.success(
+                request,
+                f"✓ Password reset for '{teacher.username}'."
+            )
+            request.session['reset_teacher_info'] = {
+                'username': teacher.username,
+                'full_name': teacher.get_full_name() or teacher.username,
+                'password': new_password,
+            }
+            return redirect('teacher_list')
+    else:
+        form = TeacherPasswordResetForm(user_obj=teacher)
+
+    return render(request, 'attendance/teacher_password_reset.html', {
+        'form': form,
+        'teacher': teacher,
+    })
+
+
+@principal_required
+def teacher_toggle_status_view(request, pk):
+    """
+    1-click toggle to activate or deactivate a teacher account.
+    """
+    User = get_user_model()
+    teacher = get_object_or_404(User.objects.filter(profile__role=UserProfile.ROLE_TEACHER), pk=pk)
+    teacher.is_active = not teacher.is_active
+    teacher.save()
+    status_str = "activated" if teacher.is_active else "deactivated"
+    messages.info(request, f"Teacher account '{teacher.username}' has been {status_str}.")
+    return redirect('teacher_list')

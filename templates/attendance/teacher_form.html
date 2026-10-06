@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>{{ title }}</h2>
+        <p>{% if is_edit %}Modify teacher details, class assignments, or account access{% else %}Provision a new teacher account for classroom attendance and fee tracking{% endif %}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{% url 'teacher_list' %}" class="btn-secondary">
+            &larr; Back to Teachers
+        </a>
+    </div>
+</div>
+
+<div style="max-width: 680px; margin: 0 auto;">
+    <div class="form-card">
+        <form method="POST">
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger" style="margin-bottom: 1.25rem;">
+                {% for err in form.non_field_errors %}
+                    <div>{{ err }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Personal Information -->
+            <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
+                1. Teacher Identity
+            </h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.first_name.id_for_label }}">First Name <span style="color: var(--danger);">*</span></label>
+                    {{ form.first_name }}
+                    {% if form.first_name.errors %}
+                        <div class="form-error">{{ form.first_name.errors.0 }}</div>
+                    {% endif %}
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.last_name.id_for_label }}">Last Name <span style="color: var(--danger);">*</span></label>
+                    {{ form.last_name }}
+                    {% if form.last_name.errors %}
+                        <div class="form-error">{{ form.last_name.errors.0 }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if not is_edit %}
+            <div class="form-group">
+                <label class="form-label" for="{{ form.username.id_for_label }}">
+                    Portal Username <span style="color: var(--danger);">*</span>
+                </label>
+                {{ form.username }}
+                {% if form.username.errors %}
+                    <div class="form-error">{{ form.username.errors.0 }}</div>
+                {% endif %}
+                <span class="form-hint">Unique identifier the teacher will use to sign into the system (e.g. <code>k_mensah</code>).</span>
+            </div>
+            {% else %}
+            <div class="form-group">
+                <label class="form-label">Username</label>
+                <div style="padding: 0.6rem 0.85rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.85rem; font-family: monospace; color: var(--text-main);">
+                    @{{ teacher.username }}
+                </div>
+                <span class="form-hint">Username cannot be changed. To reset credentials, use the "Reset Password" button.</span>
+            </div>
+            {% endif %}
+
+            <!-- Contact & Classroom Assignment -->
+            <h3 style="font-size: 0.95rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 1rem; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
+                2. Assignment & Contact
+            </h3>
+
+            <div class="form-group">
+                <label class="form-label" for="{{ form.assigned_class.id_for_label }}">
+                    Assigned Classroom
+                </label>
+                {{ form.assigned_class }}
+                {% if form.assigned_class.errors %}
+                    <div class="form-error">{{ form.assigned_class.errors.0 }}</div>
+                {% endif %}
+                <span class="form-hint">
+                    When this teacher signs in, their daily clock-in roster and attendance dashboard will automatically filter to this classroom.
+                </span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.phone_number.id_for_label }}">Phone Number</label>
+                    {{ form.phone_number }}
+                    {% if form.phone_number.errors %}
+                        <div class="form-error">{{ form.phone_number.errors.0 }}</div>
+                    {% endif %}
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.email.id_for_label }}">Email Address</label>
+                    {{ form.email }}
+                    {% if form.email.errors %}
+                        <div class="form-error">{{ form.email.errors.0 }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Password Setup (Only on Create) -->
+            {% if not is_edit %}
+            <h3 style="font-size: 0.95rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 1rem; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                <span>3. Initial Login Password</span>
+                <button type="button" class="btn-secondary" onclick="generatePassword()" style="font-size: 0.75rem; padding: 0.2rem 0.55rem;">
+                    ⚡ Auto-Generate Password
+                </button>
+            </h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.password.id_for_label }}">Password <span style="color: var(--danger);">*</span></label>
+                    {{ form.password }}
+                    {% if form.password.errors %}
+                        <div class="form-error">{{ form.password.errors.0 }}</div>
+                    {% endif %}
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.confirm_password.id_for_label }}">Confirm Password <span style="color: var(--danger);">*</span></label>
+                    {{ form.confirm_password }}
+                    {% if form.confirm_password.errors %}
+                        <div class="form-error">{{ form.confirm_password.errors.0 }}</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Account Status -->
+            <div class="form-group" style="margin-top: 1.25rem; display: flex; align-items: center; gap: 0.6rem;">
+                {{ form.is_active }}
+                <label class="form-label" for="{{ form.is_active.id_for_label }}" style="margin-bottom: 0; cursor: pointer;">
+                    Active Account (permits sign in to the teacher portal)
+                </label>
+            </div>
+
+            <div class="form-actions" style="margin-top: 1.75rem;">
+                <a href="{% url 'teacher_list' %}" class="btn-secondary">Cancel</a>
+                <button type="submit" class="btn-primary">
+                    {% if is_edit %}Save Changes{% else %}Create Teacher Account{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function generatePassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$';
+    let pass = '';
+    for (let i = 0; i < 10; i++) {
+        pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    const pField = document.getElementById('id_password');
+    const cpField = document.getElementById('id_confirm_password');
+    if (pField && cpField) {
+        pField.type = 'text';
+        cpField.type = 'text';
+        pField.value = pass;
+        cpField.value = pass;
+        alert('Generated Password: ' + pass + '\n(Displayed in plain text so you can note it down)');
+    }
+}
+</script>
+{% endblock %}

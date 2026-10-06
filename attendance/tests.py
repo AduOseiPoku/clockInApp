@@ -22,6 +22,7 @@ class SchoolClockInSystemTests(TestCase):
 
         UserProfile.objects.filter(user=self.teacher_user).update(role=UserProfile.ROLE_TEACHER)
         UserProfile.objects.filter(user=self.bursar_user).update(role=UserProfile.ROLE_ACCOUNTANT)
+        self.client.force_login(self.admin_user)
 
         # Dynamic Buses
         self.tema_bus = Bus.objects.create(name='Tema Bus', fee=Decimal('80.00'), route_description='Comm 1 - 25')
@@ -185,6 +186,7 @@ class SchoolClockInSystemTests(TestCase):
 
     def test_login_and_logout(self):
         """Test user login and logout."""
+        self.client.logout()
         login_url = reverse('login')
         res = self.client.post(login_url, {'username': 'testteacher', 'password': 'pass123'}, follow=True)
         self.assertEqual(res.status_code, 200)
@@ -465,6 +467,288 @@ class SchoolClockInSystemTests(TestCase):
 
         # Verify student with standard canteen enrollment now requires 15.00 daily
         self.assertEqual(self.student_tema.canteen_fee_required, Decimal('15.00'))
+
+
+class RoleBasedAuthorizationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin_user = User.objects.create_superuser('test_principal', 'principal@school.com', 'pass123')
+        self.teacher_user = User.objects.create_user('test_teacher_auth', 'teacher_auth@school.com', 'pass123')
+        self.bursar_user = User.objects.create_user('test_bursar_auth', 'bursar_auth@school.com', 'pass123')
+
+        teacher_profile = self.teacher_user.profile
+        teacher_profile.role = UserProfile.ROLE_TEACHER
+        teacher_profile.save()
+
+        bursar_profile = self.bursar_user.profile
+        bursar_profile.role = UserProfile.ROLE_ACCOUNTANT
+        bursar_profile.save()
+
+        self.bus = Bus.objects.create(name='Auth Test Bus', fee=Decimal('50.00'))
+        self.student = Student.objects.create(
+            first_name='Ama',
+            last_name='Koduah',
+            student_class='Class 1A',
+            bus=self.bus,
+            canteen_enrolled=True
+        )
+
+    def test_unauthenticated_user_redirected_to_login(self):
+        """Unauthenticated requests to protected endpoints redirect to login."""
+        protected_urls = [
+            reverse('dashboard'),
+            reverse('payment_list'),
+            reverse('payment_create'),
+            reverse('reports'),
+            reverse('bus_list'),
+            reverse('student_list'),
+            reverse('school_settings'),
+            reverse('notifications'),
+        ]
+        for url in protected_urls:
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, 302)
+            self.assertIn('/login/', res.url)
+
+    def test_teacher_role_permissions(self):
+        """Teacher can access dashboard and record payments, but cannot access revenue/reports/settings or delete payments."""
+        self.client.force_login(self.teacher_user)
+
+        # 1. Dashboard access and revenue masking
+        res_dash = self.client.get(reverse('dashboard'))
+        self.assertEqual(res_dash.status_code, 200)
+        self.assertContains(res_dash, 'Class Roster')
+        self.assertContains(res_dash, '+ Record Fee')
+        # Total revenue card must NOT be in HTML for teachers
+        self.assertNotContains(res_dash, "Today's Revenue")
+        # Hidden nav links
+        self.assertNotContains(res_dash, reverse('reports'))
+        self.assertNotContains(res_dash, reverse('school_settings'))
+        self.assertNotContains(res_dash, reverse('bus_list'))
+
+        # 2. Can access and submit payment create view
+        res_pay = self.client.get(reverse('payment_create'))
+        self.assertEqual(res_pay.status_code, 200)
+
+        # 3. Can record payment via quick API
+        quick_data = {
+            'student_id': self.student.id,
+            'fee_type': 'CANTEEN',
+            'amount': '10.00',
+            'canteen_amount': '10.00',
+            'payment_method': 'CASH',
+        }
+        res_api = self.client.post(
+            reverse('api_quick_payment'),
+            json.dumps(quick_data),
+            content_type='application/json'
+        )
+        self.assertEqual(res_api.status_code, 200)
+        self.assertTrue(res_api.json()['success'])
+
+        # 4. Denied from reports and settings
+        res_rep = self.client.get(reverse('reports'), follow=True)
+        self.assertContains(res_rep, 'Access denied')
+
+        res_set = self.client.get(reverse('school_settings'), follow=True)
+        self.assertContains(res_set, 'Principal administrator privileges required')
+
+        # 5. Denied from payment delete
+        payment = FeePayment.objects.first()
+        res_del = self.client.get(reverse('payment_delete', args=[payment.id]), follow=True)
+        self.assertContains(res_del, 'Access denied')
+
+    def test_bursar_role_permissions(self):
+        """Bursar can view revenue, reports, and payments, but cannot record payments or edit settings."""
+        self.client.force_login(self.bursar_user)
+
+        # 1. Access payments and reports
+        res_pay = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_pay.status_code, 200)
+        self.assertContains(res_pay, 'Fee Payments Ledger')
+        # '+ Record Payment' must be hidden on payments page for Bursar
+        self.assertNotContains(res_pay, '+ Record Payment')
+
+        # 2. In navbar, '+ Record Fee' must be hidden for Bursar
+        self.assertNotContains(res_pay, '+ Record Fee')
+
+        # 3. Reports access granted
+        res_rep = self.client.get(reverse('reports'))
+        self.assertEqual(res_rep.status_code, 200)
+
+        # 4. Blocked from recording payment
+        res_create = self.client.get(reverse('payment_create'), follow=True)
+        self.assertContains(res_create, 'Bursar account is designated for revenue review')
+
+        # 5. Blocked from quick payment API
+        quick_data = {
+            'student_id': self.student.id,
+            'fee_type': 'CANTEEN',
+            'amount': '10.00',
+            'canteen_amount': '10.00',
+            'payment_method': 'CASH',
+        }
+        res_api = self.client.post(
+            reverse('api_quick_payment'),
+            json.dumps(quick_data),
+            content_type='application/json'
+        )
+        self.assertEqual(res_api.status_code, 403)
+        self.assertFalse(res_api.json()['success'])
+
+        # 6. Blocked from settings
+        res_set = self.client.get(reverse('school_settings'), follow=True)
+        self.assertContains(res_set, 'Principal administrator privileges required')
+
+    def test_principal_role_permissions(self):
+        """Principal has full access to all sections, settings, and payment actions."""
+        self.client.force_login(self.admin_user)
+
+        res_dash = self.client.get(reverse('dashboard'))
+        self.assertEqual(res_dash.status_code, 200)
+        self.assertContains(res_dash, "Today's Revenue")
+        self.assertNotContains(res_dash, '+ Record Fee')
+        self.assertContains(res_dash, reverse('school_settings'))
+
+        res_pay = self.client.get(reverse('payment_create'))
+        self.assertEqual(res_pay.status_code, 200)
+
+        res_set = self.client.get(reverse('school_settings'))
+        self.assertEqual(res_set.status_code, 200)
+
+        res_rep = self.client.get(reverse('reports'))
+        self.assertEqual(res_rep.status_code, 200)
+
+    def test_principal_can_access_teacher_management(self):
+        """Principal has access to teacher list and teacher creation form."""
+        self.client.force_login(self.admin_user)
+
+        res = self.client.get(reverse('teacher_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Teachers & Staff Management')
+        self.assertContains(res, reverse('teacher_create'))
+
+        res_form = self.client.get(reverse('teacher_create'))
+        self.assertEqual(res_form.status_code, 200)
+        self.assertContains(res_form, 'Add New Teacher')
+
+    def test_non_principal_cannot_access_teacher_management(self):
+        """Teachers and Bursars cannot access teacher management."""
+        # Teacher attempt
+        self.client.force_login(self.teacher_user)
+        res_teacher = self.client.get(reverse('teacher_list'), follow=True)
+        self.assertContains(res_teacher, 'Principal administrator privileges required')
+
+        res_create = self.client.get(reverse('teacher_create'), follow=True)
+        self.assertContains(res_create, 'Principal administrator privileges required')
+
+        # Bursar attempt
+        self.client.force_login(self.bursar_user)
+        res_bursar = self.client.get(reverse('teacher_list'), follow=True)
+        self.assertContains(res_bursar, 'Principal administrator privileges required')
+
+    def test_principal_creates_teacher_account_successfully(self):
+        """Principal creates a new teacher, verifying role, assigned class, and login."""
+        self.client.force_login(self.admin_user)
+
+        data = {
+            'username': 'mr_mensah',
+            'first_name': 'Kofi',
+            'last_name': 'Mensah',
+            'email': 'mensah@school.com',
+            'phone_number': '+233 24 555 1234',
+            'assigned_class': 'Class 1A',
+            'password': 'StrongPassword123!',
+            'confirm_password': 'StrongPassword123!',
+            'is_active': True,
+        }
+        res = self.client.post(reverse('teacher_create'), data, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Teacher account created for Kofi Mensah')
+
+        # Verify user in database
+        new_teacher = User.objects.get(username='mr_mensah')
+        self.assertEqual(new_teacher.first_name, 'Kofi')
+        self.assertEqual(new_teacher.last_name, 'Mensah')
+        self.assertEqual(new_teacher.profile.role, UserProfile.ROLE_TEACHER)
+        self.assertEqual(new_teacher.profile.assigned_class, 'Class 1A')
+        self.assertEqual(new_teacher.profile.phone_number, '+233 24 555 1234')
+
+        # Verify new teacher can sign in and defaults to their assigned class on dashboard
+        self.client.logout()
+        login_success = self.client.login(username='mr_mensah', password='StrongPassword123!')
+        self.assertTrue(login_success)
+
+        res_dash = self.client.get(reverse('dashboard'))
+        self.assertEqual(res_dash.status_code, 200)
+        # Dashboard should auto-filter to Class 1A
+        self.assertEqual(res_dash.context['class_filter'], 'Class 1A')
+        student_items = res_dash.context['student_items']
+        for item in student_items:
+            self.assertEqual(item['student'].student_class, 'Class 1A')
+
+    def test_principal_updates_teacher_details(self):
+        """Principal edits an existing teacher's assigned class, name, and phone."""
+        self.client.force_login(self.admin_user)
+
+        update_data = {
+            'first_name': 'Grace',
+            'last_name': 'Ansah',
+            'email': 'grace@school.com',
+            'phone_number': '+233 20 999 8888',
+            'assigned_class': 'Class 2B',
+            'is_active': True,
+        }
+        res = self.client.post(reverse('teacher_update', args=[self.teacher_user.pk]), update_data, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'updated successfully')
+
+        self.teacher_user.refresh_from_db()
+        self.assertEqual(self.teacher_user.first_name, 'Grace')
+        self.assertEqual(self.teacher_user.profile.assigned_class, 'Class 2B')
+        self.assertEqual(self.teacher_user.profile.phone_number, '+233 20 999 8888')
+
+    def test_principal_resets_teacher_password(self):
+        """Principal resets password for a teacher and teacher logs in with new password."""
+        self.client.force_login(self.admin_user)
+
+        reset_data = {
+            'new_password': 'BrandNewPassword999!',
+            'confirm_password': 'BrandNewPassword999!',
+        }
+        res = self.client.post(reverse('teacher_password_reset', args=[self.teacher_user.pk]), reset_data, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Password reset for')
+
+        # Test login with old password fails, new password succeeds
+        self.client.logout()
+        old_login = self.client.login(username=self.teacher_user.username, password='pass123')
+        self.assertFalse(old_login)
+
+        new_login = self.client.login(username=self.teacher_user.username, password='BrandNewPassword999!')
+        self.assertTrue(new_login)
+
+    def test_principal_toggles_teacher_active_status(self):
+        """Principal can toggle active status to disable or enable accounts."""
+        self.client.force_login(self.admin_user)
+
+        self.assertTrue(self.teacher_user.is_active)
+        res_deact = self.client.get(reverse('teacher_toggle_status', args=[self.teacher_user.pk]), follow=True)
+        self.assertEqual(res_deact.status_code, 200)
+
+        self.teacher_user.refresh_from_db()
+        self.assertFalse(self.teacher_user.is_active)
+
+        # Deactivated teacher cannot log in
+        self.client.logout()
+        deact_login = self.client.login(username='testteacher', password='pass123')
+        self.assertFalse(deact_login)
+
+        # Reactivate
+        self.client.force_login(self.admin_user)
+        self.client.get(reverse('teacher_toggle_status', args=[self.teacher_user.pk]), follow=True)
+        self.teacher_user.refresh_from_db()
+        self.assertTrue(self.teacher_user.is_active)
 
 
 

@@ -434,12 +434,36 @@ class UserProfile(models.Model):
         return self.role == self.ROLE_ADMIN or self.user.is_superuser
 
     @property
+    def is_principal(self):
+        return self.is_school_admin
+
+    @property
     def is_accountant(self):
         return self.role == self.ROLE_ACCOUNTANT or self.is_school_admin
 
     @property
     def is_teacher(self):
         return self.role == self.ROLE_TEACHER or self.is_school_admin
+
+    @property
+    def can_view_revenue(self):
+        return self.role in [self.ROLE_ADMIN, self.ROLE_ACCOUNTANT] or self.user.is_superuser
+
+    @property
+    def can_record_payments(self):
+        return self.role in [self.ROLE_ADMIN, self.ROLE_TEACHER] or self.user.is_superuser
+
+    @property
+    def can_manage_settings(self):
+        return self.is_school_admin
+
+    @property
+    def can_manage_buses(self):
+        return self.is_school_admin
+
+    @property
+    def can_delete_payments(self):
+        return self.role in [self.ROLE_ADMIN, self.ROLE_ACCOUNTANT] or self.user.is_superuser
 
 
 class NotificationLog(models.Model):

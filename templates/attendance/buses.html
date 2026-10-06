@@ -9,9 +9,11 @@
         <p>Manage transport routes, driver details, and fee structures</p>
     </div>
     <div class="header-actions">
+        {% if user.profile.is_principal %}
         <a href="{% url 'bus_create' %}" class="btn-primary">
             + Add Bus Route
         </a>
+        {% endif %}
     </div>
 </div>
 
@@ -100,8 +102,12 @@
                             </div>
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
+                            {% if user.profile.is_principal %}
                             <a href="{% url 'bus_update' item.bus.id %}" class="btn-table-action">Edit</a>
                             <a href="{% url 'bus_delete' item.bus.id %}" class="btn-table-action" style="color: var(--danger-text);">Delete</a>
+                            {% else %}
+                            <span style="font-size:0.75rem; color:var(--text-muted);">View Only</span>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}
@@ -153,6 +159,7 @@
                 👤 <strong>{{ item.bus.driver_name|default:"Unassigned Driver" }}</strong> &bull; {{ item.bus.driver_phone|default:"No Phone" }} {% if item.bus.plate_number %} &bull; <code>{{ item.bus.plate_number }}</code>{% endif %}
             </div>
 
+            {% if user.profile.is_principal %}
             <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
                 <a href="{% url 'bus_update' item.bus.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
                     ✏️ Edit Route
@@ -161,6 +168,7 @@
                     🗑️
                 </a>
             </div>
+            {% endif %}
         </div>
     {% empty %}
         <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
