@@ -10,6 +10,9 @@
     </div>
     <div class="header-actions">
         {% if user.profile and user.profile.can_record_payments %}
+        <a href="{% url 'payment_create' %}?is_one_off=1" class="btn-secondary" style="font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;">
+            <span>🚌</span> One-Off Bus Trip
+        </a>
         <a href="{% url 'payment_create' %}" class="btn-primary">
             + Record Payment
         </a>
@@ -60,6 +63,53 @@
     </div>
 </div>
 
+<!-- Authorized Fee Collectors Audit Panel -->
+{% if authorized_collectors_summary %}
+<div class="stat-card" style="margin-bottom: 1.25rem; border-left: 4px solid var(--primary); padding: 1rem 1.25rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.1rem;">💰</span>
+            <div>
+                <h3 style="font-size: 0.92rem; font-weight: 700; color: var(--text-main); margin: 0;">Authorized Fee Collection Teachers</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0;">Instructional staff authorized to collect bus and canteen fees</p>
+            </div>
+        </div>
+        <span class="badge" style="background: hsla(var(--primary-hsl), 0.12); color: var(--primary); font-weight: 600; font-size: 0.72rem;">
+            {{ authorized_collectors_summary|length }} Authorized Collector{{ authorized_collectors_summary|length|pluralize }}
+        </span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.65rem;">
+        {% for item in authorized_collectors_summary %}
+        <a href="{% url 'payment_list' %}?collector={{ item.user.id }}{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+           class="collector-card-chip {% if selected_collector == item.user.id|stringformat:'s' %}active{% endif %}"
+           title="Remittance to Accountant: {{ CURRENCY_SYMBOL }}{{ item.today_total|floatformat:2 }} collected today | Class Target: {{ CURRENCY_SYMBOL }}{{ item.class_expected|floatformat:2 }} ({{ item.class_balance|floatformat:2 }} due)">
+            <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0;">
+                <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem; background: var(--primary-subtle); color: var(--primary); font-weight: 700; flex-shrink: 0;">
+                    {{ item.user.first_name|default:item.user.username|slice:":1" }}{{ item.user.last_name|slice:":1" }}
+                </div>
+                <div style="min-width: 0;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {{ item.user.get_full_name|default:item.user.username }}
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">
+                        {{ item.user.profile.assigned_class|default:"Floating" }}{% if item.assigned_bus_name %} • 🚌 {{ item.assigned_bus_name }}{% endif %}{% if item.student_count %} ({{ item.student_count }}){% endif %}
+                    </div>
+                </div>
+            </div>
+            <div style="text-align: right; flex-shrink: 0;">
+                <div style="font-size: 0.82rem; font-weight: 700; color: var(--success-text);">
+                    +{{ CURRENCY_SYMBOL }}{{ item.today_total|floatformat:2 }}
+                </div>
+                <div style="font-size: 0.66rem; color: var(--text-muted);" title="Class daily target">
+                    target: {{ CURRENCY_SYMBOL }}{{ item.class_expected|floatformat:2 }}{% if item.one_off_additions > 0 %} (+{{ CURRENCY_SYMBOL }}{{ item.one_off_additions|floatformat:0 }} bus){% endif %}
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <!-- Filters -->
 <form method="GET" action="{% url 'payment_list' %}" class="control-bar">
     <div class="search-input-wrapper">
@@ -68,24 +118,24 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
             </svg>
         </span>
-        <input type="text" name="q" value="{{ search }}" placeholder="Search by student or receipt #..." class="search-input">
+        <input type="text" name="q" value="{{ search }}" placeholder="Search by student, receipt #, or collector..." class="search-input">
     </div>
 
     <!-- Quick Date Filter Presets -->
     <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
-        <a href="{% url 'payment_list' %}{% if fee_type %}?fee_type={{ fee_type }}{% endif %}" 
+        <a href="{% url 'payment_list' %}{% if fee_type %}?fee_type={{ fee_type }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}" 
            class="btn-secondary filter-preset-btn {% if not date_preset and not date_str %}active{% endif %}">
            All Time
         </a>
-        <a href="{% url 'payment_list' %}?preset=today{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+        <a href="{% url 'payment_list' %}?preset=today{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}" 
            class="btn-secondary filter-preset-btn {% if date_preset == 'today' %}active{% endif %}">
            Today
         </a>
-        <a href="{% url 'payment_list' %}?preset=yesterday{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+        <a href="{% url 'payment_list' %}?preset=yesterday{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}" 
            class="btn-secondary filter-preset-btn {% if date_preset == 'yesterday' %}active{% endif %}">
            Yesterday
         </a>
-        <a href="{% url 'payment_list' %}?preset=week{% if fee_type %}&fee_type={{ fee_type }}{% endif %}" 
+        <a href="{% url 'payment_list' %}?preset=week{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}" 
            class="btn-secondary filter-preset-btn {% if date_preset == 'week' %}active{% endif %}">
            Last 7 Days
         </a>
@@ -93,11 +143,11 @@
 
     <!-- Mobile Filter Toggle Button -->
     <button type="button" class="filter-drawer-toggle" onclick="document.getElementById('mobile-payment-filters').classList.toggle('show-mobile')">
-        <span>⚙️ Filter Payments {% if search or fee_type or student_class or date_str or date_preset %}<span class="stat-badge stat-badge-success" style="margin-left:0.35rem;">Active</span>{% endif %}</span>
+        <span>⚙️ Filter Payments {% if search or fee_type or student_class or date_str or date_preset or selected_collector %}<span class="stat-badge stat-badge-success" style="margin-left:0.35rem;">Active</span>{% endif %}</span>
         <span>▼</span>
     </button>
 
-    <div id="mobile-payment-filters" class="filter-group {% if search or fee_type or student_class or date_str or date_preset %}show-mobile{% endif %}">
+    <div id="mobile-payment-filters" class="filter-group {% if search or fee_type or student_class or date_str or date_preset or selected_collector %}show-mobile{% endif %}">
         {% if date_preset %}
             <input type="hidden" name="preset" value="{{ date_preset }}">
         {% endif %}
@@ -116,7 +166,16 @@
             {% endfor %}
         </select>
 
-        {% if search or fee_type or student_class or date_str or date_preset %}
+        <select name="collector" class="filter-select" onchange="this.form.submit()" title="Filter by collector">
+            <option value="">All Collectors</option>
+            {% for col in collectors_list %}
+                <option value="{{ col.id }}" {% if selected_collector == col.id|stringformat:'s' %}selected{% endif %}>
+                    {{ col.get_full_name|default:col.username }} ({% if col.profile and col.profile.role == 'TEACHER' %}Teacher{% elif col.profile and col.profile.is_school_admin %}Principal{% else %}Staff{% endif %})
+                </option>
+            {% endfor %}
+        </select>
+
+        {% if search or fee_type or student_class or date_str or date_preset or selected_collector %}
             <a href="{% url 'payment_list' %}" class="btn-reset">Clear</a>
         {% endif %}
     </div>
@@ -136,6 +195,7 @@
                     <th>Method</th>
                     <th>Period</th>
                     <th style="text-align: right;">Amount</th>
+                    <th>Received By</th>
                     <th style="text-align: right;">Actions</th>
                 </tr>
             </thead>
@@ -159,7 +219,12 @@
                         </td>
                         <td>
                             {% if p.fee_type == 'BUS' %}
-                                <span class="fee-badge fee-badge-paid">Bus Fee</span>
+                                <span class="fee-badge fee-badge-paid">Bus Fee{% if p.bus %} ({{ p.bus.name }}){% endif %}</span>
+                                {% if p.is_temporary_bus %}
+                                <span class="badge" style="font-size: 0.65rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); display: inline-block; margin-top: 0.15rem; font-weight: 600;">
+                                    🚌 One-Off Trip
+                                </span>
+                                {% endif %}
                             {% else %}
                                 <span class="fee-badge fee-badge-paid">Canteen Fee</span>
                             {% endif %}
@@ -177,6 +242,20 @@
                                 +{{ CURRENCY_SYMBOL }}{{ p.amount|floatformat:2 }}
                             </span>
                         </td>
+                        <td>
+                            {% if p.recorded_by %}
+                                <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-main);">
+                                    {{ p.recorded_by.get_full_name|default:p.recorded_by.username }}
+                                </div>
+                                {% if p.recorded_by.profile and p.recorded_by.profile.role == 'TEACHER' %}
+                                    <span class="badge" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; background: hsla(var(--primary-hsl), 0.1); color: var(--primary);">Teacher</span>
+                                {% elif p.recorded_by.profile and p.recorded_by.profile.is_school_admin %}
+                                    <span class="badge" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; background: hsla(var(--success-hsl), 0.1); color: var(--success);">Admin</span>
+                                {% endif %}
+                            {% else %}
+                                <span style="font-size: 0.78rem; color: var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
                         <td style="text-align: right; white-space: nowrap;">
                             <a href="{% url 'payment_receipt' p.id %}" class="btn-table-action">
                                 Receipt
@@ -190,7 +269,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="9" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                        <td colspan="10" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
                             <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No payment records found</div>
                             <p style="margin-top: 0.25rem; font-size: 0.8rem;">No fee collection records found for this period.</p>
                         </td>
@@ -228,7 +307,7 @@
                 </div>
             </div>
 
-            <div class="student-card-fees" style="justify-content:space-between;">
+            <div class="student-card-fees" style="justify-content:space-between; margin-bottom: 0.35rem;">
                 <div>
                     <span style="color:var(--text-muted); font-weight:600;">Receipt:</span>
                     <code>{{ p.receipt_number|default:"Auto" }}</code>
@@ -239,7 +318,23 @@
                 </div>
             </div>
 
-            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
+            <div style="font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between; padding-top: 0.25rem;">
+                <span>Received By:</span>
+                <strong style="color: var(--text-main);">
+                    {% if p.recorded_by %}
+                        {{ p.recorded_by.get_full_name|default:p.recorded_by.username }}
+                        {% if p.recorded_by.profile and p.recorded_by.profile.role == 'TEACHER' %}
+                            <span class="badge" style="font-size: 0.62rem; padding: 0.05rem 0.3rem; background: hsla(var(--primary-hsl), 0.1); color: var(--primary);">Teacher</span>
+                        {% elif p.recorded_by.profile and p.recorded_by.profile.is_school_admin %}
+                            <span class="badge" style="font-size: 0.62rem; padding: 0.05rem 0.3rem; background: hsla(var(--success-hsl), 0.1); color: var(--success);">Admin</span>
+                        {% endif %}
+                    {% else %}
+                        <span style="color: var(--text-muted);">—</span>
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.35rem;">
                 <a href="{% url 'payment_receipt' p.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
                     📄 View Receipt Voucher
                 </a>
@@ -257,4 +352,27 @@
         </div>
     {% endfor %}
 </div>
+
+<style>
+.collector-card-chip {
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.55rem 0.75rem;
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: all 0.15s ease;
+}
+.collector-card-chip:hover {
+    border-color: var(--primary);
+    transform: translateY(-1px);
+}
+.collector-card-chip.active {
+    border-color: var(--primary);
+    background: hsla(var(--primary-hsl), 0.04);
+    box-shadow: 0 0 0 1px var(--primary);
+}
+</style>
 {% endblock %}

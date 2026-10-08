@@ -13,9 +13,11 @@
             <label for="report-date" style="font-size:0.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Date</label>
             <input type="date" id="report-date" name="date" value="{{ date_str }}" onchange="this.form.submit()">
         </form>
+        {% if user.profile.role != 'ACCOUNTANT' %}
         <a href="{% url 'export_attendance_csv' %}?date={{ date_str }}" class="btn-secondary">
             Attendance CSV
         </a>
+        {% endif %}
         <a href="{% url 'export_debtors_csv' %}?period={{ period }}" class="btn-secondary">
             Debtors CSV
         </a>
@@ -27,6 +29,7 @@
 
 <!-- Key Highlights -->
 <div class="stats-grid">
+    {% if user.profile.role != 'ACCOUNTANT' %}
     <div class="stat-card">
         <div class="stat-header">
             <span class="stat-title">Daily Attendance</span>
@@ -36,6 +39,7 @@
             <span>{{ total_school_present }} present of {{ total_school_students }} enrolled</span>
         </div>
     </div>
+    {% endif %}
 
     <div class="stat-card">
         <div class="stat-header">

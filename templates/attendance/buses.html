@@ -81,7 +81,9 @@
                             <strong>{{ currency }}{{ item.bus.fee|floatformat:2 }}</strong>
                         </td>
                         <td>
-                            <span class="class-badge">{{ item.student_count }} Riders</span>
+                            <a href="{% url 'bus_analytics' item.bus.id %}" class="class-badge" style="text-decoration: none; cursor: pointer; transition: opacity 0.15s ease;" title="View payment analytics">
+                                📊 {{ item.student_count }} Riders
+                            </a>
                         </td>
                         <td style="color: var(--text-muted); max-width: 250px;">
                             {{ item.bus.route_description|default:"—" }}
@@ -102,11 +104,12 @@
                             </div>
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
+                            <a href="{% url 'bus_analytics' item.bus.id %}" class="btn-table-action" style="color: var(--primary); font-weight: 600;" title="Payment Analytics">
+                                Analytics
+                            </a>
                             {% if user.profile.is_principal %}
                             <a href="{% url 'bus_update' item.bus.id %}" class="btn-table-action">Edit</a>
                             <a href="{% url 'bus_delete' item.bus.id %}" class="btn-table-action" style="color: var(--danger-text);">Delete</a>
-                            {% else %}
-                            <span style="font-size:0.75rem; color:var(--text-muted);">View Only</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -140,7 +143,9 @@
                     </div>
                 </div>
                 <div style="text-align:right;">
-                    <span class="class-badge" style="font-size:0.72rem; padding:0.15rem 0.45rem;">{{ item.student_count }} Riders</span>
+                    <a href="{% url 'bus_analytics' item.bus.id %}" class="class-badge" style="font-size:0.72rem; padding:0.15rem 0.45rem; text-decoration:none;">
+                        📊 {{ item.student_count }} Riders
+                    </a>
                 </div>
             </div>
 
@@ -159,16 +164,19 @@
                 👤 <strong>{{ item.bus.driver_name|default:"Unassigned Driver" }}</strong> &bull; {{ item.bus.driver_phone|default:"No Phone" }} {% if item.bus.plate_number %} &bull; <code>{{ item.bus.plate_number }}</code>{% endif %}
             </div>
 
-            {% if user.profile.is_principal %}
             <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
+                <a href="{% url 'bus_analytics' item.bus.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--primary); font-weight:600;">
+                    📊 Analytics
+                </a>
+                {% if user.profile.is_principal %}
                 <a href="{% url 'bus_update' item.bus.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
-                    ✏️ Edit Route
+                    ✏️ Edit
                 </a>
                 <a href="{% url 'bus_delete' item.bus.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
                     🗑️
                 </a>
+                {% endif %}
             </div>
-            {% endif %}
         </div>
     {% empty %}
         <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">

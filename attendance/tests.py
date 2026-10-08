@@ -7,6 +7,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from .models import Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass
+from .forms import StudentForm
+
 
 User = get_user_model()
 
@@ -511,14 +513,15 @@ class RoleBasedAuthorizationTests(TestCase):
             self.assertIn('/login/', res.url)
 
     def test_teacher_role_permissions(self):
-        """Teacher can access dashboard and record payments, but cannot access revenue/reports/settings or delete payments."""
+        """Teacher without fee permission cannot record payments; teacher with fee permission can."""
         self.client.force_login(self.teacher_user)
 
-        # 1. Dashboard access and revenue masking
+        # 1. By default, teacher has can_collect_fees=False
         res_dash = self.client.get(reverse('dashboard'))
         self.assertEqual(res_dash.status_code, 200)
         self.assertContains(res_dash, 'Class Roster')
-        self.assertContains(res_dash, '+ Record Fee')
+        self.assertNotContains(res_dash, '+ Record Fee')
+        self.assertContains(res_dash, 'Review Only')
         # Total revenue card must NOT be in HTML for teachers
         self.assertNotContains(res_dash, "Today's Revenue")
         # Hidden nav links
@@ -526,61 +529,11 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertNotContains(res_dash, reverse('school_settings'))
         self.assertNotContains(res_dash, reverse('bus_list'))
 
-        # 2. Can access and submit payment create view
-        res_pay = self.client.get(reverse('payment_create'))
-        self.assertEqual(res_pay.status_code, 200)
+        # 2. Blocked from payment create view
+        res_pay = self.client.get(reverse('payment_create'), follow=True)
+        self.assertContains(res_pay, 'You are not authorized to collect or record fee payments')
 
-        # 3. Can record payment via quick API
-        quick_data = {
-            'student_id': self.student.id,
-            'fee_type': 'CANTEEN',
-            'amount': '10.00',
-            'canteen_amount': '10.00',
-            'payment_method': 'CASH',
-        }
-        res_api = self.client.post(
-            reverse('api_quick_payment'),
-            json.dumps(quick_data),
-            content_type='application/json'
-        )
-        self.assertEqual(res_api.status_code, 200)
-        self.assertTrue(res_api.json()['success'])
-
-        # 4. Denied from reports and settings
-        res_rep = self.client.get(reverse('reports'), follow=True)
-        self.assertContains(res_rep, 'Access denied')
-
-        res_set = self.client.get(reverse('school_settings'), follow=True)
-        self.assertContains(res_set, 'Principal administrator privileges required')
-
-        # 5. Denied from payment delete
-        payment = FeePayment.objects.first()
-        res_del = self.client.get(reverse('payment_delete', args=[payment.id]), follow=True)
-        self.assertContains(res_del, 'Access denied')
-
-    def test_bursar_role_permissions(self):
-        """Bursar can view revenue, reports, and payments, but cannot record payments or edit settings."""
-        self.client.force_login(self.bursar_user)
-
-        # 1. Access payments and reports
-        res_pay = self.client.get(reverse('payment_list'))
-        self.assertEqual(res_pay.status_code, 200)
-        self.assertContains(res_pay, 'Fee Payments Ledger')
-        # '+ Record Payment' must be hidden on payments page for Bursar
-        self.assertNotContains(res_pay, '+ Record Payment')
-
-        # 2. In navbar, '+ Record Fee' must be hidden for Bursar
-        self.assertNotContains(res_pay, '+ Record Fee')
-
-        # 3. Reports access granted
-        res_rep = self.client.get(reverse('reports'))
-        self.assertEqual(res_rep.status_code, 200)
-
-        # 4. Blocked from recording payment
-        res_create = self.client.get(reverse('payment_create'), follow=True)
-        self.assertContains(res_create, 'Bursar account is designated for revenue review')
-
-        # 5. Blocked from quick payment API
+        # 3. Blocked from quick payment API
         quick_data = {
             'student_id': self.student.id,
             'fee_type': 'CANTEEN',
@@ -596,7 +549,108 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertEqual(res_api.status_code, 403)
         self.assertFalse(res_api.json()['success'])
 
-        # 6. Blocked from settings
+        # 4. Now grant fee collection permission
+        teacher_profile = self.teacher_user.profile
+        teacher_profile.can_collect_fees = True
+        teacher_profile.save()
+
+        # Authorized teacher now sees + Record Fee and can record payments
+        res_dash_auth = self.client.get(reverse('dashboard'))
+        self.assertContains(res_dash_auth, '+ Record Fee')
+        self.assertContains(res_dash_auth, 'Pay')
+
+        res_pay_auth = self.client.get(reverse('payment_create'))
+        self.assertEqual(res_pay_auth.status_code, 200)
+
+        res_api_auth = self.client.post(
+            reverse('api_quick_payment'),
+            json.dumps(quick_data),
+            content_type='application/json'
+        )
+        self.assertEqual(res_api_auth.status_code, 200)
+        self.assertTrue(res_api_auth.json()['success'])
+
+        # 5. Denied from reports and settings
+        res_rep = self.client.get(reverse('reports'), follow=True)
+        self.assertContains(res_rep, 'Access denied')
+
+        res_set = self.client.get(reverse('school_settings'), follow=True)
+        self.assertContains(res_set, 'Principal administrator privileges required')
+
+        # 6. Denied from payment delete
+        payment = FeePayment.objects.first()
+        res_del = self.client.get(reverse('payment_delete', args=[payment.id]), follow=True)
+        self.assertContains(res_del, 'Access denied')
+
+    def test_bursar_role_permissions(self):
+        """Bursar has strict read-only financial access: redirected from attendance, cannot record/delete payments."""
+        self.client.force_login(self.bursar_user)
+
+        # 1. Attendance view is removed: visiting dashboard redirects to payment_list
+        res_dash = self.client.get(reverse('dashboard'))
+        self.assertEqual(res_dash.status_code, 302)
+        self.assertEqual(res_dash.url, reverse('payment_list'))
+
+        # 2. Blocked from attendance clock-in API
+        res_clock = self.client.post(
+            reverse('api_clock_in_toggle'),
+            json.dumps({'student_id': self.student.id, 'action': 'clock_in'}),
+            content_type='application/json'
+        )
+        self.assertEqual(res_clock.status_code, 403)
+        self.assertFalse(res_clock.json()['success'])
+
+        # 3. Blocked from attendance CSV export
+        res_att_csv = self.client.get(reverse('export_attendance_csv'), follow=True)
+        self.assertContains(res_att_csv, 'Principal administrator privileges required')
+
+        # 4. Access payments and reports
+        res_pay = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_pay.status_code, 200)
+        self.assertContains(res_pay, 'Fee Payments Ledger')
+        # '+ Record Payment' must be hidden on payments page for Bursar
+        self.assertNotContains(res_pay, '+ Record Payment')
+        # Navbar must NOT have Dashboard or Class Roster for Bursar
+        self.assertNotContains(res_pay, 'Class Roster')
+        self.assertNotContains(res_pay, '>Dashboard<')
+
+        # 5. Reports access granted (debtors CSV available)
+        res_rep = self.client.get(reverse('reports'))
+        self.assertEqual(res_rep.status_code, 200)
+        self.assertNotContains(res_rep, 'Attendance CSV')
+
+        # 6. Blocked from recording payment
+        res_create = self.client.get(reverse('payment_create'), follow=True)
+        self.assertContains(res_create, 'Bursar account is designated for revenue review')
+
+        # 7. Blocked from quick payment API
+        quick_data = {
+            'student_id': self.student.id,
+            'fee_type': 'CANTEEN',
+            'amount': '10.00',
+            'canteen_amount': '10.00',
+            'payment_method': 'CASH',
+        }
+        res_api = self.client.post(
+            reverse('api_quick_payment'),
+            json.dumps(quick_data),
+            content_type='application/json'
+        )
+        self.assertEqual(res_api.status_code, 403)
+        self.assertFalse(res_api.json()['success'])
+
+        # 8. Blocked from deleting payments (read-only enforcement)
+        payment = FeePayment.objects.create(
+            student=self.student,
+            fee_type='CANTEEN',
+            amount=Decimal('10.00'),
+            receipt_number='DEL-TEST-001',
+            recorded_by=self.admin_user
+        )
+        res_del = self.client.get(reverse('payment_delete', args=[payment.id]), follow=True)
+        self.assertContains(res_del, 'Principal administrator privileges required')
+
+        # 9. Blocked from school settings
         res_set = self.client.get(reverse('school_settings'), follow=True)
         self.assertContains(res_set, 'Principal administrator privileges required')
 
@@ -632,20 +686,85 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertEqual(res_form.status_code, 200)
         self.assertContains(res_form, 'Add New Teacher')
 
-    def test_non_principal_cannot_access_teacher_management(self):
-        """Teachers and Bursars cannot access teacher management."""
-        # Teacher attempt
+    def test_non_principal_cannot_manage_teachers_but_bursar_has_read_only(self):
+        """Teachers cannot access staff roster; Bursars can view staff roster in read-only mode."""
+        # 1. Teacher attempt is completely denied
         self.client.force_login(self.teacher_user)
         res_teacher = self.client.get(reverse('teacher_list'), follow=True)
-        self.assertContains(res_teacher, 'Principal administrator privileges required')
+        self.assertContains(res_teacher, 'Access denied')
 
         res_create = self.client.get(reverse('teacher_create'), follow=True)
         self.assertContains(res_create, 'Principal administrator privileges required')
 
-        # Bursar attempt
+        # 2. Bursar has read-only access to teacher_list
         self.client.force_login(self.bursar_user)
-        res_bursar = self.client.get(reverse('teacher_list'), follow=True)
-        self.assertContains(res_bursar, 'Principal administrator privileges required')
+        res_bursar = self.client.get(reverse('teacher_list'))
+        self.assertEqual(res_bursar.status_code, 200)
+        self.assertContains(res_bursar, 'Auditing Mode (Read-Only)')
+        self.assertContains(res_bursar, 'Fee Collectors')
+        # '+ Add Teacher' must NOT be visible to Bursar
+        self.assertNotContains(res_bursar, '+ Add Teacher')
+        # Edit and password reset links must NOT be visible to Bursar
+        self.assertNotContains(res_bursar, reverse('teacher_create'))
+        self.assertNotContains(res_bursar, reverse('teacher_update', args=[self.teacher_user.pk]))
+
+        # 3. Bursar cannot modify teachers
+        res_bursar_create = self.client.get(reverse('teacher_create'), follow=True)
+        self.assertContains(res_bursar_create, 'Principal administrator privileges required')
+
+        res_bursar_update = self.client.get(reverse('teacher_update', args=[self.teacher_user.pk]), follow=True)
+        self.assertContains(res_bursar_update, 'Principal administrator privileges required')
+
+        res_bursar_reset = self.client.get(reverse('teacher_password_reset', args=[self.teacher_user.pk]), follow=True)
+        self.assertContains(res_bursar_reset, 'Principal administrator privileges required')
+
+    def test_bursar_authorized_fee_collectors_visibility_and_ledger_filters(self):
+        """Bursar view of staff roster strictly excludes unauthorized teachers and displays daily remittance."""
+        # Authorize teacher to collect fees and assign class
+        teacher_profile = self.teacher_user.profile
+        teacher_profile.can_collect_fees = True
+        teacher_profile.assigned_class = 'Class 1A'
+        teacher_profile.save()
+
+        # Create an unauthorized teacher (attendance only)
+        unauth_teacher = User.objects.create_user('unauth_teacher_bob', 'bob@school.com', 'pass123')
+        unauth_profile = unauth_teacher.profile
+        unauth_profile.role = UserProfile.ROLE_TEACHER
+        unauth_profile.can_collect_fees = False
+        unauth_profile.save()
+
+        # Record a payment by the authorized teacher
+        payment = FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            receipt_number='REC-AUTH-001',
+            recorded_by=self.teacher_user
+        )
+
+        self.client.force_login(self.bursar_user)
+
+        # 1. Staff roster automatically shows only authorized fee collectors (default visit)
+        res_teachers = self.client.get(reverse('teacher_list'))
+        self.assertEqual(res_teachers.status_code, 200)
+        self.assertContains(res_teachers, self.teacher_user.username)
+        self.assertContains(res_teachers, 'Fee Collector')
+        self.assertContains(res_teachers, '50.00')  # Cash to remit today
+        # Unauthorized teacher MUST NOT be visible to Bursar
+        self.assertNotContains(res_teachers, 'unauth_teacher_bob')
+
+        # 2. Payments ledger displays authorized collectors overview with remittance
+        res_payments = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_payments.status_code, 200)
+        self.assertContains(res_payments, 'Authorized Fee Collection Teachers')
+        self.assertContains(res_payments, 'Received By')
+        self.assertContains(res_payments, self.teacher_user.username)
+        self.assertContains(res_payments, '50.00')
+
+        # 3. Filter payments by collector
+        res_filtered = self.client.get(reverse('payment_list') + f'?collector={self.teacher_user.id}')
+        self.assertEqual(res_filtered.status_code, 200)
+        self.assertContains(res_filtered, 'REC-AUTH-001')
 
     def test_principal_creates_teacher_account_successfully(self):
         """Principal creates a new teacher, verifying role, assigned class, and login."""
@@ -661,6 +780,7 @@ class RoleBasedAuthorizationTests(TestCase):
             'password': 'StrongPassword123!',
             'confirm_password': 'StrongPassword123!',
             'is_active': True,
+            'can_collect_fees': True,
         }
         res = self.client.post(reverse('teacher_create'), data, follow=True)
         self.assertEqual(res.status_code, 200)
@@ -673,6 +793,7 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertEqual(new_teacher.profile.role, UserProfile.ROLE_TEACHER)
         self.assertEqual(new_teacher.profile.assigned_class, 'Class 1A')
         self.assertEqual(new_teacher.profile.phone_number, '+233 24 555 1234')
+        self.assertTrue(new_teacher.profile.can_collect_fees)
 
         # Verify new teacher can sign in and defaults to their assigned class on dashboard
         self.client.logout()
@@ -688,8 +809,10 @@ class RoleBasedAuthorizationTests(TestCase):
             self.assertEqual(item['student'].student_class, 'Class 1A')
 
     def test_principal_updates_teacher_details(self):
-        """Principal edits an existing teacher's assigned class, name, and phone."""
+        """Principal edits an existing teacher's assigned class, name, phone, and fee permission."""
         self.client.force_login(self.admin_user)
+
+        self.assertFalse(self.teacher_user.profile.can_collect_fees)
 
         update_data = {
             'first_name': 'Grace',
@@ -698,6 +821,7 @@ class RoleBasedAuthorizationTests(TestCase):
             'phone_number': '+233 20 999 8888',
             'assigned_class': 'Class 2B',
             'is_active': True,
+            'can_collect_fees': True,
         }
         res = self.client.post(reverse('teacher_update', args=[self.teacher_user.pk]), update_data, follow=True)
         self.assertEqual(res.status_code, 200)
@@ -707,6 +831,7 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertEqual(self.teacher_user.first_name, 'Grace')
         self.assertEqual(self.teacher_user.profile.assigned_class, 'Class 2B')
         self.assertEqual(self.teacher_user.profile.phone_number, '+233 20 999 8888')
+        self.assertTrue(self.teacher_user.profile.can_collect_fees)
 
     def test_principal_resets_teacher_password(self):
         """Principal resets password for a teacher and teacher logs in with new password."""
@@ -749,6 +874,354 @@ class RoleBasedAuthorizationTests(TestCase):
         self.client.get(reverse('teacher_toggle_status', args=[self.teacher_user.pk]), follow=True)
         self.teacher_user.refresh_from_db()
         self.assertTrue(self.teacher_user.is_active)
+
+    def test_teacher_cannot_change_student_regular_bus_on_payment(self):
+        """Teachers recording a one-off bus fare cannot alter the student's enrolled regular bus route."""
+        # Create second bus route
+        bus_b = Bus.objects.create(name='Madina Bus', fee=Decimal('60.00'))
+
+        # Authorize teacher to record payments
+        self.teacher_user.profile.can_collect_fees = True
+        self.teacher_user.profile.save()
+
+        # Student initially enrolled in Tema Bus (self.bus)
+        self.assertEqual(self.student.bus, self.bus)
+
+        self.client.force_login(self.teacher_user)
+        post_data = {
+            'student_class': self.student.school_class.id,
+            'student': self.student.id,
+            'bus': bus_b.id,
+            'bus_amount': '60.00',
+            'canteen_amount': '0.00',
+            'payment_date': timezone.localdate().strftime('%Y-%m-%d'),
+            'is_one_off_bus': 'True',
+        }
+        res = self.client.post(reverse('payment_create'), data=post_data, follow=True)
+        self.assertEqual(res.status_code, 200)
+
+        # 1. Student regular bus remains untouched!
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus, self.bus, "Student regular bus must not be changed by teacher!")
+
+        # 2. Payment record captures the one-off bus route and temporary flag
+        payment = FeePayment.objects.filter(student=self.student, fee_type='BUS', amount=Decimal('60.00')).first()
+        self.assertIsNotNone(payment)
+        self.assertEqual(payment.bus, bus_b)
+        self.assertTrue(payment.is_temporary_bus)
+        self.assertEqual(payment.recorded_by, self.teacher_user)
+
+    def test_one_off_bus_payment_adjusts_bursar_target_dynamically(self):
+        """When a teacher collects a one-off bus trip from a guest student, that amount is added to their bursar target."""
+        bus_b = Bus.objects.create(name='Madina Bus', fee=Decimal('60.00'))
+
+        # Teacher A is assigned to Class 1A (has self.student with self.bus fee 50)
+        teacher_a = self.teacher_user
+        teacher_a.profile.can_collect_fees = True
+        teacher_a.profile.assigned_class = 'Class 1A'
+        teacher_a.profile.save()
+
+        # Teacher B is assigned to Class 2B
+        teacher_b = User.objects.create_user('teacher_b', 'b@school.com', 'pass123', first_name='Kofi', last_name='Mensah')
+        teacher_b.profile.role = UserProfile.ROLE_TEACHER
+        teacher_b.profile.can_collect_fees = True
+        teacher_b.profile.assigned_class = 'Class 2B'
+        teacher_b.profile.assigned_bus = bus_b
+        teacher_b.profile.save()
+
+        # Teacher B records a one-off bus payment for self.student on bus_b
+        FeePayment.objects.create(
+            student=self.student,
+            bus=bus_b,
+            is_temporary_bus=True,
+            fee_type='BUS',
+            amount=Decimal('60.00'),
+            receipt_number='REC-ONEOFF-01',
+            recorded_by=teacher_b
+        )
+
+        self.client.force_login(self.bursar_user)
+
+        # Bursar views staff roster:
+        res = self.client.get(reverse('teacher_list'))
+        self.assertEqual(res.status_code, 200)
+
+        # Teacher B appears with remittance (+60.00) and one-off bus addition
+        self.assertContains(res, 'teacher_b')
+        self.assertContains(res, '60.00')
+        self.assertContains(res, 'one-off bus')
+
+        # Bursar views payments ledger:
+        res_pay = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_pay.status_code, 200)
+        self.assertContains(res_pay, 'REC-ONEOFF-01')
+        self.assertContains(res_pay, 'One-Off Trip')
+
+
+class BusPaymentAnalyticsTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin_user = User.objects.create_superuser('analytics_admin', 'admin@school.com', 'pass123')
+        self.bursar_user = User.objects.create_user('analytics_bursar', 'bursar@school.com', 'pass123')
+        self.bursar_user.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar_user.profile.save()
+
+        self.teacher_user = User.objects.create_user('analytics_teacher', 'teacher@school.com', 'pass123')
+        self.teacher_user.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_user.profile.save()
+
+        self.bus = Bus.objects.create(name='Tema Express', fee=Decimal('40.00'), driver_name='Kweku Boateng', plate_number='GT 1234-22')
+
+        # 2 students in Class 1A, 1 student in Class 2B
+        self.s1_1a = Student.objects.create(first_name='Kwame', last_name='Nkrumah', student_class='Class 1A', bus=self.bus)
+        self.s2_1a = Student.objects.create(first_name='Akosua', last_name='Agyeman', student_class='Class 1A', bus=self.bus)
+        self.s3_2b = Student.objects.create(first_name='Yaw', last_name='Manu', student_class='Class 2B', bus=self.bus)
+
+    def test_bus_analytics_permissions(self):
+        """Only users with financial authority (Principal, Bursar) can view bus payment analytics."""
+        url = reverse('bus_analytics', args=[self.bus.pk])
+
+        # Unauthenticated redirects to login
+        res_anon = self.client.get(url)
+        self.assertEqual(res_anon.status_code, 302)
+
+        # Teacher denied
+        self.client.force_login(self.teacher_user)
+        res_teacher = self.client.get(url, follow=True)
+        self.assertContains(res_teacher, 'Access denied: You do not have permission to access financial records')
+
+        # Bursar allowed
+        self.client.force_login(self.bursar_user)
+        res_bursar = self.client.get(url)
+        self.assertEqual(res_bursar.status_code, 200)
+
+        # Principal allowed
+        self.client.force_login(self.admin_user)
+        res_admin = self.client.get(url)
+        self.assertEqual(res_admin.status_code, 200)
+        self.assertContains(res_admin, 'Tema Express — Payment Analytics')
+
+    def test_class_by_class_breakdown_and_live_payment_updates(self):
+        """Analytics calculates paid vs unpaid correctly class by class, and updates immediately when payment occurs."""
+        self.client.force_login(self.admin_user)
+        url = reverse('bus_analytics', args=[self.bus.pk])
+
+        # Initially, 0 paid, 3 unpaid
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        summary = res.context['summary']
+        self.assertEqual(summary['total_riders'], 3)
+        self.assertEqual(summary['paid_count'], 0)
+        self.assertEqual(summary['unpaid_count'], 3)
+        self.assertEqual(summary['total_expected'], Decimal('120.00'))
+        self.assertEqual(summary['total_collected'], Decimal('0.00'))
+
+        class_breakdown = res.context['class_breakdown']
+        self.assertEqual(len(class_breakdown), 2)
+        c1a = next(c for c in class_breakdown if c['class_name'] == 'Class 1A')
+        c2b = next(c for c in class_breakdown if c['class_name'] == 'Class 2B')
+
+        self.assertEqual(c1a['riders_count'], 2)
+        self.assertEqual(c1a['paid_count'], 0)
+        self.assertEqual(c1a['unpaid_count'], 2)
+
+        self.assertEqual(c2b['riders_count'], 1)
+        self.assertEqual(c2b['paid_count'], 0)
+        self.assertEqual(c2b['unpaid_count'], 1)
+
+        # Now record payment for Kwame in Class 1A
+        today = timezone.localdate()
+        FeePayment.objects.create(
+            student=self.s1_1a,
+            fee_type='BUS',
+            amount=Decimal('40.00'),
+            payment_date=today,
+            period='Term 1 - 2026',
+            recorded_by=self.admin_user
+        )
+
+        # Re-fetch analytics: Kwame is now Paid, Class 1A has 1 Paid and 1 Unpaid
+        res_after = self.client.get(url)
+        summary_after = res_after.context['summary']
+        self.assertEqual(summary_after['paid_count'], 1)
+        self.assertEqual(summary_after['unpaid_count'], 2)
+        self.assertEqual(summary_after['total_collected'], Decimal('40.00'))
+        self.assertEqual(summary_after['total_outstanding'], Decimal('80.00'))
+
+        class_breakdown_after = res_after.context['class_breakdown']
+        c1a_after = next(c for c in class_breakdown_after if c['class_name'] == 'Class 1A')
+        self.assertEqual(c1a_after['paid_count'], 1)
+        self.assertEqual(c1a_after['unpaid_count'], 1)
+        self.assertEqual(c1a_after['compliance_pct'], 50.0)
+
+        # Check student details in Class 1A
+        kwame = next(st for st in c1a_after['students'] if st['student'].id == self.s1_1a.id)
+        akosua = next(st for st in c1a_after['students'] if st['student'].id == self.s2_1a.id)
+        self.assertTrue(kwame['is_paid'])
+        self.assertEqual(kwame['balance'], Decimal('0.00'))
+        self.assertFalse(akosua['is_paid'])
+        self.assertEqual(akosua['balance'], Decimal('40.00'))
+
+    def test_bus_analytics_custom_date_filtering(self):
+        """Analytics respects custom date query parameter."""
+        self.client.force_login(self.admin_user)
+        yesterday = timezone.localdate() - timezone.timedelta(days=1)
+
+        # Payment made yesterday
+        FeePayment.objects.create(
+            student=self.s3_2b,
+            fee_type='BUS',
+            amount=Decimal('40.00'),
+            payment_date=yesterday,
+            period='Term 1 - 2026',
+            recorded_by=self.admin_user
+        )
+
+        url = reverse('bus_analytics', args=[self.bus.pk])
+        # Query yesterday's date
+        res_yesterday = self.client.get(f"{url}?date={yesterday.strftime('%Y-%m-%d')}")
+        self.assertEqual(res_yesterday.status_code, 200)
+        self.assertEqual(res_yesterday.context['target_date'], yesterday.strftime('%Y-%m-%d'))
+        self.assertEqual(res_yesterday.context['summary']['paid_count'], 1)
+
+    def test_bus_analytics_unpaid_filter_and_class_dropdown_elements(self):
+        """Analytics provides all_unpaid_students context and renders interactive dropdown/filter controls."""
+        self.client.force_login(self.admin_user)
+        url = reverse('bus_analytics', args=[self.bus.pk])
+
+        # Initially, 3 riders are all unpaid
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        all_unpaid = res.context['all_unpaid_students']
+        self.assertEqual(len(all_unpaid), 3)
+
+        # Check DOM elements
+        self.assertContains(res, 'id="classFilterSelect"')
+        self.assertContains(res, 'value="__unpaid_all__"')
+        self.assertContains(res, 'id="pill-filter-unpaid"')
+        self.assertContains(res, 'id="unpaid-stat-card"')
+        self.assertContains(res, 'id="unified-unpaid-section"')
+        self.assertContains(res, 'data-status="unpaid"')
+
+        # Pay for Kwame
+        FeePayment.objects.create(
+            student=self.s1_1a,
+            fee_type='BUS',
+            amount=Decimal('40.00'),
+            payment_date=timezone.localdate(),
+            period='Term 1 - 2026',
+            recorded_by=self.admin_user
+        )
+
+        # Refetch: all_unpaid_students now has 2 students
+        res2 = self.client.get(url)
+        all_unpaid2 = res2.context['all_unpaid_students']
+        self.assertEqual(len(all_unpaid2), 2)
+        unpaid_ids = [item['student'].id for item in all_unpaid2]
+        self.assertNotIn(self.s1_1a.id, unpaid_ids)
+        self.assertIn(self.s2_1a.id, unpaid_ids)
+        self.assertIn(self.s3_2b.id, unpaid_ids)
+
+
+class StudentLunchProgramEnrollmentTests(TestCase):
+    """Tests for automatic lunch program enrollment and 1-click toggle functionality."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.admin_user = User.objects.create_superuser(
+            username='admin_lunch',
+            email='admin_lunch@example.com',
+            password='password123'
+        )
+        self.admin_user.profile.role = UserProfile.ROLE_ADMIN
+        self.admin_user.profile.save()
+
+        self.teacher_user = User.objects.create_user(
+            username='teacher_lunch',
+            email='teacher_lunch@example.com',
+            password='password123'
+        )
+        self.teacher_user.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_user.profile.save()
+
+        self.student = Student.objects.create(
+            first_name='Kofi',
+            last_name='Boateng',
+            student_class='Class 1A',
+        )
+
+    def test_default_lunch_enrollment(self):
+        """Newly created students must automatically have lunch included by default."""
+        self.assertTrue(self.student.canteen_enrolled)
+        form = StudentForm()
+        self.assertTrue(form.fields['canteen_enrolled'].initial)
+
+    def test_toggle_student_lunch_permissions(self):
+        """Only Principal/Admin can toggle student lunch enrollment."""
+        url = reverse('student_toggle_lunch', args=[self.student.pk])
+
+        # Anonymous user redirects to login
+        res_anon = self.client.post(url)
+        self.assertEqual(res_anon.status_code, 302)
+
+        # Teacher is blocked
+        self.client.force_login(self.teacher_user)
+        res_teacher = self.client.post(url, follow=True)
+        self.assertContains(res_teacher, 'Principal administrator privileges required')
+
+        # Principal is allowed
+        self.client.force_login(self.admin_user)
+        res_admin = self.client.post(url)
+        self.assertEqual(res_admin.status_code, 302)
+
+    def test_toggle_student_lunch_ajax_and_state_inversion(self):
+        """1-Click toggle inverts lunch enrollment state and returns JSON for AJAX."""
+        self.client.force_login(self.admin_user)
+        url = reverse('student_toggle_lunch', args=[self.student.pk])
+
+        # Initially True
+        self.assertTrue(self.student.canteen_enrolled)
+
+        # Toggle OFF via AJAX
+        res = self.client.post(
+            url,
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            content_type='application/json'
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertFalse(data['canteen_enrolled'])
+        self.assertIn('No Lunch', data['status_text'])
+
+        self.student.refresh_from_db()
+        self.assertFalse(self.student.canteen_enrolled)
+
+        # Toggle back ON via AJAX
+        res2 = self.client.post(
+            url,
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            content_type='application/json'
+        )
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.json()
+        self.assertTrue(data2['success'])
+        self.assertTrue(data2['canteen_enrolled'])
+        self.assertIn('Lunch Included', data2['status_text'])
+
+        self.student.refresh_from_db()
+        self.assertTrue(self.student.canteen_enrolled)
+
+    def test_students_list_renders_toggle_button(self):
+        """Students directory displays interactive 1-click lunch toggle pill."""
+        self.client.force_login(self.admin_user)
+        res = self.client.get(reverse('student_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'lunch-toggle-pill')
+        self.assertContains(res, '🍽️ Lunch Included')
+
+
+
 
 
 

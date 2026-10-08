@@ -16,6 +16,7 @@ urlpatterns = [
     # Bus Management
     path('buses/', views.bus_list_view, name='bus_list'),
     path('buses/add/', views.bus_create_view, name='bus_create'),
+    path('buses/<int:pk>/analytics/', views.bus_analytics_view, name='bus_analytics'),
     path('buses/<int:pk>/edit/', views.bus_update_view, name='bus_update'),
     path('buses/<int:pk>/delete/', views.bus_delete_view, name='bus_delete'),
 
@@ -25,6 +26,7 @@ urlpatterns = [
     path('students/import/', views.student_import_view, name='student_import'),
     path('students/template/', views.student_template_download, name='student_template_download'),
     path('students/<int:pk>/edit/', views.student_update_view, name='student_update'),
+    path('students/<int:pk>/toggle-lunch/', views.toggle_student_lunch_view, name='student_toggle_lunch'),
     path('students/<int:pk>/delete/', views.student_delete_view, name='student_delete'),
 
     # Payments Ledger & Printable Receipts

@@ -5,13 +5,24 @@
 {% block content %}
 <div class="page-header">
     <div class="page-title-group">
+        {% if is_accountant_view %}
+        <h2>Authorized Fee Collection Teachers</h2>
+        <p>Daily cash remittances and classroom fee collection audit</p>
+        {% else %}
         <h2>Teachers & Staff Management</h2>
         <p>Manage teacher accounts, classroom assignments, and portal access credentials</p>
+        {% endif %}
     </div>
     <div class="header-actions">
+        {% if user.profile.is_principal %}
         <a href="{% url 'teacher_create' %}" class="btn-primary">
             + Add Teacher
         </a>
+        {% else %}
+        <span class="badge" style="background: hsla(var(--primary-hsl), 0.12); color: var(--primary); font-weight: 600; padding: 0.35rem 0.75rem; font-size: 0.8rem; border-radius: 999px;">
+            👁️ Fee Remittance Auditing Mode (Read-Only)
+        </span>
+        {% endif %}
     </div>
 </div>
 
@@ -68,6 +79,49 @@
 {% endif %}
 
 <!-- Stats Grid -->
+{% if is_accountant_view %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Authorized Fee Collectors</span>
+        </div>
+        <div class="stat-value" style="color: var(--primary);">{{ authorized_collectors_count }}</div>
+        <div class="stat-footer">
+            <span>Staff authorized to receive fees</span>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-left: 3px solid var(--success);">
+        <div class="stat-header">
+            <span class="stat-title">Today's Cash to Remit</span>
+        </div>
+        <div class="stat-value" style="color: var(--success-text);">{{ CURRENCY_SYMBOL }}{{ total_remittance_today|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>Collected cash to hand to accountant</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Assigned Class Targets</span>
+        </div>
+        <div class="stat-value">{{ CURRENCY_SYMBOL }}{{ total_class_expected|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>Daily expected fees from their classes</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Classrooms Assigned</span>
+        </div>
+        <div class="stat-value">{{ assigned_classes_count }}</div>
+        <div class="stat-footer">
+            <span>Classes with dedicated collectors</span>
+        </div>
+    </div>
+</div>
+{% else %}
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-header">
@@ -76,6 +130,16 @@
         <div class="stat-value">{{ total_teachers }}</div>
         <div class="stat-footer">
             <span>Enrolled instructional staff</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Fee Collectors</span>
+        </div>
+        <div class="stat-value" style="color: #0284c7;">{{ authorized_collectors_count }}</div>
+        <div class="stat-footer">
+            <span>Authorized to collect fees</span>
         </div>
     </div>
 
@@ -99,6 +163,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <!-- Filter Toolbar -->
 <form method="GET" action="{% url 'teacher_list' %}" class="control-bar">
@@ -112,13 +177,21 @@
     </div>
 
     <div class="filter-group">
+        {% if not is_accountant_view %}
         <select name="status" class="filter-select" onchange="this.form.submit()">
             <option value="">All Statuses</option>
             <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active Only</option>
             <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive / Deactivated</option>
         </select>
 
-        {% if search or status_filter %}
+        <select name="fee_access" class="filter-select" onchange="this.form.submit()">
+            <option value="">All Fee Permissions</option>
+            <option value="authorized" {% if fee_access == 'authorized' %}selected{% endif %}>💰 Authorized Collectors Only</option>
+            <option value="attendance_only" {% if fee_access == 'attendance_only' %}selected{% endif %}>Attendance Only</option>
+        </select>
+        {% endif %}
+
+        {% if search or status_filter or fee_access %}
             <a href="{% url 'teacher_list' %}" class="btn-reset">Clear</a>
         {% endif %}
     </div>
@@ -133,10 +206,18 @@
                     <th>Teacher Name</th>
                     <th>Username</th>
                     <th>Assigned Class</th>
+                    {% if is_accountant_view %}
+                    <th style="text-align: right;">Cash to Remit Today</th>
+                    <th style="text-align: right;">Class Daily Target</th>
+                    <th style="text-align: right;">Class Unpaid Gap</th>
+                    <th style="text-align: right;">Action</th>
+                    {% else %}
+                    <th>Fee Access</th>
                     <th>Contact</th>
                     <th>Status</th>
                     <th>Last Active</th>
                     <th style="text-align: right;">Actions</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -165,8 +246,66 @@
                     <td>
                         {% if t.profile and t.profile.assigned_class %}
                             <span class="class-badge" style="font-weight: 600;">{{ t.profile.assigned_class }}</span>
-                        {% else %}
+                        {% endif %}
+                        {% if t.profile and t.profile.assigned_bus %}
+                            <span class="class-badge" style="font-weight: 600; background: hsla(var(--primary-hsl), 0.12); color: var(--primary);">🚌 {{ t.profile.assigned_bus.name }}</span>
+                        {% endif %}
+                        {% if not t.profile.assigned_class and not t.profile.assigned_bus %}
                             <span style="color: var(--text-subtle); font-size: 0.8rem;">All Classes (Floating)</span>
+                        {% endif %}
+                        {% if is_accountant_view and t.student_count %}
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem;">{{ t.student_count }} student{{ t.student_count|pluralize }}</div>
+                        {% endif %}
+                    </td>
+                    {% if is_accountant_view %}
+                    <td style="text-align: right;">
+                        <span style="font-size: 0.95rem; font-weight: 700; color: var(--success-text);">
+                            +{{ CURRENCY_SYMBOL }}{{ t.today_collected|floatformat:2 }}
+                        </span>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">
+                            {{ t.today_count }} receipt{{ t.today_count|pluralize }} today
+                        </div>
+                    </td>
+                    <td style="text-align: right;">
+                        <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-main);">
+                            {{ CURRENCY_SYMBOL }}{{ t.adjusted_target|default:t.class_expected|floatformat:2 }}
+                        </span>
+                        {% if t.one_off_additions > 0 %}
+                        <div style="font-size: 0.7rem; color: var(--primary); font-weight: 600; margin-top: 0.1rem;" title="Includes one-off bus trips collected today">
+                            +{{ CURRENCY_SYMBOL }}{{ t.one_off_additions|floatformat:2 }} one-off bus
+                        </div>
+                        {% else %}
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">Daily bus & lunch</div>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right;">
+                        {% if t.class_balance > 0 %}
+                            <span style="font-size: 0.88rem; font-weight: 700; color: var(--danger-text);">
+                                {{ CURRENCY_SYMBOL }}{{ t.class_balance|floatformat:2 }}
+                            </span>
+                            <div style="font-size: 0.72rem; color: var(--danger-text);">Uncollected</div>
+                        {% else %}
+                            <span style="font-size: 0.88rem; font-weight: 600; color: var(--success-text);">
+                                {{ CURRENCY_SYMBOL }}0.00
+                            </span>
+                            <div style="font-size: 0.72rem; color: var(--success-text);">Fully settled</div>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right; white-space: nowrap;">
+                        <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-table-action" style="color: var(--primary);" title="Filter payments recorded by {{ t.get_full_name|default:t.username }}">
+                            View Receipts
+                        </a>
+                    </td>
+                    {% else %}
+                    <td>
+                        {% if t.profile and t.profile.can_collect_fees %}
+                            <span class="badge" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); border: 1px solid hsla(var(--primary-hsl), 0.25); font-weight: 600;">
+                                💰 Fee Collector
+                            </span>
+                        {% else %}
+                            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">
+                                Attendance Only
+                            </span>
                         {% endif %}
                     </td>
                     <td>
@@ -189,6 +328,7 @@
                         </span>
                     </td>
                     <td style="text-align: right; white-space: nowrap;">
+                        {% if user.profile.is_principal %}
                         <a href="{% url 'teacher_update' t.pk %}" class="btn-table-action" title="Edit details">
                             Edit
                         </a>
@@ -198,16 +338,28 @@
                         <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="color: {% if t.is_active %}var(--danger-text){% else %}var(--success){% endif %};" onclick="return confirm('Are you sure you want to {% if t.is_active %}deactivate{% else %}activate{% endif %} {{ t.username }}?');">
                             {% if t.is_active %}Deactivate{% else %}Activate{% endif %}
                         </a>
+                        {% else %}
+                        <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Audit Only</span>
+                        {% endif %}
                     </td>
+                    {% endif %}
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                    <td colspan="{% if is_accountant_view %}7{% else %}8{% endif %}" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
                         <div style="font-size: 1rem; font-weight: 600; color: var(--text-main);">No teacher accounts found</div>
-                        <p style="margin-top: 0.25rem; font-size: 0.85rem;">Click "+ Add Teacher" to create the first teacher account.</p>
+                        <p style="margin-top: 0.25rem; font-size: 0.85rem;">
+                            {% if is_accountant_view %}
+                            No teachers have been authorized to collect fees yet.
+                            {% else %}
+                            Click "+ Add Teacher" to create the first teacher account.
+                            {% endif %}
+                        </p>
+                        {% if user.profile.is_principal %}
                         <a href="{% url 'teacher_create' %}" class="btn-primary" style="margin-top: 1rem; display: inline-flex;">
                             + Add Teacher
                         </a>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -232,19 +384,51 @@
                     <code style="font-size: 0.75rem; color: var(--text-muted);">@{{ t.username }}</code>
                 </div>
             </div>
-            <div>
-                {% if t.is_active %}
-                    <span class="badge badge-success" style="font-size: 0.7rem;">Active</span>
-                {% else %}
-                    <span class="badge badge-danger" style="font-size: 0.7rem;">Inactive</span>
+            <div style="display: flex; gap: 0.35rem; align-items: center;">
+                {% if t.profile and t.profile.can_collect_fees %}
+                    <span class="badge" style="font-size: 0.68rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); font-weight: 600;">💰 Fees</span>
+                {% endif %}
+                {% if not is_accountant_view %}
+                    {% if t.is_active %}
+                        <span class="badge badge-success" style="font-size: 0.7rem;">Active</span>
+                    {% else %}
+                        <span class="badge badge-danger" style="font-size: 0.7rem;">Inactive</span>
+                    {% endif %}
                 {% endif %}
             </div>
         </div>
 
+        {% if is_accountant_view %}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem; background: var(--surface-card); padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.72rem;">Cash to Remit:</span><br>
+                <strong style="color: var(--success-text); font-size: 0.95rem;">+{{ CURRENCY_SYMBOL }}{{ t.today_collected|floatformat:2 }}</strong>
+                <div style="font-size: 0.68rem; color: var(--text-muted);">{{ t.today_count }} receipt{{ t.today_count|pluralize }}</div>
+            </div>
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.72rem;">Expected Target:</span><br>
+                <strong style="font-size: 0.95rem;">{{ CURRENCY_SYMBOL }}{{ t.adjusted_target|default:t.class_expected|floatformat:2 }}</strong>
+                {% if t.one_off_additions > 0 %}
+                <div style="font-size: 0.68rem; color: var(--primary); font-weight: 600;">+{{ CURRENCY_SYMBOL }}{{ t.one_off_additions|floatformat:2 }} one-off bus</div>
+                {% endif %}
+                {% if t.class_balance > 0 %}
+                <div style="font-size: 0.68rem; color: var(--danger-text);">Due: {{ CURRENCY_SYMBOL }}{{ t.class_balance|floatformat:2 }}</div>
+                {% else %}
+                <div style="font-size: 0.68rem; color: var(--success-text);">Settled</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem; border-top: 1px solid var(--border-subtle); padding-top: 0.5rem;">
+            <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.8rem;">
+                📄 View Receipts in Ledger
+            </a>
+        </div>
+        {% else %}
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem;">
             <div>
-                <span style="color: var(--text-muted);">Assigned Class:</span><br>
-                <strong>{{ t.profile.assigned_class|default:"Floating" }}</strong>
+                <span style="color: var(--text-muted);">Assignment:</span><br>
+                <strong>{{ t.profile.assigned_class|default:"" }}{% if t.profile.assigned_bus %} • 🚌 {{ t.profile.assigned_bus.name }}{% elif not t.profile.assigned_class %}Floating{% endif %}</strong>
             </div>
             <div>
                 <span style="color: var(--text-muted);">Phone:</span><br>
@@ -252,6 +436,7 @@
             </div>
         </div>
 
+        {% if user.profile.is_principal %}
         <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem; border-top: 1px solid var(--border-subtle); padding-top: 0.65rem;">
             <a href="{% url 'teacher_update' t.pk %}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.78rem;">
                 Edit
@@ -263,11 +448,19 @@
                 {% if t.is_active %}Disable{% else %}Enable{% endif %}
             </a>
         </div>
+        {% endif %}
+        {% endif %}
     </div>
     {% empty %}
     <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
         <div style="font-weight: 600;">No teachers found</div>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Add a teacher account to get started.</p>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
+            {% if is_accountant_view %}
+            No teachers have fee collection authorization.
+            {% else %}
+            Add a teacher account to get started.
+            {% endif %}
+        </p>
     </div>
     {% endfor %}
 </div>

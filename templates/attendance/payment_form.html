@@ -240,6 +240,22 @@
                 </div>
             {% endif %}
 
+            {{ form.is_one_off_bus }}
+
+            {% if is_one_off_mode %}
+            <div style="background: hsla(var(--primary-hsl), 0.08); border: 1px solid var(--primary); padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 1.35rem;">🚌</span>
+                <div>
+                    <div style="font-weight: 700; color: var(--primary); font-size: 0.92rem;">
+                        One-Off / Guest Bus Trip Mode
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;">
+                        Recording single ride fare for <strong>{{ locked_bus.name|default:"selected route" }}</strong>. The student's permanent regular bus assignment is strictly protected and will not be changed.
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Payment Date & Daily Rate Indicators -->
             <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-subtle); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 1.15rem; gap: 1rem; flex-wrap: wrap;">
                 <div>

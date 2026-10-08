@@ -80,9 +80,12 @@ def payment_recording_required(view_func):
             if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
                 return JsonResponse({
                     'success': False,
-                    'error': 'Payment recording disabled: The Bursar role is restricted to revenue review and auditing.'
+                    'error': 'Payment recording disabled: Fee recording permission required.'
                 }, status=403)
-            messages.warning(request, "The Bursar account is designated for revenue review and auditing. Direct payment recording is handled by teachers.")
+            if profile and profile.role == profile.ROLE_TEACHER:
+                messages.warning(request, "You are not authorized to collect or record fee payments. Please contact the Principal if you require fee collection access.")
+            else:
+                messages.warning(request, "The Bursar account is designated for revenue review and auditing. Direct payment recording is handled by authorized teachers.")
             return redirect('payment_list')
             
         return view_func(request, *args, **kwargs)

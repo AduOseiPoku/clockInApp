@@ -1,0 +1,768 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ bus.name }} - Payment Analytics | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <div class="page-title-group">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+            <a href="{% url 'bus_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">&larr; Bus Fleet</a>
+            <span style="color: var(--border);">&bull;</span>
+            <span style="color: var(--primary); font-size: 0.85rem; font-weight: 600;">Daily Analytics</span>
+        </div>
+        <h2>🚌 {{ bus.name }} — Payment Analytics</h2>
+        <p>Daily fee collection audit, rider compliance, and class-by-class arrears breakdown</p>
+    </div>
+    <div class="header-actions">
+        <!-- Date Selector Filter Form -->
+        <form method="GET" action="" class="date-selector-pill">
+            <label for="date-picker" style="font-size:0.72rem; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">Date</label>
+            <input type="date" id="date-picker" name="date" value="{{ target_date }}" onchange="this.form.submit()">
+        </form>
+        {% if user.profile and user.profile.can_record_payments %}
+        <a href="{% url 'payment_create' %}?bus_id={{ bus.id }}&is_one_off=1" class="btn-primary" style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; font-weight: 600;">
+            <span>🚌</span> Record One-Off Rider
+        </a>
+        {% endif %}
+        <a href="{% url 'bus_update' bus.pk %}" class="btn-secondary" style="font-size: 0.82rem;">
+            Edit Route
+        </a>
+    </div>
+</div>
+
+<!-- Route Metadata Banner -->
+<div style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem;">
+    <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+        <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Daily Fare</span>
+            <div style="font-size: 1.15rem; font-weight: 700; color: var(--primary);">
+                {{ currency }}{{ bus.fee|floatformat:2 }}
+            </div>
+        </div>
+        <div style="width: 1px; height: 32px; background: var(--border);"></div>
+        <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Driver</span>
+            <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">
+                {{ bus.driver_name|default:"Unassigned" }}
+                {% if bus.driver_phone %}
+                    <a href="tel:{{ bus.driver_phone }}" style="font-size: 0.8rem; color: var(--primary); margin-left: 0.35rem; text-decoration: none;">📞 {{ bus.driver_phone }}</a>
+                {% endif %}
+            </div>
+        </div>
+        <div style="width: 1px; height: 32px; background: var(--border);"></div>
+        <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Plate Number</span>
+            <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">
+                {{ bus.plate_number|default:"—" }}
+            </div>
+        </div>
+    </div>
+    {% if bus.route_description %}
+    <div style="font-size: 0.8rem; color: var(--text-muted); max-width: 380px;">
+        <span style="font-weight: 600; color: var(--text-main);">Route:</span> {{ bus.route_description }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Daily Performance Summary Metrics -->
+<div class="stats-grid">
+    <!-- Total Registered Riders -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Registered Riders</span>
+        </div>
+        <div class="stat-value">{{ summary.total_riders }}</div>
+        <div class="stat-footer">
+            <span>Enrolled on {{ bus.name }}</span>
+        </div>
+    </div>
+
+    <!-- Paid Riders -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Paid Riders</span>
+        </div>
+        <div class="stat-value" style="color: var(--success);">
+            {{ summary.paid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
+        </div>
+        <div class="stat-footer">
+            <span class="stat-badge stat-badge-success">{{ summary.paid_pct }}% Paid</span>
+            <span>Fee settled for {{ target_date }}</span>
+        </div>
+    </div>
+
+    <!-- Unpaid Riders / Defaulters (Clickable Quick Filter) -->
+    <div class="stat-card" id="unpaid-stat-card" onclick="triggerUnpaidFilter()" style="cursor: pointer; position: relative; transition: transform 0.15s ease, box-shadow 0.15s ease;" title="Click to show unpaid students immediately">
+        <div class="stat-header">
+            <span class="stat-title">Unpaid Riders</span>
+            <span style="font-size: 0.7rem; background: hsla(var(--danger-hsl), 0.15); color: var(--danger-text); padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem;">
+                ⚡ Show Unpaid
+            </span>
+        </div>
+        <div class="stat-value" style="color: {% if summary.unpaid_count > 0 %}var(--danger){% else %}var(--text-muted){% endif %};">
+            {{ summary.unpaid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
+        </div>
+        <div class="stat-footer">
+            <span class="stat-badge {% if summary.unpaid_count > 0 %}stat-badge-danger{% else %}stat-badge-success{% endif %}">
+                {{ summary.unpaid_pct }}% Owing
+            </span>
+            <span>Arrears: {{ currency }}{{ summary.total_outstanding|floatformat:2 }}</span>
+        </div>
+    </div>
+
+    <!-- Daily Revenue Collection -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Collected Revenue</span>
+        </div>
+        <div class="stat-value" style="color: var(--primary);">
+            {{ currency }}{{ summary.total_collected|floatformat:2 }}
+        </div>
+        <div class="stat-footer">
+            <span>Expected: {{ currency }}{{ summary.total_expected|floatformat:2 }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Visual Payment Progress Compliance Bar -->
+<div style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.1rem 1.25rem; margin-bottom: 1.75rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
+        <span style="font-weight: 700; font-size: 0.9rem; color: var(--text-main);">Daily Payment Compliance</span>
+        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);">
+            <strong style="color: var(--success);">{{ summary.paid_count }} Paid</strong> &bull; 
+            <strong style="color: var(--danger);">{{ summary.unpaid_count }} Unpaid</strong> ({{ summary.total_riders }} Total)
+        </span>
+    </div>
+    
+    <!-- Progress Bar Track -->
+    <div style="height: 12px; background: hsla(var(--danger-hsl), 0.15); border-radius: 999px; overflow: hidden; display: flex;">
+        <div style="width: {{ summary.paid_pct }}%; background: var(--success); transition: width 0.3s ease;" title="{{ summary.paid_pct }}% Paid"></div>
+    </div>
+    
+    <div style="display: flex; justify-content: space-between; margin-top: 0.45rem; font-size: 0.75rem; color: var(--text-muted);">
+        <span>0%</span>
+        <span>Target: 100% Daily Compliance</span>
+        <span>100%</span>
+    </div>
+</div>
+
+<style>
+.filter-pill {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-card);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.filter-pill:hover {
+    border-color: var(--primary);
+    color: var(--text-main);
+}
+.filter-pill.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+}
+.filter-pill-danger:hover {
+    border-color: var(--danger);
+    color: var(--danger-text);
+}
+.filter-pill-danger.active {
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
+}
+.filter-pill-success:hover {
+    border-color: var(--success);
+    color: var(--success-text);
+}
+.filter-pill-success.active {
+    background: var(--success);
+    color: #fff;
+    border-color: var(--success);
+}
+#unpaid-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.18);
+}
+</style>
+
+<!-- Interactive Filter & Roster Controls -->
+<div id="roster-controls" style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem;">
+    <!-- Left: Class Dropdown Selector -->
+    <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+        <label for="classFilterSelect" style="font-size: 0.85rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem;">
+            <span>🏫</span> Select Class:
+        </label>
+        <select id="classFilterSelect" style="padding: 0.48rem 0.85rem; font-size: 0.88rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-subtle); color: var(--text-main); outline: none; min-width: 260px; cursor: pointer;">
+            <option value="all">📂 All Classes ({{ class_breakdown|length }} classrooms)</option>
+            <option value="__unpaid_all__" style="color: var(--danger-text); font-weight: 700;">
+                🚨 All Unpaid Riders Across Route ({{ summary.unpaid_count }})
+            </option>
+            {% if class_breakdown %}
+            <option disabled>────────── Classrooms ──────────</option>
+            {% for c in class_breakdown %}
+            <option value="{{ c.class_name }}">
+                {{ c.class_name }} ({{ c.riders_count }} rider{{ c.riders_count|pluralize }} &bull; {{ c.unpaid_count }} unpaid)
+            </option>
+            {% endfor %}
+            {% endif %}
+        </select>
+    </div>
+
+    <!-- Right: Quick Status Filter Pills -->
+    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+        <span style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Filter:</span>
+        <button type="button" id="pill-filter-all" class="filter-pill active" onclick="setStatusFilter('all')">
+            👥 All ({{ summary.total_riders }})
+        </button>
+        <button type="button" id="pill-filter-unpaid" class="filter-pill filter-pill-danger" onclick="setStatusFilter('unpaid')">
+            🚨 Show Unpaid Only ({{ summary.unpaid_count }})
+        </button>
+        <button type="button" id="pill-filter-paid" class="filter-pill filter-pill-success" onclick="setStatusFilter('paid')">
+            ✓ Paid ({{ summary.paid_count }})
+        </button>
+    </div>
+</div>
+
+<!-- Unified Route-Wide Unpaid Defaulters Section (Instant Quick View) -->
+<div id="unified-unpaid-section" style="display: none; margin-bottom: 2rem;">
+    <div class="table-card" style="border: 2px solid hsla(var(--danger-hsl), 0.35); overflow: hidden;">
+        <div style="padding: 1rem 1.25rem; background: hsla(var(--danger-hsl), 0.06); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <span style="font-size: 1.2rem;">🚨</span>
+                <div>
+                    <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--danger-text); margin: 0;">
+                        Unpaid Bus Riders — Route Defaulters Roster
+                    </h3>
+                    <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">
+                        Showing all {{ summary.unpaid_count }} registered riders on {{ bus.name }} with unsettled bus fare for {{ target_date }}
+                    </p>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <span class="badge badge-danger" style="font-size: 0.8rem; padding: 0.25rem 0.7rem;">
+                    Total Arrears: {{ currency }}{{ summary.total_outstanding|floatformat:2 }}
+                </span>
+                <button type="button" onclick="resetFilters()" class="btn-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.65rem;">
+                    Show All Classes
+                </button>
+            </div>
+        </div>
+
+        {% if all_unpaid_students %}
+        <!-- Desktop Table for Unified Unpaid -->
+        <div class="table-responsive desktop-only">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Student Name</th>
+                        <th>Classroom</th>
+                        <th>Status</th>
+                        <th>Fare Balance</th>
+                        <th>Parent / Guardian Phone</th>
+                        <th style="text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in all_unpaid_students %}
+                    <tr>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                                    {{ item.student.initials }}
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600; color: var(--text-main);">
+                                        {{ item.student.full_name }}
+                                    </div>
+                                    <div style="font-size: 0.75rem; color: var(--text-muted);">
+                                        ID #{{ item.student.id }}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="class-badge" style="font-size: 0.8rem; font-weight: 600;">
+                                {{ item.class_name }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="fee-badge fee-badge-unpaid">
+                                ⚠ Unpaid
+                            </span>
+                        </td>
+                        <td>
+                            <span style="font-weight: 700; color: var(--danger-text);">
+                                Owes {{ currency }}{{ item.balance|floatformat:2 }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if item.parent_phone %}
+                                <a href="tel:{{ item.parent_phone }}" class="phone-link" style="color: var(--text-main); font-size: 0.82rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                                    <span>📞</span> {{ item.parent_phone }}
+                                </a>
+                            {% else %}
+                                <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if user.profile.can_record_payments %}
+                                <a href="{% url 'payment_create' %}?student_id={{ item.student.id }}&fee_type=BUS" class="btn-table-action" style="color: var(--primary);">
+                                    Record Payment
+                                </a>
+                            {% else %}
+                                <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Mobile Cards for Unified Unpaid -->
+        <div class="mobile-only student-cards-list" style="padding: 0.75rem;">
+            {% for item in all_unpaid_students %}
+            <div class="student-card-item" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
+                            {{ item.student.initials }}
+                        </div>
+                        <div>
+                            <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-main);">
+                                {{ item.student.full_name }}
+                            </div>
+                            <span class="class-badge" style="font-size: 0.7rem; padding: 0.1rem 0.4rem;">
+                                {{ item.class_name }}
+                            </span>
+                        </div>
+                    </div>
+                    <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">
+                        Owes {{ currency }}{{ item.balance|floatformat:2 }}
+                    </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-top: 0.35rem;">
+                    <div>
+                        {% if item.parent_phone %}
+                            <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
+                        {% endif %}
+                    </div>
+                    {% if user.profile.can_record_payments %}
+                        <a href="{% url 'payment_create' %}?student_id={{ item.student.id }}&fee_type=BUS" style="color: var(--primary); font-weight: 600; text-decoration: none;">
+                            Record &rarr;
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+            <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎉</div>
+            <div style="font-weight: 700; font-size: 1rem; color: var(--success-text);">All Registered Riders Have Paid!</div>
+            <p style="font-size: 0.85rem; margin-top: 0.25rem;">There are no outstanding bus fares on this route for {{ target_date }}.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if guest_riders %}
+<!-- Guest / One-Off Riders Table Section -->
+<div class="table-card" style="margin-bottom: 2rem; border: 1px solid hsla(var(--primary-hsl), 0.35); overflow: hidden;">
+    <div style="padding: 0.85rem 1.25rem; background: hsla(var(--primary-hsl), 0.08); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.15rem;">🚌</span>
+            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--primary);">
+                Guest / One-Off Bus Riders Today ({{ guest_riders_count }})
+            </h4>
+        </div>
+        <span class="badge" style="background: hsla(var(--primary-hsl), 0.15); color: var(--primary); font-size: 0.72rem; font-weight: 600;">
+            One-Off Trips Recorded
+        </span>
+    </div>
+    <div class="table-responsive">
+        <table class="table" style="margin: 0;">
+            <thead>
+                <tr>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Regular Assignment</th>
+                    <th style="text-align: right;">Fare Paid</th>
+                    <th style="text-align: right;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in guest_riders %}
+                <tr>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="student-avatar" style="width: 26px; height: 26px; font-size: 0.68rem;">
+                                {{ item.student.initials }}
+                            </div>
+                            <span style="font-weight: 600;">{{ item.student.full_name }}</span>
+                        </div>
+                    </td>
+                    <td><span class="class-badge">{{ item.student.student_class }}</span></td>
+                    <td style="color: var(--text-muted); font-size: 0.82rem;">Regular: {{ item.regular_bus_name }}</td>
+                    <td style="text-align: right; font-weight: 700; color: var(--success-text);">
+                        +{{ currency }}{{ item.amount_paid|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right;">
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">Paid (One-Off)</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Class-By-Class Breakdown Section -->
+<div id="class-breakdown-section" style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem;">
+        <div>
+            <h3 id="class-section-title" style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.2rem;">
+                Class-by-Class Breakdown
+            </h3>
+            <p id="class-section-subtitle" style="font-size: 0.82rem; color: var(--text-muted);">
+                Payment compliance and arrears for each classroom with registered riders on {{ bus.name }}
+            </p>
+        </div>
+        <span id="class-section-counter" style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);">
+            {{ class_breakdown|length }} Class{{ class_breakdown|length|pluralize:"room,rooms" }}
+        </span>
+    </div>
+
+    <!-- Empty State for Filters -->
+    <div id="no-filter-results-notice" style="display: none; text-align: center; padding: 2.5rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-muted); margin-bottom: 1.5rem;">
+        <div style="font-size: 1.8rem; margin-bottom: 0.35rem;">🎉</div>
+        <div style="font-weight: 700; font-size: 1rem; color: var(--success-text); margin-bottom: 0.25rem;">
+            No Students Match Filter
+        </div>
+        <p style="font-size: 0.84rem;">All students in the selected view have cleared their bus fare for {{ target_date }}.</p>
+        <button type="button" onclick="resetFilters()" class="btn-secondary" style="margin-top: 0.75rem; font-size: 0.82rem;">
+            Reset Filter to Show All
+        </button>
+    </div>
+
+    {% for c in class_breakdown %}
+    <div class="table-card class-card-container" data-class="{{ c.class_name }}" data-unpaid-count="{{ c.unpaid_count }}" style="margin-bottom: 1.5rem; overflow: hidden;">
+        <!-- Class Card Header -->
+        <div style="padding: 1rem 1.25rem; background: var(--surface-subtle); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span class="class-badge" style="font-size: 0.88rem; padding: 0.25rem 0.65rem; font-weight: 700;">
+                    {{ c.class_name }}
+                </span>
+                <span style="font-size: 0.84rem; color: var(--text-muted);">
+                    <strong>{{ c.riders_count }}</strong> rider{{ c.riders_count|pluralize }}
+                </span>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap;">
+                <!-- Paid Pill -->
+                <span class="badge badge-success" style="font-size: 0.75rem; padding: 0.2rem 0.55rem;">
+                    ✓ {{ c.paid_count }} Paid ({{ c.compliance_pct }}%)
+                </span>
+                
+                <!-- Unpaid Pill -->
+                {% if c.unpaid_count > 0 %}
+                <span class="badge badge-danger" style="font-size: 0.75rem; padding: 0.2rem 0.55rem;">
+                    ⚠ {{ c.unpaid_count }} Owing ({{ currency }}{{ c.outstanding_amount|floatformat:2 }})
+                </span>
+                {% else %}
+                <span class="badge badge-success" style="font-size: 0.75rem; padding: 0.2rem 0.55rem;">
+                    ✓ All Cleared
+                </span>
+                {% endif %}
+
+                <!-- Financial ratio -->
+                <span style="font-size: 0.8rem; color: var(--text-muted);">
+                    {{ currency }}{{ c.collected_amount|floatformat:2 }} / {{ currency }}{{ c.expected_amount|floatformat:2 }}
+                </span>
+            </div>
+        </div>
+
+        <!-- Student Roster Table for this Class (Desktop View) -->
+        <div class="table-responsive desktop-only">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Student Name</th>
+                        <th>Payment Status</th>
+                        <th>Amount Paid</th>
+                        <th>Balance / Arrears</th>
+                        <th>Parent / Guardian Phone</th>
+                        <th style="text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in c.students %}
+                    <tr class="student-row" data-status="{% if item.is_paid %}paid{% else %}unpaid{% endif %}">
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">
+                                    {{ item.student.initials }}
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600; color: var(--text-main);">
+                                        {{ item.student.full_name }}
+                                    </div>
+                                    <div style="font-size: 0.75rem; color: var(--text-muted);">
+                                        ID #{{ item.student.id }}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            {% if item.is_paid %}
+                                <span class="fee-badge fee-badge-paid">
+                                    ✓ Paid
+                                </span>
+                            {% else %}
+                                <span class="fee-badge fee-badge-unpaid">
+                                    ⚠ Unpaid
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <strong style="color: {% if item.is_paid %}var(--success-text){% else %}var(--text-muted){% endif %};">
+                                {{ currency }}{{ item.amount_paid|floatformat:2 }}
+                            </strong>
+                        </td>
+                        <td>
+                            {% if item.balance > 0 %}
+                                <span style="font-weight: 700; color: var(--danger-text);">
+                                    Owes {{ currency }}{{ item.balance|floatformat:2 }}
+                                </span>
+                            {% else %}
+                                <span style="color: var(--success); font-weight: 500;">
+                                    Cleared ({{ currency }}0.00)
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.parent_phone %}
+                                <a href="tel:{{ item.parent_phone }}" class="phone-link" style="color: var(--text-main); font-size: 0.82rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                                    <span>📞</span> {{ item.parent_phone }}
+                                </a>
+                            {% else %}
+                                <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if not item.is_paid and user.profile.can_record_payments %}
+                                <a href="{% url 'payment_create' %}?student_id={{ item.student.id }}&fee_type=BUS" class="btn-table-action" style="color: var(--primary);">
+                                    Record Payment
+                                </a>
+                            {% else %}
+                                <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Student Roster Mobile Cards for this Class -->
+        <div class="mobile-only student-cards-list" style="padding: 0.75rem;">
+            {% for item in c.students %}
+            <div class="student-card-item student-row" data-status="{% if item.is_paid %}paid{% else %}unpaid{% endif %}" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
+                            {{ item.student.initials }}
+                        </div>
+                        <span style="font-weight: 600; font-size: 0.88rem; color: var(--text-main);">
+                            {{ item.student.full_name }}
+                        </span>
+                    </div>
+                    {% if item.is_paid %}
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">✓ Paid</span>
+                    {% else %}
+                        <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">Owes {{ currency }}{{ item.balance|floatformat:2 }}</span>
+                    {% endif %}
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted);">
+                    <span>Paid: {{ currency }}{{ item.amount_paid|floatformat:2 }}</span>
+                    {% if item.parent_phone %}
+                        <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% empty %}
+    <div style="text-align: center; padding: 3rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-muted);">
+        <div style="font-size: 1.1rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">No registered riders on this route</div>
+        <p style="font-size: 0.85rem;">Assign students to <strong>{{ bus.name }}</strong> in the student enrollment directory to view live analytics.</p>
+        <a href="{% url 'student_list' %}" class="btn-primary" style="margin-top: 1rem; display: inline-flex;">
+            View Students Roster
+        </a>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Reactive Client-Side Filtering JavaScript -->
+<script>
+let currentClass = 'all';
+let currentStatus = 'all';
+
+function setStatusFilter(status) {
+    currentStatus = status;
+    updatePillUI();
+    applyFilters();
+}
+
+function updatePillUI() {
+    ['all', 'unpaid', 'paid'].forEach(function(s) {
+        const pill = document.getElementById('pill-filter-' + s);
+        if (pill) {
+            if (s === currentStatus) {
+                pill.classList.add('active');
+            } else {
+                pill.classList.remove('active');
+            }
+        }
+    });
+}
+
+function triggerUnpaidFilter() {
+    // Stat card click triggers unpaid filter
+    setStatusFilter('unpaid');
+    const controls = document.getElementById('roster-controls');
+    if (controls) {
+        controls.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function resetFilters() {
+    currentStatus = 'all';
+    currentClass = 'all';
+    const select = document.getElementById('classFilterSelect');
+    if (select) select.value = 'all';
+    updatePillUI();
+    applyFilters();
+}
+
+function applyFilters() {
+    const unifiedSection = document.getElementById('unified-unpaid-section');
+    const classSection = document.getElementById('class-breakdown-section');
+    const classCards = document.querySelectorAll('.class-card-container');
+    const noResultsNotice = document.getElementById('no-filter-results-notice');
+    const titleEl = document.getElementById('class-section-title');
+    const subtitleEl = document.getElementById('class-section-subtitle');
+    const counterEl = document.getElementById('class-section-counter');
+
+    // 1. Unified Route Unpaid View selected in Dropdown
+    if (currentClass === '__unpaid_all__') {
+        if (unifiedSection) unifiedSection.style.display = 'block';
+        if (classSection) classSection.style.display = 'none';
+        return;
+    }
+
+    if (unifiedSection) unifiedSection.style.display = 'none';
+    if (classSection) classSection.style.display = 'block';
+
+    let visibleClassCount = 0;
+    let totalVisibleStudents = 0;
+
+    classCards.forEach(function(card) {
+        const cardClass = card.getAttribute('data-class');
+        const unpaidCount = parseInt(card.getAttribute('data-unpaid-count') || '0', 10);
+        const matchesClass = (currentClass === 'all' || cardClass === currentClass);
+
+        if (!matchesClass) {
+            card.style.display = 'none';
+            return;
+        }
+
+        // If filtering by unpaid and viewing all classes, hide completely cleared classes
+        if (currentStatus === 'unpaid' && currentClass === 'all' && unpaidCount === 0) {
+            card.style.display = 'none';
+            return;
+        }
+
+        // Filter individual student rows in this card
+        const studentRows = card.querySelectorAll('.student-row');
+        let visibleRowsInCard = 0;
+
+        studentRows.forEach(function(row) {
+            const status = row.getAttribute('data-status');
+            let showRow = true;
+            if (currentStatus === 'unpaid' && status !== 'unpaid') {
+                showRow = false;
+            } else if (currentStatus === 'paid' && status !== 'paid') {
+                showRow = false;
+            }
+
+            row.style.display = showRow ? '' : 'none';
+            if (showRow) {
+                visibleRowsInCard++;
+                totalVisibleStudents++;
+            }
+        });
+
+        // If a specific class is selected but no rows match the filter, still show the card with zero-rows or hide?
+        if (visibleRowsInCard === 0 && currentClass !== 'all') {
+            card.style.display = 'none';
+        } else {
+            card.style.display = '';
+            visibleClassCount++;
+        }
+    });
+
+    // Update section titles dynamically
+    if (titleEl) {
+        if (currentClass !== 'all') {
+            titleEl.textContent = currentClass + ' Roster';
+        } else if (currentStatus === 'unpaid') {
+            titleEl.textContent = 'Unpaid Riders by Classroom';
+        } else {
+            titleEl.textContent = 'Class-by-Class Breakdown';
+        }
+    }
+
+    if (counterEl) {
+        if (currentClass !== 'all') {
+            counterEl.textContent = '1 Classroom Selected';
+        } else {
+            counterEl.textContent = visibleClassCount + ' Classroom' + (visibleClassCount === 1 ? '' : 's');
+        }
+    }
+
+    if (noResultsNotice) {
+        noResultsNotice.style.display = (visibleClassCount === 0) ? 'block' : 'none';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const classSelect = document.getElementById('classFilterSelect');
+    if (classSelect) {
+        classSelect.addEventListener('change', function() {
+            currentClass = this.value;
+            applyFilters();
+        });
+    }
+
+    // Check URL parameters for ?filter=unpaid
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('filter') === 'unpaid' || window.location.hash === '#unpaid') {
+        setStatusFilter('unpaid');
+    }
+});
+</script>
+{% endblock %}
+

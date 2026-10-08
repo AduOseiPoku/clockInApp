@@ -104,14 +104,21 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if student.canteen_enrolled %}
-                                <span class="fee-badge fee-badge-paid">
-                                    Enrolled ({{ CURRENCY_SYMBOL }}{{ student.canteen_fee_required|floatformat:2 }})
-                                </span>
+                            {% if user.profile.is_principal %}
+                                <button type="button" 
+                                        class="lunch-toggle-pill {% if student.canteen_enrolled %}lunch-included{% else %}lunch-opted-out{% endif %}"
+                                        data-student-id="{{ student.id }}"
+                                        onclick="toggleStudentLunch(this)"
+                                        title="{% if student.canteen_enrolled %}Click to remove from lunch program{% else %}Click to include in lunch program{% endif %}">
+                                    <span class="status-indicator"></span>
+                                    <span class="lunch-text">{% if student.canteen_enrolled %}🍽️ Lunch Included{% else %}❌ No Lunch (Opted Out){% endif %}</span>
+                                </button>
                             {% else %}
-                                <span class="fee-badge fee-badge-none">
-                                    Opted Out
-                                </span>
+                                {% if student.canteen_enrolled %}
+                                    <span class="fee-badge fee-badge-paid">🍽️ Lunch Included</span>
+                                {% else %}
+                                    <span class="fee-badge fee-badge-none">❌ No Lunch</span>
+                                {% endif %}
                             {% endif %}
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
@@ -155,9 +162,11 @@
                         <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ student.student_class }}</span>
                     </div>
                 </div>
+                {% if user.profile and user.profile.can_record_payments %}
                 <a href="{% url 'payment_create' %}?student_id={{ student.id }}" class="btn-primary" style="padding:0.4rem 0.75rem; font-size:0.78rem; min-height:36px;">
                     + Pay
                 </a>
+                {% endif %}
             </div>
 
             <div class="student-card-fees">
@@ -170,11 +179,23 @@
                     {% endif %}
                 </div>
                 <div>
-                    <span style="font-weight:600; color:var(--text-muted);">Canteen:</span>
-                    {% if student.canteen_enrolled %}
-                        <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Enrolled ({{ CURRENCY_SYMBOL }}{{ student.canteen_fee_required|floatformat:2 }})</span>
+                    <span style="font-weight:600; color:var(--text-muted);">Lunch:</span>
+                    {% if user.profile.is_principal %}
+                        <button type="button" 
+                                class="lunch-toggle-pill {% if student.canteen_enrolled %}lunch-included{% else %}lunch-opted-out{% endif %}"
+                                data-student-id="{{ student.id }}"
+                                onclick="toggleStudentLunch(this)"
+                                style="margin-left: 0.35rem; font-size: 0.72rem; padding: 0.2rem 0.55rem;"
+                                title="{% if student.canteen_enrolled %}Click to remove from lunch program{% else %}Click to include in lunch program{% endif %}">
+                            <span class="status-indicator"></span>
+                            <span class="lunch-text">{% if student.canteen_enrolled %}🍽️ Lunch Included{% else %}❌ No Lunch{% endif %}</span>
+                        </button>
                     {% else %}
-                        <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">Opted Out</span>
+                        {% if student.canteen_enrolled %}
+                            <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">🍽️ Lunch Included</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">❌ No Lunch</span>
+                        {% endif %}
                     {% endif %}
                 </div>
             </div>
@@ -197,4 +218,134 @@
         </div>
     {% endfor %}
 </div>
+
+<!-- Hidden CSRF token for AJAX -->
+<form style="display:none;">{% csrf_token %}</form>
+
+<!-- Toast Notice Container -->
+<div id="toast-lunch-notice" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; background: var(--text-main); color: #fff; padding: 0.75rem 1.25rem; border-radius: var(--radius-md); box-shadow: 0 4px 16px rgba(0,0,0,0.25); display: none; font-size: 0.85rem; font-weight: 600; align-items: center; gap: 0.5rem; animation: slideUp 0.25s ease;">
+</div>
+
+<style>
+.lunch-toggle-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    line-height: 1.3;
+}
+.lunch-toggle-pill.lunch-included {
+    background: hsla(var(--success-hsl), 0.12);
+    color: var(--success-text);
+    border-color: hsla(var(--success-hsl), 0.3);
+}
+.lunch-toggle-pill.lunch-included:hover {
+    background: hsla(var(--danger-hsl), 0.12);
+    color: var(--danger-text);
+    border-color: hsla(var(--danger-hsl), 0.35);
+}
+.lunch-toggle-pill.lunch-opted-out {
+    background: var(--surface-subtle);
+    color: var(--text-muted);
+    border-color: var(--border);
+}
+.lunch-toggle-pill.lunch-opted-out:hover {
+    background: hsla(var(--success-hsl), 0.12);
+    color: var(--success-text);
+    border-color: hsla(var(--success-hsl), 0.35);
+}
+.lunch-toggle-pill .status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.lunch-toggle-pill.lunch-included .status-indicator {
+    background: var(--success);
+}
+.lunch-toggle-pill.lunch-opted-out .status-indicator {
+    background: var(--text-muted);
+}
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+</style>
+
+<script>
+function toggleStudentLunch(target, btnElement) {
+    let studentId = target;
+    if (target instanceof HTMLElement) {
+        btnElement = target;
+        studentId = btnElement.dataset.studentId;
+    }
+    if (!studentId || !btnElement) return;
+
+    btnElement.disabled = true;
+    btnElement.style.opacity = '0.6';
+
+    const csrfInput = document.querySelector('[name=csrfmiddlewaretoken]');
+    const csrfToken = csrfInput ? csrfInput.value : '';
+
+    fetch(`/students/${studentId}/toggle-lunch/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        btnElement.disabled = false;
+        btnElement.style.opacity = '1';
+
+        if (data.success) {
+            const allButtons = document.querySelectorAll('button[data-student-id="' + studentId + '"]');
+            allButtons.forEach(function(btn) {
+                const textSpan = btn.querySelector('.lunch-text');
+                if (data.canteen_enrolled) {
+                    btn.className = 'lunch-toggle-pill lunch-included';
+                    if (textSpan) textSpan.textContent = '🍽️ Lunch Included';
+                    btn.title = 'Click to remove from lunch program';
+                } else {
+                    btn.className = 'lunch-toggle-pill lunch-opted-out';
+                    if (textSpan) textSpan.textContent = '❌ No Lunch (Opted Out)';
+                    btn.title = 'Click to include in lunch program';
+                }
+            });
+
+            // Show toast message
+            showLunchToast(data.message);
+        } else {
+            alert(data.error || 'Failed to update lunch status.');
+        }
+    })
+    .catch(function(err) {
+        btnElement.disabled = false;
+        btnElement.style.opacity = '1';
+        console.error('Error toggling lunch:', err);
+        alert('An error occurred while updating lunch status.');
+    });
+}
+
+function showLunchToast(msg) {
+    const toast = document.getElementById('toast-lunch-notice');
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.style.display = 'flex';
+    clearTimeout(window.lunchToastTimer);
+    window.lunchToastTimer = setTimeout(function() {
+        toast.style.display = 'none';
+    }, 3200);
+}
+</script>
 {% endblock %}
+

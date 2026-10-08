@@ -357,6 +357,8 @@ class FeePayment(models.Model):
     ]
 
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='payments')
+    bus = models.ForeignKey('Bus', on_delete=models.SET_NULL, null=True, blank=True, related_name='payments', help_text="Specific bus route this fee payment was collected on")
+    is_temporary_bus = models.BooleanField(default=False, help_text="True if recorded for a one-off/guest bus ride different from student regular route")
     fee_type = models.CharField(max_length=20, choices=FEE_TYPES)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_date = models.DateField(default=timezone.localdate)
@@ -425,6 +427,11 @@ class UserProfile(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_TEACHER)
     phone_number = models.CharField(max_length=30, blank=True)
     assigned_class = models.CharField(max_length=50, blank=True, help_text="Specific class for class teacher (optional)")
+    assigned_bus = models.ForeignKey('Bus', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_teachers', help_text="Specific bus route for bus teacher/conductor (optional)")
+    can_collect_fees = models.BooleanField(
+        default=False,
+        help_text="Designates whether this teacher is authorized to record and collect fee payments."
+    )
 
     def __str__(self):
         return f"{self.user.username} ({self.get_role_display()})"
@@ -451,7 +458,11 @@ class UserProfile(models.Model):
 
     @property
     def can_record_payments(self):
-        return self.role in [self.ROLE_ADMIN, self.ROLE_TEACHER] or self.user.is_superuser
+        if self.is_school_admin:
+            return True
+        if self.role == self.ROLE_TEACHER:
+            return self.can_collect_fees
+        return False
 
     @property
     def can_manage_settings(self):
@@ -463,7 +474,7 @@ class UserProfile(models.Model):
 
     @property
     def can_delete_payments(self):
-        return self.role in [self.ROLE_ADMIN, self.ROLE_ACCOUNTANT] or self.user.is_superuser
+        return self.is_school_admin
 
 
 class NotificationLog(models.Model):

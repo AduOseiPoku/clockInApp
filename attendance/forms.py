@@ -38,6 +38,8 @@ class StudentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['bus'].empty_label = "-- No Bus (Walker / Private Drop-off) --"
         self.fields['bus'].queryset = Bus.objects.filter(is_active=True)
+        if 'instance' not in kwargs or not kwargs['instance'] or kwargs['instance'].pk is None:
+            self.fields['canteen_enrolled'].initial = True
 
 
 class FeePaymentForm(forms.Form):
@@ -79,6 +81,7 @@ class FeePaymentForm(forms.Form):
     )
 
     # Optional / hidden fields for automated defaults and backward compatibility
+    is_one_off_bus = forms.BooleanField(required=False, widget=forms.HiddenInput())
     fee_type = forms.CharField(required=False, widget=forms.HiddenInput())
     amount = forms.DecimalField(required=False, min_value=Decimal('0.00'), decimal_places=2, widget=forms.HiddenInput())
     period = forms.CharField(max_length=50, required=False, widget=forms.HiddenInput())
@@ -208,6 +211,13 @@ class TeacherCreationForm(forms.Form):
         widget=forms.Select(attrs={'class': 'form-select'}),
         help_text="Class this teacher is responsible for (clock-in roster will default to this class)"
     )
+    assigned_bus = forms.ModelChoiceField(
+        queryset=Bus.objects.filter(is_active=True).order_by('name'),
+        required=False,
+        empty_label="-- No Bus Assigned --",
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        help_text="Designated bus route if this teacher is in charge of a bus (optional)"
+    )
     password = forms.CharField(
         required=True,
         widget=forms.PasswordInput(attrs={'class': 'form-input', 'placeholder': 'Initial password', 'id': 'id_password'}),
@@ -221,6 +231,13 @@ class TeacherCreationForm(forms.Form):
         required=False,
         initial=True,
         widget=forms.CheckboxInput(attrs={'class': 'form-checkbox'})
+    )
+    can_collect_fees = forms.BooleanField(
+        required=False,
+        initial=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-checkbox', 'id': 'id_can_collect_fees'}),
+        label="Can Collect / Record Fees",
+        help_text="Authorize this teacher to collect bus and canteen payments from students."
     )
 
     def __init__(self, *args, **kwargs):
@@ -258,6 +275,8 @@ class TeacherCreationForm(forms.Form):
         is_active = self.cleaned_data.get('is_active', True)
         phone_number = self.cleaned_data.get('phone_number', '')
         assigned_class = self.cleaned_data.get('assigned_class', '')
+        assigned_bus = self.cleaned_data.get('assigned_bus')
+        can_collect_fees = self.cleaned_data.get('can_collect_fees', False)
 
         user = User.objects.create_user(
             username=username,
@@ -272,6 +291,8 @@ class TeacherCreationForm(forms.Form):
         profile.role = UserProfile.ROLE_TEACHER
         profile.phone_number = phone_number
         profile.assigned_class = assigned_class
+        profile.assigned_bus = assigned_bus
+        profile.can_collect_fees = can_collect_fees
         profile.save()
         return user
 
@@ -302,9 +323,22 @@ class TeacherUpdateForm(forms.Form):
         widget=forms.Select(attrs={'class': 'form-select'}),
         help_text="Class this teacher is responsible for"
     )
+    assigned_bus = forms.ModelChoiceField(
+        queryset=Bus.objects.filter(is_active=True).order_by('name'),
+        required=False,
+        empty_label="-- No Bus Assigned --",
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        help_text="Designated bus route if this teacher is in charge of a bus (optional)"
+    )
     is_active = forms.BooleanField(
         required=False,
         widget=forms.CheckboxInput(attrs={'class': 'form-checkbox'})
+    )
+    can_collect_fees = forms.BooleanField(
+        required=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-checkbox', 'id': 'id_can_collect_fees'}),
+        label="Can Collect / Record Fees",
+        help_text="Authorize this teacher to collect bus and canteen payments from students."
     )
 
     def __init__(self, *args, user_obj=None, **kwargs):
@@ -319,6 +353,9 @@ class TeacherUpdateForm(forms.Form):
             if sc:
                 class_choices.append((sc, sc))
         self.fields['assigned_class'].widget.choices = class_choices
+        if user_obj and hasattr(user_obj, 'profile'):
+            self.fields['can_collect_fees'].initial = user_obj.profile.can_collect_fees
+            self.fields['assigned_bus'].initial = user_obj.profile.assigned_bus
 
     def save(self):
         user = self.user_obj
@@ -331,6 +368,8 @@ class TeacherUpdateForm(forms.Form):
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.phone_number = self.cleaned_data.get('phone_number', '')
         profile.assigned_class = self.cleaned_data.get('assigned_class', '')
+        profile.assigned_bus = self.cleaned_data.get('assigned_bus')
+        profile.can_collect_fees = self.cleaned_data.get('can_collect_fees', False)
         profile.save()
         return user
 

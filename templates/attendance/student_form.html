@@ -49,17 +49,35 @@
             {% endif %}
         </div>
 
-        <div class="form-group" style="background: var(--surface-subtle); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-            <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.65rem; cursor: pointer;">
+        <div class="form-group" style="background: var(--surface-subtle); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
+                <span style="font-weight: 700; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+                    <span>🍽️</span> School Lunch Program
+                </span>
+                <span style="font-size: 0.72rem; background: hsla(var(--success-hsl), 0.15); color: var(--success-text); padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600;">
+                    Default: Included
+                </span>
+            </div>
+            <label style="display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0.85rem; cursor: pointer;">
                 {{ form.canteen_enrolled }}
-                <span style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Enroll in Canteen / School Lunch</span>
+                <div>
+                    <span style="font-weight: 600; font-size: 0.88rem; color: var(--text-main); display: block;">
+                        Lunch Included
+                    </span>
+                    <small class="form-hint" style="margin-top: 0.15rem; display: block;">
+                        Toggle OFF only if student brings food from home or opts out of school meals.
+                    </small>
+                </div>
             </label>
-            <div>
-                <label class="form-label" for="{{ form.custom_canteen_fee.id_for_label }}">Custom Daily Canteen Fee (Optional override)</label>
+            <div style="border-top: 1px dashed var(--border); padding-top: 0.75rem; margin-top: 0.5rem;">
+                <label class="form-label" for="{{ form.custom_canteen_fee.id_for_label }}" style="font-size: 0.8rem;">
+                    Custom Daily Canteen Fee (Optional override)
+                </label>
                 {{ form.custom_canteen_fee }}
-                <small class="form-hint">Leave blank for standard daily fee ({{ CURRENCY_SYMBOL }}{{ DEFAULT_CANTEEN_FEE }} / day).</small>
+                <small class="form-hint">Leave blank to use standard daily fee ({{ CURRENCY_SYMBOL }}{{ DEFAULT_CANTEEN_FEE }} / day).</small>
             </div>
         </div>
+
 
         <div class="form-group">
             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
