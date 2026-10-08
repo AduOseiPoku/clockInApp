@@ -7,7 +7,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from .models import Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass
-from .forms import StudentForm
+from .forms import StudentForm, TeacherCreationForm, TeacherUpdateForm
+from .views import get_collectors_financial_summary
 
 
 User = get_user_model()
@@ -1221,8 +1222,795 @@ class StudentLunchProgramEnrollmentTests(TestCase):
         self.assertContains(res, '🍽️ Lunch Included')
 
 
+class FeeTeacherArchitectureTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin = User.objects.create_superuser('admin_fee', 'admin_fee@test.com', 'pass123')
+        
+        # Fee teacher assigned to Bus A (no assigned classroom)
+        self.bus_a = Bus.objects.create(name='Route Alpha', fee=Decimal('15.00'))
+        self.fee_teacher = User.objects.create_user('fee_teacher_1', 'feeteacher@test.com', 'pass123')
+        self.fee_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.fee_teacher.profile.can_collect_fees = True
+        self.fee_teacher.profile.assigned_bus = self.bus_a
+        self.fee_teacher.profile.assigned_class = ''
+        self.fee_teacher.profile.save()
+
+        # Classroom teacher assigned to Class 1A (no bus)
+        self.class_teacher = User.objects.create_user('class_teacher_1', 'classteacher@test.com', 'pass123')
+        self.class_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.class_teacher.profile.can_collect_fees = True
+        self.class_teacher.profile.assigned_class = 'Class 1A'
+        self.class_teacher.profile.save()
+
+        # Student 1: Rides Bus A, in Class 1A, enrolled in canteen (10.00)
+        self.s1 = Student.objects.create(
+            first_name='Kweku',
+            last_name='Baah',
+            student_class='Class 1A',
+            bus=self.bus_a,
+            canteen_enrolled=True,
+            custom_canteen_fee=Decimal('10.00'),
+            is_active=True
+        )
+
+        # Student 2: Rides Bus A, in Class 2B, not enrolled in canteen
+        self.s2 = Student.objects.create(
+            first_name='Akosua',
+            last_name='Mansah',
+            student_class='Class 2B',
+            bus=self.bus_a,
+            canteen_enrolled=False,
+            is_active=True
+        )
+
+        # Student 3: Walker (no bus), in Class 1A, enrolled in canteen (custom 8.00)
+        self.s3_walker = Student.objects.create(
+            first_name='Yaw',
+            last_name='Osei',
+            student_class='Class 1A',
+            bus=None,
+            canteen_enrolled=True,
+            custom_canteen_fee=Decimal('8.00'),
+            is_active=True
+        )
+
+    def test_fee_teacher_target_combines_bus_and_canteen_without_classroom(self):
+        """Fee Teacher's target includes both bus and canteen fees for all students riding their bus."""
+        today = timezone.localdate()
+        summary = get_collectors_financial_summary([self.fee_teacher, self.class_teacher], today)
+        
+        ft_meta = summary[self.fee_teacher.id]
+        # Student 1: Bus 15 + Canteen 10 = 25
+        # Student 2: Bus 15 + Canteen 0 = 15
+        # Fee teacher total = 40.00
+        self.assertEqual(ft_meta['bus_expected'], Decimal('30.00'))
+        self.assertEqual(ft_meta['canteen_expected'], Decimal('10.00'))
+        self.assertEqual(ft_meta['baseline_target'], Decimal('40.00'))
+        self.assertEqual(ft_meta['student_count'], 2)
+
+        # Class teacher target should NOT double count Student 1's canteen fee!
+        # Only Walker Student 3 (Canteen 8.00) belongs to classroom teacher's morning target.
+        ct_meta = summary[self.class_teacher.id]
+        self.assertEqual(ct_meta['canteen_expected'], Decimal('8.00'))
+        self.assertEqual(ct_meta['bus_expected'], Decimal('0.00'))
+        self.assertEqual(ct_meta['baseline_target'], Decimal('8.00'))
+        self.assertEqual(ct_meta['student_count'], 1)
+
+    def test_fee_teacher_dashboard_redirects_to_bus_analytics(self):
+        """Fee Teacher with assigned bus and no classroom visiting / redirects directly to bus_analytics."""
+        self.client.force_login(self.fee_teacher)
+        res = self.client.get(reverse('dashboard'))
+        self.assertEqual(res.status_code, 302)
+        self.assertRedirects(res, reverse('bus_analytics', args=[self.bus_a.pk]))
+
+    def test_collect_both_fees_api_atomic_collection(self):
+        """1-tap API collects both Bus Fare and Canteen Fee atomically."""
+        self.client.force_login(self.fee_teacher)
+        url = reverse('api_collect_both_fees')
+        
+        res = self.client.post(
+            url,
+            json.dumps({'student_id': self.s1.id, 'fee_type': 'BOTH'}),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['bus_collected'])
+        self.assertTrue(data['canteen_collected'])
+        self.assertEqual(data['bus_amount'], 15.0)
+        self.assertEqual(data['canteen_amount'], 10.0)
+        self.assertEqual(data['total_amount'], 25.0)
+
+        # Verify DB records created
+        today = timezone.localdate()
+        bus_p = FeePayment.objects.filter(student=self.s1, fee_type='BUS', payment_date=today).first()
+        can_p = FeePayment.objects.filter(student=self.s1, fee_type='CANTEEN', payment_date=today).first()
+        self.assertIsNotNone(bus_p)
+        self.assertIsNotNone(can_p)
+        self.assertEqual(bus_p.amount, Decimal('15.00'))
+        self.assertEqual(can_p.amount, Decimal('10.00'))
+        self.assertEqual(bus_p.bus, self.bus_a)
+        self.assertEqual(bus_p.recorded_by, self.fee_teacher)
+
+    def test_collect_both_fees_api_idempotent(self):
+        """Attempting to re-collect fees that are already paid returns 0.0 with status message."""
+        self.client.force_login(self.fee_teacher)
+        url = reverse('api_collect_both_fees')
+        
+        # First collection
+        self.client.post(url, json.dumps({'student_id': self.s1.id}), content_type='application/json')
+
+        # Re-collection attempt
+        res2 = self.client.post(url, json.dumps({'student_id': self.s1.id}), content_type='application/json')
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.json()
+        self.assertTrue(data2['success'])
+        self.assertFalse(data2['bus_collected'])
+        self.assertFalse(data2['canteen_collected'])
+        self.assertEqual(data2['total_amount'], 0.0)
 
 
+class AdvancePaymentAndCreditDeductionTests(TestCase):
+    """
+    Test suite for Student Advance Payments, Multi-Day Weekly Prepayments,
+    Day-by-Day Credit Depletion, and Bursar Cash Remittance Reconciliation.
+    """
+
+    def setUp(self):
+        self.principal = User.objects.create_user(username='principal_adv', password='password123')
+        self.principal.profile.role = UserProfile.ROLE_ADMIN
+        self.principal.profile.save()
+
+        self.accountant = User.objects.create_user(username='accountant_adv', password='password123')
+        self.accountant.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.accountant.profile.save()
+
+        self.bus = Bus.objects.create(name='Madina Bus', fee=Decimal('10.00'))
+
+        self.fee_teacher = User.objects.create_user(username='teacher_kwasi', password='password123', first_name='Kwasi')
+        self.fee_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.fee_teacher.profile.can_collect_fees = True
+        self.fee_teacher.profile.assigned_bus = self.bus
+        self.fee_teacher.profile.save()
+
+        self.student = Student.objects.create(
+            first_name='Abena',
+            last_name='Osei',
+            student_class='Class 3',
+            bus=self.bus,
+            canteen_enrolled=True,
+            custom_canteen_fee=Decimal('8.00'),
+            is_active=True
+        )
+
+    def test_weekly_advance_payment_recording_and_credit_days(self):
+        """Advance payment for 5 school days accurately creates credit balance and credit days."""
+        monday = datetime.date(2026, 10, 5)  # Monday
+        
+        # 5 days: Bus = GH₵50.00, Canteen = GH₵40.00
+        p_bus = FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=monday,
+            is_advance=True,
+            days_covered=5,
+            bus=self.bus,
+            recorded_by=self.fee_teacher
+        )
+        p_can = FeePayment.objects.create(
+            student=self.student,
+            fee_type='CANTEEN',
+            amount=Decimal('40.00'),
+            payment_date=monday,
+            is_advance=True,
+            days_covered=5,
+            recorded_by=self.fee_teacher
+        )
+
+        # On Monday (payment day): covers today, leaves 4 prepaid days
+        self.assertTrue(self.student.is_bus_paid_for_date(monday))
+        self.assertTrue(self.student.is_canteen_paid_for_date(monday))
+        self.assertEqual(self.student.get_bus_credit_days(monday), 4)
+        self.assertEqual(self.student.get_canteen_credit_days(monday), 4)
+
+        status = self.student.get_prepaid_status(monday)
+        self.assertTrue(status['has_credit'])
+        self.assertTrue(status['bus_has_credit'])
+        self.assertEqual(status['bus_credit_days'], 4)
+        self.assertTrue(status['canteen_has_credit'])
+        self.assertEqual(status['canteen_credit_days'], 4)
+
+    def test_day_by_day_credit_depletion(self):
+        """Credit depletes school day by school day until fully exhausted."""
+        monday = datetime.date(2026, 10, 5)
+        tuesday = datetime.date(2026, 10, 6)
+        wednesday = datetime.date(2026, 10, 7)
+        thursday = datetime.date(2026, 10, 8)
+        friday = datetime.date(2026, 10, 9)
+        next_monday = datetime.date(2026, 10, 12)
+
+        # Record 5 days advance on Monday
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=monday,
+            is_advance=True,
+            days_covered=5,
+            bus=self.bus
+        )
+
+        # Tuesday (1 day consumed): 3 days remaining
+        self.assertTrue(self.student.is_bus_paid_for_date(tuesday))
+        self.assertEqual(self.student.get_bus_credit_days(tuesday), 3)
+
+        # Wednesday (2 days consumed): 2 days remaining
+        self.assertTrue(self.student.is_bus_paid_for_date(wednesday))
+        self.assertEqual(self.student.get_bus_credit_days(wednesday), 2)
+
+        # Thursday (3 days consumed): 1 day remaining
+        self.assertTrue(self.student.is_bus_paid_for_date(thursday))
+        self.assertEqual(self.student.get_bus_credit_days(thursday), 1)
+
+        # Friday (4 days consumed): 0 days remaining after Friday
+        self.assertTrue(self.student.is_bus_paid_for_date(friday))
+        self.assertEqual(self.student.get_bus_credit_days(friday), 0)
+
+        # Next Monday (5 school days consumed): Credit is 0 -> Student owes fee again!
+        self.assertFalse(self.student.is_bus_paid_for_date(next_monday))
+        self.assertEqual(self.student.get_bus_credit_days(next_monday), 0)
+        self.assertEqual(self.student.get_daily_bus_balance(next_monday), Decimal('10.00'))
+
+    def test_bursar_cash_reconciliation_no_phantom_deficit(self):
+        """
+        On Monday: Teacher collects full advance cash -> target expands to match cash.
+        On Tuesday: Fee is settled via credit -> target contracts so teacher has 0 shortage.
+        """
+        monday = datetime.date(2026, 10, 5)
+        tuesday = datetime.date(2026, 10, 6)
+
+        # Monday collection: Student pays 5 days advance (GH₵50 Bus + GH₵40 Lunch = GH₵90)
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=monday,
+            is_advance=True,
+            days_covered=5,
+            bus=self.bus,
+            recorded_by=self.fee_teacher
+        )
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='CANTEEN',
+            amount=Decimal('40.00'),
+            payment_date=monday,
+            is_advance=True,
+            days_covered=5,
+            recorded_by=self.fee_teacher
+        )
+
+        # Check Monday summary for Kwasi
+        monday_summary = get_collectors_financial_summary([self.fee_teacher], target_date=monday)
+        kwasi_mon = monday_summary[self.fee_teacher.id]
+        self.assertEqual(kwasi_mon['today_collected'], Decimal('90.00'))
+        # Baseline = 10 + 8 = 18; Advance collected = 40 + 32 = 72; Adjusted target = 18 + 72 = 90
+        self.assertEqual(kwasi_mon['adjusted_target'], Decimal('90.00'))
+        self.assertEqual(kwasi_mon['balance'], Decimal('0.00'))
+
+        # Check Tuesday summary for Kwasi: No payment collected on Tuesday
+        tuesday_summary = get_collectors_financial_summary([self.fee_teacher], target_date=tuesday)
+        kwasi_tue = tuesday_summary[self.fee_teacher.id]
+        self.assertEqual(kwasi_tue['today_collected'], Decimal('0.00'))
+        # Student is covered by prepaid credit -> prepaid_deductions = 18.00
+        # Adjusted target = baseline (18.00) - prepaid_deductions (18.00) = 0.00!
+        self.assertEqual(kwasi_tue['prepaid_deductions'], Decimal('18.00'))
+        self.assertEqual(kwasi_tue['adjusted_target'], Decimal('0.00'))
+        self.assertEqual(kwasi_tue['balance'], Decimal('0.00'))  # NO FALSE DEFICIT!
+
+    def test_collect_both_fees_api_multi_day_advance(self):
+        """API accepts days=5 and records both fees with is_advance=True and days_covered=5."""
+        self.client.force_login(self.fee_teacher)
+        url = reverse('api_collect_both_fees')
+        
+        res = self.client.post(
+            url,
+            json.dumps({'student_id': self.student.id, 'fee_type': 'BOTH', 'days': 5}),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['bus_amount'], 50.0)    # 10 * 5
+        self.assertEqual(data['canteen_amount'], 40.0) # 8 * 5
+        self.assertEqual(data['total_amount'], 90.0)
+
+        today = timezone.localdate()
+        p_bus = FeePayment.objects.filter(student=self.student, fee_type='BUS', payment_date=today).first()
+        p_can = FeePayment.objects.filter(student=self.student, fee_type='CANTEEN', payment_date=today).first()
+        self.assertTrue(p_bus.is_advance)
+        self.assertEqual(p_bus.days_covered, 5)
+        self.assertTrue(p_can.is_advance)
+        self.assertEqual(p_can.days_covered, 5)
 
 
+class FeeTeacherRecordPaymentScopingTests(TestCase):
+    def setUp(self):
+        self.bus_1 = Bus.objects.create(name='Bus 1 - Morning Route', fee=Decimal('10.00'))
+        self.bus_2 = Bus.objects.create(name='Bus 2 - Afternoon Route', fee=Decimal('15.00'))
 
+        self.class_1a = SchoolClass.objects.create(name='Class 1A')
+        self.class_2b = SchoolClass.objects.create(name='Class 2B')
+
+        # Rider on Bus 1 in Class 1A
+        self.student_bus1_1a = Student.objects.create(
+            first_name='Kofi', last_name='Bus1',
+            school_class=self.class_1a, student_class='Class 1A',
+            bus=self.bus_1
+        )
+        # Rider on Bus 1 in Class 2B
+        self.student_bus1_2b = Student.objects.create(
+            first_name='Ama', last_name='Bus1',
+            school_class=self.class_2b, student_class='Class 2B',
+            bus=self.bus_1
+        )
+        # Rider on Bus 2 in Class 1A
+        self.student_bus2 = Student.objects.create(
+            first_name='Kwame', last_name='Bus2',
+            school_class=self.class_1a, student_class='Class 1A',
+            bus=self.bus_2
+        )
+        # Walker in Class 1A
+        self.student_walker = Student.objects.create(
+            first_name='Akosua', last_name='Walker',
+            school_class=self.class_1a, student_class='Class 1A',
+            bus=None
+        )
+
+        # Fee teacher assigned to Bus 1
+        self.fee_teacher = User.objects.create_user(username='fee_teacher_bus1', password='pass123')
+        self.fee_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.fee_teacher.profile.can_collect_fees = True
+        self.fee_teacher.profile.assigned_bus = self.bus_1
+        self.fee_teacher.profile.save()
+
+        # Admin user
+        self.admin_user = User.objects.create_user(username='school_admin', password='pass123')
+        self.admin_user.profile.role = UserProfile.ROLE_ADMIN
+        self.admin_user.profile.save()
+
+    def test_fee_teacher_scoped_dropdowns_on_payment_create(self):
+        """Fee Teacher filters by actual class and scoped students only contain their bus riders in that class."""
+        self.client.force_login(self.fee_teacher)
+        res = self.client.get(reverse('payment_create'))
+        self.assertEqual(res.status_code, 200)
+
+        ctx = res.context
+        self.assertTrue(ctx['is_scoped_fee_teacher'])
+        self.assertEqual(ctx['assigned_bus'], self.bus_1)
+        self.assertEqual(ctx['scoped_rider_count'], 2)
+        self.assertEqual(ctx['initial_class_id'], '')
+
+        scoped_data = json.loads(ctx['scoped_students_by_class_json'])
+        # Virtual __ALL_BUS__ is NOT in scoped_data
+        self.assertNotIn('__ALL_BUS__', scoped_data)
+
+        # In class 1A scoped list: only student_bus1_1a is present
+        class1a_key = str(self.class_1a.id)
+        class1a_riders = [s['id'] for s in scoped_data[class1a_key]]
+        self.assertEqual(len(class1a_riders), 1)
+        self.assertEqual(class1a_riders[0], self.student_bus1_1a.id)
+        self.assertNotIn(self.student_bus2.id, class1a_riders)
+        self.assertNotIn(self.student_walker.id, class1a_riders)
+
+        # In class 2B scoped list: only student_bus1_2b is present
+        class2b_key = str(self.class_2b.id)
+        class2b_riders = [s['id'] for s in scoped_data[class2b_key]]
+        self.assertEqual(len(class2b_riders), 1)
+        self.assertEqual(class2b_riders[0], self.student_bus1_2b.id)
+
+    def test_guest_rider_mode_payment_recording(self):
+        """Fee teacher can record payment for a student from another bus without altering student permanent bus."""
+        self.client.force_login(self.fee_teacher)
+        today = timezone.localdate()
+
+        post_data = {
+            'student_class': str(self.class_1a.id),
+            'student': self.student_bus2.id,
+            'bus': self.bus_1.id,
+            'is_one_off_bus': True,
+            'bus_amount': '10.00',
+            'canteen_amount': '0.00',
+            'payment_date': today.strftime('%Y-%m-%d'),
+        }
+
+        res = self.client.post(reverse('payment_create'), post_data)
+        self.assertEqual(res.status_code, 302)
+
+        payment = FeePayment.objects.filter(student=self.student_bus2, fee_type='BUS', payment_date=today).first()
+        self.assertIsNotNone(payment)
+        self.assertEqual(payment.amount, Decimal('10.00'))
+        self.assertEqual(payment.bus, self.bus_1)
+        self.assertTrue(payment.is_temporary_bus)
+        self.assertIn('Guest ride on Bus 1 - Morning Route', payment.notes)
+
+        # Student's permanent bus registration MUST BE UNTOUCHED!
+        self.student_bus2.refresh_from_db()
+        self.assertEqual(self.student_bus2.bus, self.bus_2)
+
+    def test_admin_retains_unscoped_access(self):
+        """Admin user sees full school scope without fee teacher restrictions."""
+        self.client.force_login(self.admin_user)
+        res = self.client.get(reverse('payment_create'))
+        self.assertEqual(res.status_code, 200)
+
+        ctx = res.context
+        self.assertFalse(ctx['is_scoped_fee_teacher'])
+        self.assertIsNone(ctx['assigned_bus'])
+
+
+class PartialCreditTopUpTests(TestCase):
+    """
+    Test suite for partial prepaid balance rollover and remainder top-up collection:
+    1. Student with partial credit (< daily fare) is detected with bus_has_partial=True and remainder_due.
+    2. Fee Teacher 1-tap API collects only the exact remainder without double-charging.
+    3. Accountant reconciliation adjusts teacher target down by prepaid credit, resulting in zero deficit.
+    4. Bus analytics roster presents credit details and top-up actions.
+    """
+
+    def setUp(self):
+        self.bus_route = Bus.objects.create(name='Express Route', fee=Decimal('10.00'))
+        self.school_class = SchoolClass.objects.create(name='Grade 4')
+
+        self.student = Student.objects.create(
+            first_name='Kofi',
+            last_name='Mensah',
+            student_class='Grade 4',
+            school_class=self.school_class,
+            bus=self.bus_route,
+            canteen_enrolled=False
+        )
+
+        self.teacher_user = User.objects.create_user(username='fee_teacher_kofi', password='password123')
+        self.teacher_user.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_user.profile.can_collect_fees = True
+        self.teacher_user.profile.assigned_bus = self.bus_route
+        self.teacher_user.profile.save()
+
+        # Simulate advance payment made yesterday of GH₵25.00 on a GH₵10/day bus
+        # Attended yesterday (cost = 10.00), leaving GH₵15.00 credit
+        # If student took a different GH₵10 guest bus or had GH₵15 paid for 2 days at GH₵10:
+        # Let's directly simulate student having GH₵5.00 remaining credit on target_date
+        self.target_date = timezone.localdate()
+        self.yesterday = self.target_date - datetime.timedelta(days=1)
+
+        # Yesterday student paid GH₵15.00 and attended yesterday:
+        # Past cost = 1 day * GH₵10.00 = GH₵10.00
+        # Available credit today before paying = GH₵15.00 - GH₵10.00 = GH₵5.00!
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('15.00'),
+            payment_date=self.yesterday,
+            is_advance=True,
+            days_covered=1,
+            bus=self.bus_route,
+            recorded_by=self.teacher_user
+        )
+        ClockInRecord.objects.create(
+            student=self.student,
+            date=self.yesterday,
+            recorded_by=self.teacher_user
+        )
+
+    def test_partial_credit_detection_and_remainder_due(self):
+        """Student with GH₵5 credit on GH₵10 daily route is detected with partial credit and GH₵5 remainder due."""
+        credit_bal = self.student.get_bus_credit_balance(self.target_date)
+        self.assertEqual(credit_bal, Decimal('5.00'))
+
+        self.assertFalse(self.student.is_bus_paid_for_date(self.target_date))
+        self.assertEqual(self.student.get_daily_bus_balance(self.target_date), Decimal('5.00'))
+
+        status = self.student.get_prepaid_status(self.target_date)
+        self.assertTrue(status['bus_has_partial'])
+        self.assertEqual(status['bus_credit_balance'], Decimal('5.00'))
+        self.assertEqual(status['bus_remainder_due'], Decimal('5.00'))
+
+    def test_collect_both_fees_api_collects_exact_remainder(self):
+        """1-tap fee collection API charges only the exact remainder (GH₵5.00), not the full GH₵10 fare."""
+        self.client.force_login(self.teacher_user)
+
+        res = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'days': 1,
+                'date': self.target_date.strftime('%Y-%m-%d')
+            }),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['bus_collected'])
+        self.assertEqual(data['bus_amount'], 5.0)  # Charged only GH₵5.00!
+        self.assertEqual(data['total_amount'], 5.0)
+
+        # Verify payment record in database
+        today_payment = FeePayment.objects.filter(
+            student=self.student,
+            fee_type='BUS',
+            payment_date=self.target_date
+        ).first()
+        self.assertIsNotNone(today_payment)
+        self.assertEqual(today_payment.amount, Decimal('5.00'))
+        self.assertIn('remainder top-up', today_payment.notes.lower())
+
+        # Student is now fully paid for today
+        self.student.refresh_from_db()
+        self.assertTrue(self.student.is_bus_paid_for_date(self.target_date))
+        self.assertEqual(self.student.get_daily_bus_balance(self.target_date), Decimal('0.00'))
+
+        status = self.student.get_prepaid_status(self.target_date)
+        self.assertFalse(status['bus_has_partial'])
+
+    def test_accountant_reconciliation_zero_deficit_on_topup(self):
+        """Accountant audit reconciliation credits GH₵5 non-cash from past credit, resulting in GH₵0 balance for teacher."""
+        # Fee teacher collects the GH₵5.00 top-up today
+        self.client.force_login(self.teacher_user)
+        self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'days': 1,
+                'date': self.target_date.strftime('%Y-%m-%d')
+            }),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+
+        # Run financial summary for accountant audit
+        summary = get_collectors_financial_summary([self.teacher_user], self.target_date)
+        meta = summary[self.teacher_user.id]
+
+        self.assertEqual(meta['bus_expected'], Decimal('10.00'))
+        self.assertEqual(meta['prepaid_deductions'], Decimal('5.00'))  # GH₵5 non-cash credit from past
+        self.assertEqual(meta['today_collected'], Decimal('5.00'))     # GH₵5 physical cash collected today
+        self.assertEqual(meta['adjusted_target'], Decimal('5.00'))     # Cash expected to hand over = GH₵5
+        self.assertEqual(meta['balance'], Decimal('0.00'))             # ZERO DEFICIT / BALANCED!
+
+    def test_bus_analytics_view_displays_partial_credit(self):
+        """Bus analytics page renders partial credit information and remainder due."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus_route.pk}))
+        self.assertEqual(res.status_code, 200)
+
+        # Verify class breakdown in context
+        c_students = res.context['class_breakdown'][0]['students']
+        item = [s for s in c_students if s['student'].id == self.student.id][0]
+        self.assertTrue(item['has_partial_credit'])
+        self.assertEqual(item['credit_available'], Decimal('5.00'))
+        self.assertEqual(item['remainder_due'], Decimal('5.00'))
+        self.assertEqual(item['combined_due'], Decimal('5.00'))
+
+    def test_collect_both_fees_api_custom_multipay_bus(self):
+        """Fee teacher can enter custom multi-pay amount (e.g. GH₵70 for 7 days) instead of fixed days."""
+        # Clean existing payments for today
+        FeePayment.objects.filter(student=self.student, payment_date=self.target_date).delete()
+
+        self.client.force_login(self.teacher_user)
+        res = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'amount': 70.00,
+                'method': 'CASH',
+                'date': self.target_date.strftime('%Y-%m-%d')
+            }),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+
+        payment = FeePayment.objects.filter(
+            student=self.student, fee_type='BUS', payment_date=self.target_date
+        ).first()
+        self.assertIsNotNone(payment)
+        self.assertEqual(payment.amount, Decimal('70.00'))
+        self.assertTrue(payment.is_advance)
+        self.assertEqual(payment.days_covered, 7)
+        self.assertIn("~7 days credit", payment.notes)
+
+    def test_collect_both_fees_api_custom_multipay_split_both(self):
+        """Fee teacher custom multi-pay splits proportionately between bus and canteen."""
+        # Enable canteen enrollment on student: Bus is GH₵10, Canteen is GH₵5 (ratio 2:1)
+        self.student.canteen_enrolled = True
+        self.student.custom_canteen_fee = Decimal('5.00')
+        self.student.save()
+        FeePayment.objects.filter(student=self.student, payment_date=self.target_date).delete()
+
+        self.client.force_login(self.teacher_user)
+        res = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BOTH',
+                'amount': 75.00,
+                'method': 'MOMO',
+                'date': self.target_date.strftime('%Y-%m-%d')
+            }),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest'
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+
+        bus_p = FeePayment.objects.filter(student=self.student, fee_type='BUS', payment_date=self.target_date).first()
+        canteen_p = FeePayment.objects.filter(student=self.student, fee_type='CANTEEN', payment_date=self.target_date).first()
+
+        self.assertIsNotNone(bus_p)
+        self.assertIsNotNone(canteen_p)
+        self.assertEqual(bus_p.amount, Decimal('50.00'))
+        self.assertEqual(bus_p.days_covered, 5)
+        self.assertTrue(bus_p.is_advance)
+        self.assertEqual(canteen_p.amount, Decimal('25.00'))
+        self.assertEqual(canteen_p.days_covered, 5)
+        self.assertTrue(canteen_p.is_advance)
+        self.assertEqual(bus_p.payment_method, 'MOMO')
+
+    def test_bus_analytics_contains_multipay_modal(self):
+        """Bus analytics template contains the custom amount Multi-Pay modal."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus_route.pk}))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'multipay-modal-backdrop')
+        self.assertContains(res, 'openMultipayModal')
+        self.assertContains(res, 'modal-mp-amount')
+
+    def test_fee_teacher_navbar_links_to_assigned_bus_roster(self):
+        """Fee Teacher sees 'Bus Roster' linking directly to their assigned bus route analytics."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus_route.pk}))
+        self.assertEqual(res.status_code, 200)
+        expected_url = reverse('bus_analytics', kwargs={'pk': self.bus_route.pk})
+        self.assertContains(res, f'href="{expected_url}"')
+        self.assertContains(res, 'Bus Roster')
+
+    def test_fee_teacher_dashboard_auto_scopes_to_assigned_bus_students(self):
+        """Fee Teacher accessing the dashboard is auto-scoped to their assigned bus riders."""
+        other_bus = Bus.objects.create(name='Other Bus Route', fee=Decimal('8.00'))
+        Student.objects.create(
+            first_name='Ama', last_name='Other', student_class='Grade 4',
+            school_class=self.school_class, bus=other_bus
+        )
+        Student.objects.create(
+            first_name='Kwame', last_name='Walker', student_class='Grade 4',
+            school_class=self.school_class, bus=None
+        )
+
+        self.client.force_login(self.teacher_user)
+        self.teacher_user.profile.assigned_class = 'Grade 4'
+        self.teacher_user.profile.save()
+
+        res = self.client.get(reverse('dashboard'))
+        self.assertEqual(res.status_code, 200)
+        items = res.context['student_items']
+        item_student_ids = [item['student'].id for item in items]
+        self.assertIn(self.student.id, item_student_ids)
+        for item in items:
+            self.assertEqual(item['student'].bus_id, self.bus_route.id)
+
+    def test_fee_teacher_teachers_page_contains_bus_roster_link(self):
+        """Teachers directory and remittance page contains direct Bus Roster button for Fee Teachers."""
+        principal = User.objects.create_user(username='test_principal_user', password='password123')
+        principal.profile.role = UserProfile.ROLE_ADMIN
+        principal.profile.save()
+        self.client.force_login(principal)
+        res = self.client.get(reverse('teacher_list'))
+        self.assertEqual(res.status_code, 200)
+        expected_url = reverse('bus_analytics', kwargs={'pk': self.bus_route.pk})
+        self.assertContains(res, expected_url)
+        self.assertContains(res, 'Bus Roster')
+
+
+class PrincipalAdminManagementTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.principal = User.objects.create_user(
+            username='main_principal',
+            password='password123',
+            is_staff=True,
+            is_superuser=True
+        )
+        self.principal.profile.role = UserProfile.ROLE_ADMIN
+        self.principal.profile.save()
+
+        self.teacher = User.objects.create_user(
+            username='regular_teacher',
+            password='password123',
+            is_staff=True
+        )
+        self.teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher.profile.save()
+
+    def test_teacher_creation_as_admin(self):
+        """Creating an account with role=ADMIN sets is_superuser and is_principal."""
+        form_data = {
+            'username': 'new_vice_principal',
+            'first_name': 'Vice',
+            'last_name': 'Principal',
+            'email': 'vp@school.edu',
+            'phone_number': '0241234567',
+            'password': 'Password123!',
+            'confirm_password': 'Password123!',
+            'is_active': True,
+            'role': UserProfile.ROLE_ADMIN,
+            'can_collect_fees': True,
+            'assigned_class': '',
+        }
+        form = TeacherCreationForm(data=form_data)
+        self.assertTrue(form.is_valid(), form.errors)
+        user = form.save()
+        self.assertTrue(user.is_superuser)
+        self.assertEqual(user.profile.role, UserProfile.ROLE_ADMIN)
+        self.assertTrue(user.profile.is_principal)
+
+    def test_promote_teacher_to_admin_via_update_form(self):
+        """Updating a teacher's role to ADMIN promotes them with is_superuser and is_principal."""
+        form_data = {
+            'first_name': 'Regular',
+            'last_name': 'Teacher',
+            'email': 'teacher@school.edu',
+            'phone_number': '0249876543',
+            'role': UserProfile.ROLE_ADMIN,
+            'is_active': True,
+            'can_collect_fees': False,
+            'assigned_class': '',
+        }
+        form = TeacherUpdateForm(data=form_data, user_obj=self.teacher)
+        self.assertTrue(form.is_valid(), form.errors)
+        user = form.save()
+        self.assertTrue(user.is_superuser)
+        self.assertEqual(user.profile.role, UserProfile.ROLE_ADMIN)
+        self.assertTrue(user.profile.is_principal)
+
+    def test_promoted_principal_can_access_principal_required_views(self):
+        """A user promoted to Admin can successfully access views protected by @principal_required."""
+        # Before promotion, teacher gets redirected from principal-required view
+        self.client.force_login(self.teacher)
+        response_before = self.client.get(reverse('teacher_create'))
+        self.assertEqual(response_before.status_code, 302)
+
+        # Promote teacher
+        self.teacher.is_superuser = True
+        self.teacher.profile.role = UserProfile.ROLE_ADMIN
+        self.teacher.profile.save()
+        self.teacher.save()
+
+        # After promotion, succeeds
+        response_after = self.client.get(reverse('teacher_create'))
+        self.assertEqual(response_after.status_code, 200)
+
+    def test_superuser_syncs_with_role_admin_signal(self):
+        """Saving a user as superuser ensures profile.role is synced to ROLE_ADMIN."""
+        staff_user = User.objects.create_user(username='staff_member', password='password123')
+        self.assertEqual(staff_user.profile.role, UserProfile.ROLE_TEACHER)
+
+        staff_user.is_superuser = True
+        staff_user.save()
+        staff_user.profile.refresh_from_db()
+        self.assertEqual(staff_user.profile.role, UserProfile.ROLE_ADMIN)
+        self.assertTrue(staff_user.profile.is_principal)

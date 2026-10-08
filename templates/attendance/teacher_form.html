@@ -91,14 +91,14 @@
 
             <div class="form-group">
                 <label class="form-label" for="{{ form.assigned_bus.id_for_label }}">
-                    Assigned Bus Route (Optional)
+                    Assigned Bus Route (Fee Teacher)
                 </label>
                 {{ form.assigned_bus }}
                 {% if form.assigned_bus.errors %}
                     <div class="form-error">{{ form.assigned_bus.errors.0 }}</div>
                 {% endif %}
                 <span class="form-hint">
-                    Designate this route if this teacher is responsible for supervising and collecting bus fees on a specific bus.
+                    Designate this route if this teacher is the Fee Teacher for this bus. Fee Teachers do NOT need an assigned classroom; they collect both bus fare and canteen (lunch) fees for all students on their bus during the morning commute.
                 </span>
             </div>
 
@@ -146,10 +146,23 @@
             </div>
             {% endif %}
 
-            <!-- Financial Permissions -->
+            <!-- Role & Permissions -->
             <h3 style="font-size: 0.95rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 1rem; color: var(--text-main); border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
-                {% if not is_edit %}4{% else %}3{% endif %}. Financial Permissions
+                {% if not is_edit %}4{% else %}3{% endif %}. Role & Permissions
             </h3>
+
+            <div class="form-group" style="margin-bottom: 1.25rem;">
+                <label class="form-label" for="{{ form.role.id_for_label }}">
+                    Staff Role & Privileges
+                </label>
+                {{ form.role }}
+                {% if form.role.errors %}
+                    <div class="form-error">{{ form.role.errors.0 }}</div>
+                {% endif %}
+                <span class="form-hint">
+                    Choose <strong>Administrator / Principal</strong> to give this user full administrative privileges (manage teachers, bus routes, classes, settings, and audits). Choose <strong>Teacher</strong> for standard classroom/bus access.
+                </span>
+            </div>
 
             <div class="form-group" style="display: flex; align-items: flex-start; gap: 0.75rem; background: var(--surface-subtle); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 1.25rem;">
                 <div style="padding-top: 0.15rem;">

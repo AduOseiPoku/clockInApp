@@ -37,13 +37,13 @@
                 <ul class="nav-links">
                     {% if user.is_authenticated and user.profile.role != 'ACCOUNTANT' %}
                     <li>
-                        <a href="{% url 'dashboard' %}"
-                            class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                        <a href="{% if user.profile and user.profile.is_bus_fee_teacher and user.profile.assigned_bus %}{% url 'bus_analytics' user.profile.assigned_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}"
+                            class="nav-link {% if request.resolver_match.url_name == 'dashboard' or request.resolver_match.url_name == 'bus_analytics' and user.profile.is_bus_fee_teacher %}active{% endif %}">
                             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            {% if user.profile and user.profile.role == 'TEACHER' %}Class Roster{% else %}Dashboard{% endif %}
+                            {% if user.profile and user.profile.is_bus_fee_teacher %}Bus Roster{% elif user.profile and user.profile.role == 'TEACHER' %}Class Roster{% else %}Dashboard{% endif %}
                         </a>
                     </li>
                     {% endif %}
@@ -216,6 +216,10 @@
                         <button type="button" id="modal-btn-5days" class="btn-secondary"
                             style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; min-height: 34px;">
                             5 Days (1 Wk)
+                        </button>
+                        <button type="button" id="modal-btn-10days" class="btn-secondary"
+                            style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; min-height: 34px;">
+                            10 Days (2 Wks)
                         </button>
                         <button type="button" id="modal-btn-balance" class="btn-secondary"
                             style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; min-height: 34px;">

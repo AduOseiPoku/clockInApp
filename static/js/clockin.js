@@ -187,6 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btn1Day = document.getElementById('modal-btn-1day');
     const btn5Days = document.getElementById('modal-btn-5days');
+    const btn10Days = document.getElementById('modal-btn-10days');
     const btnBalance = document.getElementById('modal-btn-balance');
 
     let currentModalStudent = null;
@@ -219,6 +220,9 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (mode === '5days') {
                 if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? busReq * 5 : 0).toFixed(2);
                 if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? canReq * 5 : 0).toFixed(2);
+            } else if (mode === '10days') {
+                if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? busReq * 10 : 0).toFixed(2);
+                if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? canReq * 10 : 0).toFixed(2);
             } else {
                 if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? (busBal > 0 ? busBal : busReq) : 0).toFixed(2);
                 if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? (canBal > 0 ? canBal : canReq) : 0).toFixed(2);
@@ -228,6 +232,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (modalAmountInput) modalAmountInput.value = busReq.toFixed(2);
             } else if (mode === '5days') {
                 if (modalAmountInput) modalAmountInput.value = (busReq * 5).toFixed(2);
+            } else if (mode === '10days') {
+                if (modalAmountInput) modalAmountInput.value = (busReq * 10).toFixed(2);
             } else {
                 if (modalAmountInput) modalAmountInput.value = (busBal > 0 ? busBal : busReq).toFixed(2);
             }
@@ -237,6 +243,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (modalAmountInput) modalAmountInput.value = canReq.toFixed(2);
             } else if (mode === '5days') {
                 if (modalAmountInput) modalAmountInput.value = (canReq * 5).toFixed(2);
+            } else if (mode === '10days') {
+                if (modalAmountInput) modalAmountInput.value = (canReq * 10).toFixed(2);
             } else {
                 if (modalAmountInput) modalAmountInput.value = (canBal > 0 ? canBal : canReq).toFixed(2);
             }
@@ -252,6 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (btn1Day) btn1Day.addEventListener('click', () => applyPreset('1day'));
     if (btn5Days) btn5Days.addEventListener('click', () => applyPreset('5days'));
+    if (btn10Days) btn10Days.addEventListener('click', () => applyPreset('10days'));
     if (btnBalance) btnBalance.addEventListener('click', () => applyPreset('balance'));
 
     document.addEventListener('click', (e) => {

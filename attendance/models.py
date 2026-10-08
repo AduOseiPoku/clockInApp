@@ -5,6 +5,23 @@ from django.utils import timezone
 from django.db.models import Sum
 from decimal import Decimal
 
+
+def count_school_days_between(start_date, end_date):
+    """
+    Counts school days (Monday to Friday) strictly in range [start_date, end_date).
+    Does not include end_date itself.
+    """
+    if not start_date or not end_date or start_date >= end_date:
+        return 0
+    days = 0
+    cur = start_date
+    while cur < end_date:
+        if cur.weekday() < 5:
+            days += 1
+        cur += datetime.timedelta(days=1)
+    return days
+
+
 class Bus(models.Model):
     """
     Dynamic Bus/Route Model.
@@ -183,29 +200,47 @@ class Student(models.Model):
 
     def get_bus_credit_balance(self, target_date=None):
         """
-        Available prepaid credit before accounting for target_date.
-        Calculates cumulative bus payments made up to target_date minus cost of past days attended.
+        Available prepaid credit on target_date before covering target_date.
+        Calculates cumulative bus payments made up to target_date minus cost of past days attended/elapsed.
         """
         if not self.bus or self.bus_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        total_paid = self.payments.filter(fee_type='BUS', payment_date__lte=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        past_attended_days = self.clock_in_records.filter(date__lt=target_date).count()
+        payments_qs = self.payments.filter(fee_type='BUS', payment_date__lte=target_date)
+        total_paid = payments_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        if total_paid <= Decimal('0.00'):
+            return Decimal('0.00')
+
+        earliest_p = payments_qs.order_by('payment_date').first()
+        start_date = earliest_p.payment_date if earliest_p else target_date
+        if self.clock_in_records.filter(date__gte=start_date).exists():
+            past_attended_days = self.clock_in_records.filter(date__gte=start_date, date__lt=target_date).count()
+        else:
+            past_attended_days = count_school_days_between(start_date, target_date)
         past_cost = Decimal(past_attended_days) * self.bus_fee_required
         return max(Decimal('0.00'), total_paid - past_cost)
 
     def get_canteen_credit_balance(self, target_date=None):
         """
-        Available prepaid canteen credit before accounting for target_date.
-        Calculates cumulative canteen payments made up to target_date minus cost of past days attended.
+        Available prepaid canteen credit on target_date before covering target_date.
+        Calculates cumulative canteen payments made up to target_date minus cost of past days attended/elapsed.
         """
         if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        total_paid = self.payments.filter(fee_type='CANTEEN', payment_date__lte=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        past_attended_days = self.clock_in_records.filter(date__lt=target_date).count()
+        payments_qs = self.payments.filter(fee_type='CANTEEN', payment_date__lte=target_date)
+        total_paid = payments_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        if total_paid <= Decimal('0.00'):
+            return Decimal('0.00')
+
+        earliest_p = payments_qs.order_by('payment_date').first()
+        start_date = earliest_p.payment_date if earliest_p else target_date
+        if self.clock_in_records.filter(date__gte=start_date).exists():
+            past_attended_days = self.clock_in_records.filter(date__gte=start_date, date__lt=target_date).count()
+        else:
+            past_attended_days = count_school_days_between(start_date, target_date)
         past_cost = Decimal(past_attended_days) * self.canteen_fee_required
         return max(Decimal('0.00'), total_paid - past_cost)
 
@@ -274,6 +309,55 @@ class Student(models.Model):
             remaining = credit - self.canteen_fee_required
             return int(remaining // self.canteen_fee_required)
         return 0
+
+    def get_prepaid_status(self, target_date=None):
+        """
+        Summary of prepaid credit and remaining days for bus and canteen on target_date.
+        Includes partial credit detection and remainder top-up calculations.
+        """
+        if target_date is None:
+            target_date = timezone.localdate()
+        bus_credit = self.get_bus_credit_balance(target_date)
+        bus_days = self.get_bus_credit_days(target_date)
+        can_credit = self.get_canteen_credit_balance(target_date)
+        can_days = self.get_canteen_credit_days(target_date)
+        bus_active = bool(self.bus and bus_credit >= self.bus_fee_required)
+        can_active = bool(self.canteen_enrolled and can_credit >= self.canteen_fee_required)
+
+        bus_paid_today = self.get_daily_bus_paid(target_date)
+        canteen_paid_today = self.get_daily_canteen_paid(target_date)
+
+        bus_has_partial = bool(
+            self.bus and
+            not self.is_bus_paid_for_date(target_date) and
+            Decimal('0.00') < bus_credit < self.bus_fee_required
+        )
+        bus_remainder_due = max(Decimal('0.00'), self.bus_fee_required - bus_credit - bus_paid_today) if bus_has_partial else Decimal('0.00')
+
+        can_has_partial = bool(
+            self.canteen_enrolled and
+            not self.is_canteen_paid_for_date(target_date) and
+            Decimal('0.00') < can_credit < self.canteen_fee_required
+        )
+        can_remainder_due = max(Decimal('0.00'), self.canteen_fee_required - can_credit - canteen_paid_today) if can_has_partial else Decimal('0.00')
+
+        has_credit = bus_active or can_active or bus_has_partial or can_has_partial
+        is_expiring = (bus_active and bus_days <= 1) or (can_active and can_days <= 1) or bus_has_partial or can_has_partial
+
+        return {
+            'has_credit': has_credit,
+            'bus_has_credit': bus_active,
+            'bus_credit_balance': bus_credit,
+            'bus_credit_days': bus_days,
+            'bus_has_partial': bus_has_partial,
+            'bus_remainder_due': bus_remainder_due,
+            'canteen_has_credit': can_active,
+            'canteen_credit_balance': can_credit,
+            'canteen_credit_days': can_days,
+            'canteen_has_partial': can_has_partial,
+            'canteen_remainder_due': can_remainder_due,
+            'is_expiring_soon': is_expiring,
+        }
 
     def get_bus_paid_amount(self, period_or_date=None):
         if isinstance(period_or_date, (datetime.date, datetime.datetime)):
@@ -359,6 +443,8 @@ class FeePayment(models.Model):
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='payments')
     bus = models.ForeignKey('Bus', on_delete=models.SET_NULL, null=True, blank=True, related_name='payments', help_text="Specific bus route this fee payment was collected on")
     is_temporary_bus = models.BooleanField(default=False, help_text="True if recorded for a one-off/guest bus ride different from student regular route")
+    is_advance = models.BooleanField(default=False, help_text="True if recorded as advance payment covering future days")
+    days_covered = models.PositiveIntegerField(default=1, help_text="Number of school days this payment is intended to cover")
     fee_type = models.CharField(max_length=20, choices=FEE_TYPES)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_date = models.DateField(default=timezone.localdate)
@@ -453,6 +539,24 @@ class UserProfile(models.Model):
         return self.role == self.ROLE_TEACHER or self.is_school_admin
 
     @property
+    def is_fee_teacher(self):
+        return (self.role == self.ROLE_TEACHER and self.can_collect_fees) or self.is_school_admin
+
+    @property
+    def is_bus_fee_teacher(self):
+        return self.is_fee_teacher and bool(self.assigned_bus)
+
+    @property
+    def fee_teacher_title(self):
+        if self.assigned_bus:
+            return f"Fee Teacher ({self.assigned_bus.name})"
+        elif self.assigned_class:
+            return f"Class Teacher ({self.assigned_class})"
+        elif self.can_collect_fees:
+            return "Fee Collector (Floating)"
+        return "Teacher"
+
+    @property
     def can_view_revenue(self):
         return self.role in [self.ROLE_ADMIN, self.ROLE_ACCOUNTANT] or self.user.is_superuser
 
@@ -517,6 +621,8 @@ def create_or_save_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.create(user=instance, role=role)
     else:
         if hasattr(instance, 'profile'):
+            if instance.is_superuser and instance.profile.role != UserProfile.ROLE_ADMIN:
+                instance.profile.role = UserProfile.ROLE_ADMIN
             instance.profile.save()
 
 

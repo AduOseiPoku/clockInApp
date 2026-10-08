@@ -47,10 +47,8 @@ class FeePaymentForm(forms.Form):
         required=False,
         widget=forms.DateInput(attrs={'class': 'form-input', 'type': 'date', 'id': 'id_payment_date'})
     )
-    student_class = forms.ModelChoiceField(
-        queryset=SchoolClass.objects.filter(is_active=True),
+    student_class = forms.CharField(
         required=False,
-        empty_label="-- 1. Select Class First --",
         widget=forms.Select(attrs={'class': 'form-select', 'id': 'id_student_class'})
     )
     student = forms.ModelChoiceField(
@@ -92,6 +90,13 @@ class FeePaymentForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['student'].queryset = Student.objects.filter(is_active=True).order_by('student_class', 'first_name')
+        class_choices = [("", "-- 1. Select Class First --")]
+        try:
+            for sc in SchoolClass.objects.filter(is_active=True).order_by('name'):
+                class_choices.append((str(sc.id), sc.name))
+        except Exception:
+            pass
+        self.fields['student_class'].widget.choices = class_choices
         if not self.initial.get('payment_date'):
             self.initial['payment_date'] = timezone.localdate()
         if not self.initial.get('period'):
@@ -232,6 +237,16 @@ class TeacherCreationForm(forms.Form):
         initial=True,
         widget=forms.CheckboxInput(attrs={'class': 'form-checkbox'})
     )
+    role = forms.ChoiceField(
+        choices=[
+            (UserProfile.ROLE_TEACHER, 'Teacher'),
+            (UserProfile.ROLE_ADMIN, 'Administrator / Principal'),
+        ],
+        initial=UserProfile.ROLE_TEACHER,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label="Account Role & Privileges",
+        help_text="Select 'Administrator / Principal' to grant full administrative rights, or 'Teacher' for standard access."
+    )
     can_collect_fees = forms.BooleanField(
         required=False,
         initial=False,
@@ -273,11 +288,13 @@ class TeacherCreationForm(forms.Form):
         first_name = self.cleaned_data.get('first_name', '')
         last_name = self.cleaned_data.get('last_name', '')
         is_active = self.cleaned_data.get('is_active', True)
+        role = self.cleaned_data.get('role', UserProfile.ROLE_TEACHER)
         phone_number = self.cleaned_data.get('phone_number', '')
         assigned_class = self.cleaned_data.get('assigned_class', '')
         assigned_bus = self.cleaned_data.get('assigned_bus')
         can_collect_fees = self.cleaned_data.get('can_collect_fees', False)
 
+        is_admin_role = (role == UserProfile.ROLE_ADMIN)
         user = User.objects.create_user(
             username=username,
             email=email,
@@ -285,10 +302,11 @@ class TeacherCreationForm(forms.Form):
             first_name=first_name,
             last_name=last_name,
             is_active=is_active,
-            is_staff=True
+            is_staff=True,
+            is_superuser=is_admin_role
         )
         profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = UserProfile.ROLE_TEACHER
+        profile.role = role
         profile.phone_number = phone_number
         profile.assigned_class = assigned_class
         profile.assigned_bus = assigned_bus
@@ -316,6 +334,16 @@ class TeacherUpdateForm(forms.Form):
         max_length=30,
         required=False,
         widget=forms.TextInput(attrs={'class': 'form-input', 'placeholder': '+233 24 000 0000'})
+    )
+    role = forms.ChoiceField(
+        choices=[
+            (UserProfile.ROLE_TEACHER, 'Teacher'),
+            (UserProfile.ROLE_ADMIN, 'Administrator / Principal'),
+        ],
+        required=False,
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label="Account Role & Privileges",
+        help_text="Select 'Administrator / Principal' to grant full administrative rights, or 'Teacher' for standard access."
     )
     assigned_class = forms.CharField(
         max_length=50,
@@ -354,6 +382,7 @@ class TeacherUpdateForm(forms.Form):
                 class_choices.append((sc, sc))
         self.fields['assigned_class'].widget.choices = class_choices
         if user_obj and hasattr(user_obj, 'profile'):
+            self.fields['role'].initial = user_obj.profile.role
             self.fields['can_collect_fees'].initial = user_obj.profile.can_collect_fees
             self.fields['assigned_bus'].initial = user_obj.profile.assigned_bus
 
@@ -363,9 +392,17 @@ class TeacherUpdateForm(forms.Form):
         user.last_name = self.cleaned_data['last_name']
         user.email = self.cleaned_data.get('email', '')
         user.is_active = self.cleaned_data.get('is_active', True)
+
+        new_role = self.cleaned_data.get('role') or UserProfile.ROLE_TEACHER
+        if new_role == UserProfile.ROLE_ADMIN:
+            user.is_superuser = True
+            user.is_staff = True
+        elif new_role == UserProfile.ROLE_TEACHER:
+            user.is_superuser = False
         user.save()
 
         profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = new_role
         profile.phone_number = self.cleaned_data.get('phone_number', '')
         profile.assigned_class = self.cleaned_data.get('assigned_class', '')
         profile.assigned_bus = self.cleaned_data.get('assigned_bus')

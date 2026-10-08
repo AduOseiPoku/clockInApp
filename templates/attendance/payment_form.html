@@ -242,7 +242,48 @@
 
             {{ form.is_one_off_bus }}
 
-            {% if is_one_off_mode %}
+            {% if is_scoped_fee_teacher %}
+            <!-- Scoped Fee Teacher Banner -->
+            <div id="scoped-bus-mode-banner" style="background: hsla(217, 91%, 60%, 0.08); border: 1.5px solid #3b82f6; padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span style="font-size: 1.5rem;">🚌</span>
+                    <div>
+                        <div style="font-weight: 700; color: #1d4ed8; font-size: 0.92rem; display: flex; align-items: center; gap: 0.45rem;">
+                            <span>{{ assigned_bus.name }} Passengers Only</span>
+                            <span style="background: #dbeafe; color: #1e40af; font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 9999px; font-weight: 600;">Scoped Roster</span>
+                        </div>
+                        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">
+                            Showing <strong>{{ scoped_rider_count }}</strong> assigned passengers across all grades. Walkers and other buses are hidden.
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <button type="button" id="btn-toggle-guest-mode" class="btn-secondary" style="border-color: #f59e0b; color: #b45309; background: #fffbeb; font-weight: 600; font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                        ➕ Record Guest / Other Bus Rider
+                    </button>
+                </div>
+            </div>
+
+            <!-- Guest Mode Banner (Hidden initially unless in guest mode) -->
+            <div id="guest-mode-banner" style="display: none; background: hsla(38, 92%, 50%, 0.1); border: 1.5px solid #f59e0b; padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span style="font-size: 1.5rem;">⚠️</span>
+                    <div>
+                        <div style="font-weight: 700; color: #b45309; font-size: 0.92rem;">
+                            Guest Rider Mode Active
+                        </div>
+                        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">
+                            Searching all school students. Fare will be credited for <strong>{{ assigned_bus.name }}</strong> without altering the student's permanent bus assignment.
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <button type="button" id="btn-cancel-guest-mode" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                        ↩ Back to My Bus Roster
+                    </button>
+                </div>
+            </div>
+            {% elif is_one_off_mode %}
             <div style="background: hsla(var(--primary-hsl), 0.08); border: 1px solid var(--primary); padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; align-items: center; gap: 0.75rem;">
                 <span style="font-size: 1.35rem;">🚌</span>
                 <div>
@@ -314,6 +355,41 @@
                     </div>
                 </div>
 
+                <!-- Redesigned Multi-Pay Advance Prepayment Card -->
+                <div class="multipay-card" style="background: var(--surface-card); border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: var(--radius-sm); padding: 0.9rem 1.15rem; margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;">
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <div style="width: 32px; height: 32px; border-radius: 8px; background: hsla(var(--primary-hsl), 0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0;">
+                                💳
+                            </div>
+                            <div>
+                                <div style="font-size: 0.9rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+                                    <span>Multi-Pay Advance Prepayment</span>
+                                    <span class="badge" style="background: hsla(var(--primary-hsl), 0.08); color: var(--primary); font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.4rem;">Multi-Day Credit</span>
+                                </div>
+                                <span style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-top: 0.1rem;">
+                                    Enter lump-sum payment; automatically calculates days covered and splits between bus and lunch.
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Input & Apply Action Row -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 160px; max-width: 240px;">
+                            <input type="number" id="input-custom-multipay" step="0.50" min="0" placeholder="0.00" class="form-input" style="font-weight: 700; font-size: 1rem;">
+                        </div>
+                        <button type="button" id="btn-apply-multipay" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.82rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+                            <span>⚡</span> Apply Multi-Pay
+                        </button>
+                    </div>
+
+                    <!-- Live Coverage & Split Preview Badge Card -->
+                    <div id="multipay-preview-container" style="display: none; margin-top: 0.65rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; font-size: 0.78rem;">
+                        <div id="multipay-coverage-info" style="font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;"></div>
+                    </div>
+                </div>
+
                 <!-- Responsive Fee Cards Grid (2 cols on desktop, 1 col on mobile) -->
                 <div class="fee-cards-grid">
                     <!-- Bus Fee Card -->
@@ -343,10 +419,7 @@
 
                         <div class="fee-quick-actions" style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem;">
                             <button type="button" id="btn-bus-1day" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
-                                1 Day
-                            </button>
-                            <button type="button" id="btn-bus-5days" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
-                                5 Days
+                                1 Day (Today)
                             </button>
                             <button type="button" id="btn-bus-full" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
                                 Balance
@@ -384,10 +457,7 @@
 
                         <div class="fee-quick-actions" style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem;">
                             <button type="button" id="btn-canteen-1day" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
-                                1 Day
-                            </button>
-                            <button type="button" id="btn-canteen-5days" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
-                                5 Days
+                                1 Day (Today)
                             </button>
                             <button type="button" id="btn-canteen-full" class="btn-secondary" style="flex: 1; padding: 0.35rem 0.5rem; font-size: 0.78rem; text-align: center;">
                                 Balance
@@ -429,16 +499,40 @@
 </div>
 
 <script id="students-by-class-data" type="application/json">{{ students_by_class_json|safe }}</script>
+<script id="scoped-students-data" type="application/json">{{ scoped_students_by_class_json|safe }}</script>
+<script id="all-students-data" type="application/json">{{ all_students_by_class_json|safe }}</script>
+<script id="scoped-classes-data" type="application/json">{{ scoped_classes_json|safe }}</script>
+<script id="all-classes-data" type="application/json">{{ all_classes_json|safe }}</script>
 <script id="buses-data" type="application/json">{{ buses_json|safe }}</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const studentsDataEl = document.getElementById('students-by-class-data');
-    const studentsByClass = studentsDataEl ? JSON.parse(studentsDataEl.textContent || '{}') : {};
+    const isScopedFeeTeacher = "{{ is_scoped_fee_teacher|yesno:'true,false' }}" === "true";
+    let isGuestMode = "{{ is_guest_mode_initial|yesno:'true,false' }}" === "true";
+    const assignedBusId = "{{ assigned_bus.id|default:'' }}";
+    const assignedBusName = "{{ assigned_bus.name|default:'' }}";
+
+    const scopedStudentsEl = document.getElementById('scoped-students-data');
+    const allStudentsEl = document.getElementById('all-students-data');
+    const scopedClassesEl = document.getElementById('scoped-classes-data');
+    const allClassesEl = document.getElementById('all-classes-data');
     const busesDataEl = document.getElementById('buses-data');
+
+    const scopedStudents = scopedStudentsEl ? JSON.parse(scopedStudentsEl.textContent || '{}') : {};
+    const allStudents = allStudentsEl ? JSON.parse(allStudentsEl.textContent || '{}') : {};
+    const scopedClasses = scopedClassesEl ? JSON.parse(scopedClassesEl.textContent || '[]') : [];
+    const allClasses = allClassesEl ? JSON.parse(allClassesEl.textContent || '[]') : [];
     const busesList = busesDataEl ? JSON.parse(busesDataEl.textContent || '[]') : [];
     const busesById = {};
     busesList.forEach(b => { busesById[String(b.id)] = b; });
+
+    let activeStudentsByClass = isScopedFeeTeacher ? (isGuestMode ? allStudents : scopedStudents) : allStudents;
+
+    const scopedBanner = document.getElementById('scoped-bus-mode-banner');
+    const guestBanner = document.getElementById('guest-mode-banner');
+    const btnToggleGuest = document.getElementById('btn-toggle-guest-mode');
+    const btnCancelGuest = document.getElementById('btn-cancel-guest-mode');
+    const isOneOffInput = document.getElementById('id_is_one_off_bus');
 
     const classSelect = document.getElementById('id_student_class');
     const studentSelect = document.getElementById('id_student');
@@ -452,7 +546,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const cardBusBadge = document.getElementById('card-bus-badge');
     const cardBusBalance = document.getElementById('card-bus-balance');
     const btnBus1Day = document.getElementById('btn-bus-1day');
-    const btnBus5Days = document.getElementById('btn-bus-5days');
     const btnBusFull = document.getElementById('btn-bus-full');
     const btnBusZero = document.getElementById('btn-bus-zero');
 
@@ -460,7 +553,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const cardCanteenBadge = document.getElementById('card-canteen-badge');
     const cardCanteenBalance = document.getElementById('card-canteen-balance');
     const btnCanteen1Day = document.getElementById('btn-canteen-1day');
-    const btnCanteen5Days = document.getElementById('btn-canteen-5days');
     const btnCanteenFull = document.getElementById('btn-canteen-full');
     const btnCanteenZero = document.getElementById('btn-canteen-zero');
 
@@ -510,12 +602,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const b = busesById[selectedBusId];
             const busFee = b.fee;
             const busPaid = (currentStudent && currentStudent.bus_paid) ? currentStudent.bus_paid : 0;
+            const busHasPartial = Boolean(currentStudent && currentStudent.bus_has_partial);
+            const busRemainder = (currentStudent && currentStudent.bus_remainder_due !== undefined) ? currentStudent.bus_remainder_due : 0;
+            const busCredit = (currentStudent && currentStudent.bus_credit !== undefined) ? currentStudent.bus_credit : 0;
             const busBal = Math.max(0, busFee - busPaid);
 
-            // Amount to fill when clicking "Pay Full":
-            // If student owes an outstanding balance > 0, charge that balance.
-            // If student already paid for today (balance is 0), charge the full daily route fee!
-            const fullAmountToCharge = busBal > 0 ? busBal : busFee;
+            // Amount to fill when clicking "Pay Full" or "Pay Remainder":
+            let fullAmountToCharge;
+            if (busHasPartial && busRemainder > 0) {
+                fullAmountToCharge = busRemainder;
+            } else if (busBal > 0) {
+                fullAmountToCharge = busBal;
+            } else {
+                fullAmountToCharge = busFee;
+            }
             currentStudentActiveBusBalance = fullAmountToCharge;
 
             cardBusRoute.textContent = `Route: ${b.name}`;
@@ -523,19 +623,28 @@ document.addEventListener('DOMContentLoaded', () => {
             cardBusBadge.style.background = '#e0f2fe';
             cardBusBadge.style.color = '#0369a1';
 
-            if (currentStudent && busPaid > 0 && busBal === 0) {
+            if (busHasPartial) {
+                cardBusBalance.innerHTML = `<span style="color:#b45309; font-weight:700;">${formatMoney(busRemainder)} Top-Up</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(busCredit)} credit applied)</span>`;
+                btnBusFull.textContent = `Top-Up (${formatMoney(busRemainder)})`;
+            } else if (currentStudent && busPaid > 0 && busBal === 0) {
                 cardBusBalance.innerHTML = `<span style="color:var(--success-text); font-weight:600;">Paid (${formatMoney(busPaid)})</span>`;
+                btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
             } else if (currentStudent && busPaid > 0) {
                 cardBusBalance.innerHTML = `<span style="color:var(--danger-text); font-weight:700;">${formatMoney(busBal)}</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(busPaid)} paid)</span>`;
+                btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
             } else {
                 cardBusBalance.textContent = formatMoney(fullAmountToCharge);
                 cardBusBalance.style.color = 'var(--danger-text)';
+                btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
             }
-
-            btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
             if (busHelperText) {
-                busHelperText.textContent = `${b.name} (${formatMoney(busFee)}) active`;
-                busHelperText.style.color = 'var(--text-muted)';
+                if (isScopedFeeTeacher && isGuestMode) {
+                    busHelperText.textContent = `Guest ride on ${b.name} (${formatMoney(busFee)})`;
+                    busHelperText.style.color = 'var(--warning-text, #b45309)';
+                } else {
+                    busHelperText.textContent = `${b.name} (${formatMoney(busFee)}) active`;
+                    busHelperText.style.color = 'var(--text-muted)';
+                }
             }
 
             if (forceAmount || !busAmountInput.value || parseFloat(busAmountInput.value) === 0) {
@@ -563,23 +672,74 @@ document.addEventListener('DOMContentLoaded', () => {
         calculateTotal();
     }
 
+    function renderClassOptions(selectedVal = null) {
+        if (!classSelect) return;
+        classSelect.innerHTML = '';
+        const def = document.createElement('option');
+        def.value = '';
+        def.textContent = '-- 1. Select Class First --';
+        classSelect.appendChild(def);
+
+        const classesToList = isScopedFeeTeacher ? (isGuestMode ? allClasses : scopedClasses) : allClasses;
+        classesToList.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            if (selectedVal && String(c.id) === String(selectedVal)) opt.selected = true;
+            classSelect.appendChild(opt);
+        });
+    }
+
+    function setGuestMode(active) {
+        isGuestMode = active;
+        if (isOneOffInput) isOneOffInput.checked = active;
+        if (scopedBanner) scopedBanner.style.display = active ? 'none' : 'flex';
+        if (guestBanner) guestBanner.style.display = active ? 'flex' : 'none';
+
+        activeStudentsByClass = active ? allStudents : scopedStudents;
+        renderClassOptions('');
+        updateStudentDropdown('');
+
+        if (busSelect && assignedBusId) {
+            busSelect.value = assignedBusId;
+            syncBusFee(false);
+        }
+    }
+
+    if (btnToggleGuest) {
+        btnToggleGuest.addEventListener('click', () => setGuestMode(true));
+    }
+    if (btnCancelGuest) {
+        btnCancelGuest.addEventListener('click', () => setGuestMode(false));
+    }
+
     function updateStudentDropdown(classId, preserveStudentId = null) {
         studentSelect.innerHTML = '<option value="">-- Select Student --</option>';
 
-        if (!classId || !studentsByClass[classId] || studentsByClass[classId].length === 0) {
+        if (!classId || !activeStudentsByClass[classId] || activeStudentsByClass[classId].length === 0) {
             studentSelect.disabled = true;
-            helperText.textContent = classId ? 'No students enrolled in this class' : 'Select a class first';
+            helperText.textContent = classId ? 'No students found for this class on your bus' : 'Select a class first';
             clearStudentCards();
             return;
         }
 
         studentSelect.disabled = false;
-        helperText.textContent = `${studentsByClass[classId].length} students in class`;
+        const count = activeStudentsByClass[classId].length;
+        if (isScopedFeeTeacher && !isGuestMode) {
+            helperText.textContent = `${count} assigned rider${count > 1 ? 's' : ''} on ${assignedBusName || 'your bus'}`;
+        } else {
+            helperText.textContent = `${count} students in class`;
+        }
 
-        studentsByClass[classId].forEach(s => {
+        activeStudentsByClass[classId].forEach(s => {
             const opt = document.createElement('option');
             opt.value = s.id;
-            opt.textContent = s.name;
+            if (isGuestMode) {
+                const busLabel = s.bus_name ? s.bus_name : 'Walker';
+                opt.textContent = `${s.name} [Reg: ${busLabel}]`;
+            } else {
+                opt.textContent = s.name;
+            }
             if (preserveStudentId && String(s.id) === String(preserveStudentId)) {
                 opt.selected = true;
             }
@@ -593,13 +753,19 @@ document.addEventListener('DOMContentLoaded', () => {
         currentStudent = null;
         currentStudentActiveBusBalance = 0;
         currentStudentActiveCanteenBalance = 0;
-        if (busSelect) busSelect.value = '';
+        if (busSelect) {
+            if (isScopedFeeTeacher && assignedBusId) {
+                busSelect.value = assignedBusId;
+            } else {
+                busSelect.value = '';
+            }
+        }
         if (busHelperText) {
-            busHelperText.textContent = 'Select student or route first';
+            busHelperText.textContent = isScopedFeeTeacher ? `${assignedBusName} locked` : 'Select student or route first';
             busHelperText.style.color = 'var(--text-muted)';
         }
 
-        cardBusRoute.textContent = 'Route: —';
+        cardBusRoute.textContent = isScopedFeeTeacher ? `Route: ${assignedBusName}` : 'Route: —';
         cardBusBadge.textContent = '—';
         cardBusBadge.style.background = 'var(--surface-subtle)';
         cardBusBadge.style.color = 'var(--text-muted)';
@@ -623,12 +789,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const classId = classSelect.value;
         const studentId = studentSelect.value;
 
-        if (!classId || !studentId || !studentsByClass[classId]) {
+        if (!classId || !studentId || !activeStudentsByClass[classId]) {
             clearStudentCards();
             return;
         }
 
-        const student = studentsByClass[classId].find(s => String(s.id) === String(studentId));
+        const student = activeStudentsByClass[classId].find(s => String(s.id) === String(studentId));
         if (!student) {
             clearStudentCards();
             return;
@@ -637,8 +803,13 @@ document.addEventListener('DOMContentLoaded', () => {
         currentStudent = student;
         quickFillAll.style.display = 'block';
 
-        // 1. Bus Selection & Fee Sync
-        if (busSelect) {
+        // 1. Bus Selection & Lock
+        if (isScopedFeeTeacher && assignedBusId) {
+            if (busSelect) busSelect.value = assignedBusId;
+            if (isOneOffInput) {
+                isOneOffInput.checked = Boolean(isGuestMode || (student.bus_id && String(student.bus_id) !== String(assignedBusId)));
+            }
+        } else if (busSelect) {
             busSelect.value = student.bus_id ? String(student.bus_id) : '';
         }
         syncBusFee(false);
@@ -646,27 +817,39 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2. Canteen Card
         const canteenFee = (student && student.canteen_fee) ? student.canteen_fee : 10.0;
         const canteenBal = (student && student.canteen_balance) ? student.canteen_balance : 0;
-        const canteenFullAmount = canteenBal > 0 ? canteenBal : canteenFee;
+        const canHasPartial = Boolean(student && student.canteen_has_partial);
+        const canRemainder = (student && student.canteen_remainder_due !== undefined) ? student.canteen_remainder_due : 0;
+        const canCredit = (student && student.canteen_credit !== undefined) ? student.canteen_credit : 0;
+        const canteenFullAmount = canHasPartial ? canRemainder : (canteenBal > 0 ? canteenBal : canteenFee);
         currentStudentActiveCanteenBalance = canteenFullAmount;
 
-        cardCanteenBalance.textContent = formatMoney(student.canteen_balance);
         if (student.canteen_enrolled) {
             cardCanteenStatus.textContent = 'Status: Enrolled in meal plan';
             cardCanteenBadge.textContent = `${formatMoney(student.canteen_fee)} / day`;
             cardCanteenBadge.style.background = '#ecfdf5';
             cardCanteenBadge.style.color = '#047857';
-            btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFullAmount)})`;
+
+            if (canHasPartial) {
+                cardCanteenBalance.innerHTML = `<span style="color:#b45309; font-weight:700;">${formatMoney(canRemainder)} Top-Up</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(canCredit)} credit applied)</span>`;
+                btnCanteenFull.textContent = `Top-Up (${formatMoney(canRemainder)})`;
+            } else {
+                cardCanteenBalance.textContent = formatMoney(student.canteen_balance);
+                btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFullAmount)})`;
+            }
         } else {
             cardCanteenStatus.textContent = 'Status: Opted out';
             cardCanteenBadge.textContent = 'Opted Out';
             cardCanteenBadge.style.background = 'var(--surface-subtle)';
             cardCanteenBadge.style.color = 'var(--text-muted)';
+            cardCanteenBalance.textContent = formatMoney(0);
             btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFee)})`;
         }
 
         // Auto-fill suggested canteen amount if field is empty or 0
         if (!canteenAmountInput.value || parseFloat(canteenAmountInput.value) === 0) {
-            if (student.canteen_balance > 0) {
+            if (canHasPartial) {
+                canteenAmountInput.value = canRemainder.toFixed(2);
+            } else if (student.canteen_balance > 0) {
                 canteenAmountInput.value = student.canteen_balance.toFixed(2);
             } else if (student.canteen_enrolled) {
                 canteenAmountInput.value = canteenFee.toFixed(2);
@@ -703,45 +886,32 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnBus5Days) {
-        btnBus5Days.addEventListener('click', () => {
+    if (btnBusFull) {
+        btnBusFull.addEventListener('click', () => {
             const selectedBusId = busSelect ? busSelect.value : '';
             if (selectedBusId && busesById[selectedBusId]) {
                 const b = busesById[selectedBusId];
-                busAmountInput.value = (parseFloat(b.fee) * 5).toFixed(2);
+                const fullAmount = currentStudentActiveBusBalance > 0 ? currentStudentActiveBusBalance : b.fee;
+                busAmountInput.value = fullAmount.toFixed(2);
                 calculateTotal();
-            } else if (busSelect) {
-                busSelect.focus();
-                if (busHelperText) {
-                    busHelperText.textContent = 'Please choose a Bus Route above first!';
-                    busHelperText.style.color = 'var(--danger-text)';
+            } else {
+                if (busSelect) {
+                    busSelect.focus();
+                    if (busHelperText) {
+                        busHelperText.textContent = 'Please choose a Bus Route above first!';
+                        busHelperText.style.color = 'var(--danger-text)';
+                    }
                 }
             }
         });
     }
 
-    btnBusFull.addEventListener('click', () => {
-        const selectedBusId = busSelect ? busSelect.value : '';
-        if (selectedBusId && busesById[selectedBusId]) {
-            const b = busesById[selectedBusId];
-            const fullAmount = currentStudentActiveBusBalance > 0 ? currentStudentActiveBusBalance : b.fee;
-            busAmountInput.value = fullAmount.toFixed(2);
+    if (btnBusZero) {
+        btnBusZero.addEventListener('click', () => {
+            busAmountInput.value = '0.00';
             calculateTotal();
-        } else {
-            if (busSelect) {
-                busSelect.focus();
-                if (busHelperText) {
-                    busHelperText.textContent = 'Please choose a Bus Route above first!';
-                    busHelperText.style.color = 'var(--danger-text)';
-                }
-            }
-        }
-    });
-
-    btnBusZero.addEventListener('click', () => {
-        busAmountInput.value = '0.00';
-        calculateTotal();
-    });
+        });
+    }
 
     if (btnCanteen1Day) {
         btnCanteen1Day.addEventListener('click', () => {
@@ -751,35 +921,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnCanteen5Days) {
-        btnCanteen5Days.addEventListener('click', () => {
-            const fee = (currentStudent && currentStudent.canteen_fee) ? currentStudent.canteen_fee : 10.0;
-            canteenAmountInput.value = (fee * 5).toFixed(2);
+    if (btnCanteenFull) {
+        btnCanteenFull.addEventListener('click', () => {
+            const fullCanteen = currentStudentActiveCanteenBalance > 0 ? currentStudentActiveCanteenBalance : 10.0;
+            canteenAmountInput.value = fullCanteen.toFixed(2);
             calculateTotal();
         });
     }
 
-    btnCanteenFull.addEventListener('click', () => {
-        const fullCanteen = currentStudentActiveCanteenBalance > 0 ? currentStudentActiveCanteenBalance : 10.0;
-        canteenAmountInput.value = fullCanteen.toFixed(2);
-        calculateTotal();
-    });
+    if (btnCanteenZero) {
+        btnCanteenZero.addEventListener('click', () => {
+            canteenAmountInput.value = '0.00';
+            calculateTotal();
+        });
+    }
 
-    btnCanteenZero.addEventListener('click', () => {
-        canteenAmountInput.value = '0.00';
-        calculateTotal();
-    });
-
-    btnPayAllBalances.addEventListener('click', () => {
-        const selectedBusId = busSelect ? busSelect.value : '';
-        if (selectedBusId && busesById[selectedBusId]) {
-            const b = busesById[selectedBusId];
-            busAmountInput.value = (currentStudentActiveBusBalance > 0 ? currentStudentActiveBusBalance : b.fee).toFixed(2);
-        }
-        const fullCanteen = currentStudentActiveCanteenBalance > 0 ? currentStudentActiveCanteenBalance : 10.0;
-        canteenAmountInput.value = fullCanteen.toFixed(2);
-        calculateTotal();
-    });
+    if (btnPayAllBalances) {
+        btnPayAllBalances.addEventListener('click', () => {
+            const selectedBusId = busSelect ? busSelect.value : '';
+            if (selectedBusId && busesById[selectedBusId]) {
+                const b = busesById[selectedBusId];
+                busAmountInput.value = (currentStudentActiveBusBalance > 0 ? currentStudentActiveBusBalance : b.fee).toFixed(2);
+            }
+            const fullCanteen = currentStudentActiveCanteenBalance > 0 ? currentStudentActiveCanteenBalance : 10.0;
+            canteenAmountInput.value = fullCanteen.toFixed(2);
+            calculateTotal();
+        });
+    }
 
     busAmountInput.addEventListener('input', calculateTotal);
     canteenAmountInput.addEventListener('input', calculateTotal);
@@ -792,15 +960,190 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStudentDetails();
     });
 
-    // Handle initial state or pre-selected student from URL
-    if (initialClassId) {
-        classSelect.value = initialClassId;
-        updateStudentDropdown(initialClassId, initialStudentId);
-    } else if (classSelect.value) {
-        updateStudentDropdown(classSelect.value, studentSelect.value);
+    // Handle initial state setup
+    if (isScopedFeeTeacher) {
+        if (isGuestMode) {
+            setGuestMode(true);
+            if (initialClassId) {
+                classSelect.value = initialClassId;
+                updateStudentDropdown(initialClassId, initialStudentId);
+            }
+        } else {
+            renderClassOptions(initialClassId || '');
+            if (initialClassId) {
+                classSelect.value = initialClassId;
+                updateStudentDropdown(initialClassId, initialStudentId);
+            } else {
+                studentSelect.disabled = true;
+            }
+        }
+        if (busSelect && assignedBusId) {
+            busSelect.value = assignedBusId;
+        }
     } else {
-        studentSelect.disabled = true;
+        renderClassOptions(initialClassId || '');
+        if (initialClassId) {
+            classSelect.value = initialClassId;
+            updateStudentDropdown(initialClassId, initialStudentId);
+        } else if (classSelect.value) {
+            updateStudentDropdown(classSelect.value, studentSelect.value);
+        } else {
+            studentSelect.disabled = true;
+        }
     }
+
+    function getDailyRates() {
+        const selectedBusId = busSelect ? busSelect.value : '';
+        const busFee = (selectedBusId && busesById[selectedBusId]) ? parseFloat(busesById[selectedBusId].fee) : 0;
+        const canteenFee = (currentStudent && currentStudent.canteen_enrolled && currentStudent.canteen_fee) ? parseFloat(currentStudent.canteen_fee) : 0;
+        return { busFee, canteenFee, totalDaily: busFee + canteenFee };
+    }
+
+    function renderMultipayPreview(customAmount, isApplied = false) {
+        const previewContainer = document.getElementById('multipay-preview-container');
+        const coverageInfoEl = document.getElementById('multipay-coverage-info');
+        if (!previewContainer || !coverageInfoEl) return;
+
+        if (customAmount <= 0) {
+            previewContainer.style.display = 'none';
+            return;
+        }
+
+        const { busFee, canteenFee, totalDaily } = getDailyRates();
+        previewContainer.style.display = 'block';
+
+        const prefix = isApplied ? '<span style="color:var(--success);font-weight:700;">✓ Applied:</span>' : '<span style="color:var(--primary);font-weight:700;">Preview:</span>';
+
+        if (totalDaily <= 0) {
+            coverageInfoEl.innerHTML = `${prefix} <span>${formatMoney(customAmount)} credit</span>`;
+            return;
+        }
+
+        if (busFee > 0 && canteenFee > 0) {
+            const ratio = busFee / totalDaily;
+            const allocatedBus = Math.round((customAmount * ratio) * 100) / 100;
+            const allocatedCanteen = Math.round((customAmount - allocatedBus) * 100) / 100;
+            const daysCovered = Math.floor(customAmount / totalDaily);
+            const remainder = Math.round((customAmount % totalDaily) * 100) / 100;
+
+            let details = `<span class="badge" style="background:hsla(var(--primary-hsl),0.1);color:var(--primary);font-weight:600;">🚌 Bus: ${formatMoney(allocatedBus)} (~${Math.floor(allocatedBus / busFee)}d)</span> `;
+            details += `<span class="badge" style="background:hsla(24,95%,53%,0.1);color:#ea580c;font-weight:600;">🍽️ Lunch: ${formatMoney(allocatedCanteen)} (~${Math.floor(allocatedCanteen / canteenFee)}d)</span>`;
+            if (remainder > 0) {
+                details += ` <span style="color:var(--text-muted);font-size:0.72rem;">(+${formatMoney(remainder)} partial credit)</span>`;
+            }
+
+            coverageInfoEl.innerHTML = `
+                ${prefix} <strong>${formatMoney(customAmount)}</strong>
+                <span style="color:var(--border);">&bull;</span>
+                <span>Covers <strong>~${daysCovered} day${daysCovered !== 1 ? 's' : ''}</strong></span>
+                <span style="color:var(--border);">&bull;</span>
+                ${details}
+            `;
+        } else if (busFee > 0) {
+            const daysCovered = Math.floor(customAmount / busFee);
+            const remainder = Math.round((customAmount % busFee) * 100) / 100;
+            let remText = remainder > 0 ? ` (+${formatMoney(remainder)} partial)` : '';
+            coverageInfoEl.innerHTML = `
+                ${prefix} <strong>${formatMoney(customAmount)}</strong>
+                <span style="color:var(--border);">&bull;</span>
+                <span class="badge" style="background:hsla(var(--primary-hsl),0.1);color:var(--primary);font-weight:600;">🚌 Covers ~${daysCovered} day${daysCovered !== 1 ? 's' : ''} bus${remText}</span>
+            `;
+        } else if (canteenFee > 0) {
+            const daysCovered = Math.floor(customAmount / canteenFee);
+            const remainder = Math.round((customAmount % canteenFee) * 100) / 100;
+            let remText = remainder > 0 ? ` (+${formatMoney(remainder)} partial)` : '';
+            coverageInfoEl.innerHTML = `
+                ${prefix} <strong>${formatMoney(customAmount)}</strong>
+                <span style="color:var(--border);">&bull;</span>
+                <span class="badge" style="background:hsla(24,95%,53%,0.1);color:#ea580c;font-weight:600;">🍽️ Covers ~${daysCovered} day${daysCovered !== 1 ? 's' : ''} lunch${remText}</span>
+            `;
+        }
+    }
+
+    function applyCustomMultipay() {
+        if (!currentStudent) {
+            alert("Please select a student first to calculate fee coverage.");
+            return;
+        }
+        const customAmountInput = document.getElementById('input-custom-multipay');
+        const customAmount = parseFloat(customAmountInput ? customAmountInput.value : 0) || 0;
+
+        if (customAmount <= 0) {
+            alert('Please enter an amount greater than 0.');
+            return;
+        }
+
+        const { busFee, canteenFee, totalDaily } = getDailyRates();
+
+        if (totalDaily <= 0) {
+            busAmountInput.value = customAmount.toFixed(2);
+            canteenAmountInput.value = '0.00';
+            renderMultipayPreview(customAmount, true);
+            calculateTotal();
+            return;
+        }
+
+        if (busFee > 0 && canteenFee > 0) {
+            const ratio = busFee / totalDaily;
+            const allocatedBus = Math.round((customAmount * ratio) * 100) / 100;
+            const allocatedCanteen = Math.round((customAmount - allocatedBus) * 100) / 100;
+            busAmountInput.value = allocatedBus.toFixed(2);
+            canteenAmountInput.value = allocatedCanteen.toFixed(2);
+        } else if (busFee > 0) {
+            busAmountInput.value = customAmount.toFixed(2);
+            canteenAmountInput.value = '0.00';
+        } else if (canteenFee > 0) {
+            busAmountInput.value = '0.00';
+            canteenAmountInput.value = customAmount.toFixed(2);
+        }
+
+        renderMultipayPreview(customAmount, true);
+
+        const notesEl = document.getElementById('id_notes');
+        if (notesEl && !notesEl.value) {
+            notesEl.value = `Custom multi-pay prepayment of ${formatMoney(customAmount)}`;
+        }
+        calculateTotal();
+    }
+
+    const btnApplyMultipay = document.getElementById('btn-apply-multipay');
+    if (btnApplyMultipay) btnApplyMultipay.addEventListener('click', applyCustomMultipay);
+
+    const inputCustomMultipay = document.getElementById('input-custom-multipay');
+    if (inputCustomMultipay) {
+        inputCustomMultipay.addEventListener('input', () => {
+            const amt = parseFloat(inputCustomMultipay.value) || 0;
+            renderMultipayPreview(amt, false);
+        });
+        inputCustomMultipay.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                applyCustomMultipay();
+            }
+        });
+    }
+
+    // Preset button handlers (1 Wk, 2 Wks, 1 Mo)
+    document.querySelectorAll('.btn-mp-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!currentStudent) {
+                alert("Please select a student first to calculate presets.");
+                return;
+            }
+            const days = parseInt(btn.getAttribute('data-days')) || 5;
+            const { totalDaily, busFee, canteenFee } = getDailyRates();
+            const rate = totalDaily > 0 ? totalDaily : (busFee > 0 ? busFee : canteenFee);
+            if (rate <= 0) {
+                alert("Student has no active daily fee rate configured.");
+                return;
+            }
+            const calculatedAmount = Math.round((rate * days) * 100) / 100;
+            if (inputCustomMultipay) {
+                inputCustomMultipay.value = calculatedAmount.toFixed(2);
+            }
+            applyCustomMultipay();
+        });
+    });
 
     calculateTotal();
 });

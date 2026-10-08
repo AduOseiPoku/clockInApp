@@ -92,7 +92,14 @@
                         {{ item.user.get_full_name|default:item.user.username }}
                     </div>
                     <div style="font-size: 0.7rem; color: var(--text-muted);">
-                        {{ item.user.profile.assigned_class|default:"Floating" }}{% if item.assigned_bus_name %} • 🚌 {{ item.assigned_bus_name }}{% endif %}{% if item.student_count %} ({{ item.student_count }}){% endif %}
+                        {% if item.is_bus_fee_teacher %}
+                            <strong style="color: var(--primary);">🚌 Fee Teacher ({{ item.assigned_bus_name }})</strong>
+                        {% elif item.user.profile.assigned_class %}
+                            Class: {{ item.user.profile.assigned_class }}
+                        {% else %}
+                            Floating
+                        {% endif %}
+                        {% if item.student_count %} ({{ item.student_count }}){% endif %}
                     </div>
                 </div>
             </div>
@@ -100,8 +107,8 @@
                 <div style="font-size: 0.82rem; font-weight: 700; color: var(--success-text);">
                     +{{ CURRENCY_SYMBOL }}{{ item.today_total|floatformat:2 }}
                 </div>
-                <div style="font-size: 0.66rem; color: var(--text-muted);" title="Class daily target">
-                    target: {{ CURRENCY_SYMBOL }}{{ item.class_expected|floatformat:2 }}{% if item.one_off_additions > 0 %} (+{{ CURRENCY_SYMBOL }}{{ item.one_off_additions|floatformat:0 }} bus){% endif %}
+                <div style="font-size: 0.66rem; color: var(--text-muted);" title="Target breakdown: Bus {{ CURRENCY_SYMBOL }}{{ item.bus_expected|floatformat:2 }} | Lunch {{ CURRENCY_SYMBOL }}{{ item.canteen_expected|floatformat:2 }}">
+                    target: {{ CURRENCY_SYMBOL }}{{ item.class_expected|floatformat:2 }}{% if item.prepaid_deductions > 0 %} (-{{ CURRENCY_SYMBOL }}{{ item.prepaid_deductions|floatformat:0 }} credit){% endif %}{% if item.advance_prepayments > 0 %} (+{{ CURRENCY_SYMBOL }}{{ item.advance_prepayments|floatformat:0 }} adv){% endif %}{% if item.one_off_additions > 0 %} (+{{ CURRENCY_SYMBOL }}{{ item.one_off_additions|floatformat:0 }} one-off){% endif %}
                 </div>
             </div>
         </a>
@@ -228,6 +235,11 @@
                             {% else %}
                                 <span class="fee-badge fee-badge-paid">Canteen Fee</span>
                             {% endif %}
+                            {% if p.is_advance or p.days_covered > 1 %}
+                            <span class="badge" style="font-size: 0.65rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd; display: inline-block; margin-top: 0.15rem; font-weight: 600;">
+                                💳 {{ p.days_covered }}d Advance
+                            </span>
+                            {% endif %}
                         </td>
                         <td>
                             <span style="font-size: 0.8rem; color: var(--text-muted);">
@@ -303,6 +315,11 @@
                         <span class="fee-badge fee-badge-paid" style="font-size:0.68rem;">Bus Fee</span>
                     {% else %}
                         <span class="fee-badge fee-badge-paid" style="font-size:0.68rem;">Canteen Fee</span>
+                    {% endif %}
+                    {% if p.is_advance or p.days_covered > 1 %}
+                        <span class="badge" style="font-size:0.65rem; background:#ede9fe; color:#6d28d9; border:1px solid #c4b5fd; display:inline-block; font-weight:600; margin-top:0.15rem;">
+                            💳 {{ p.days_covered }}d Adv
+                        </span>
                     {% endif %}
                 </div>
             </div>

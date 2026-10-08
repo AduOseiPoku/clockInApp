@@ -25,9 +25,11 @@
             <span>🚌</span> Record One-Off Rider
         </a>
         {% endif %}
+        {% if user.profile and user.profile.is_principal %}
         <a href="{% url 'bus_update' bus.pk %}" class="btn-secondary" style="font-size: 0.82rem;">
             Edit Route
         </a>
+        {% endif %}
     </div>
 </div>
 
@@ -55,6 +57,19 @@
             <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Plate Number</span>
             <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">
                 {{ bus.plate_number|default:"—" }}
+            </div>
+        </div>
+        <div style="width: 1px; height: 32px; background: var(--border);"></div>
+        <div>
+            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Fee Teacher on Duty</span>
+            <div style="font-size: 0.92rem; font-weight: 600; color: var(--primary);">
+                {% if fee_teachers %}
+                    {% for ft in fee_teachers %}
+                        <span>👤 {{ ft.get_full_name|default:ft.username }}</span>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <span style="color: var(--text-subtle); font-weight: 400;">Unassigned</span>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -100,9 +115,15 @@
                 ⚡ Show Unpaid
             </span>
         </div>
-        <div class="stat-value" style="color: {% if summary.unpaid_count > 0 %}var(--danger){% else %}var(--text-muted){% endif %};">
-            {{ summary.unpaid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
-        </div>
+        {% if summary.unpaid_count > 0 %}
+            <div class="stat-value" style="color: var(--danger);">
+                {{ summary.unpaid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
+            </div>
+        {% else %}
+            <div class="stat-value" style="color: var(--text-muted);">
+                {{ summary.unpaid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
+            </div>
+        {% endif %}
         <div class="stat-footer">
             <span class="stat-badge {% if summary.unpaid_count > 0 %}stat-badge-danger{% else %}stat-badge-success{% endif %}">
                 {{ summary.unpaid_pct }}% Owing
@@ -137,8 +158,14 @@
     
     <!-- Progress Bar Track -->
     <div style="height: 12px; background: hsla(var(--danger-hsl), 0.15); border-radius: 999px; overflow: hidden; display: flex;">
-        <div style="width: {{ summary.paid_pct }}%; background: var(--success); transition: width 0.3s ease;" title="{{ summary.paid_pct }}% Paid"></div>
+        <div id="compliance-progress-bar" style="width: 0%; background: var(--success); transition: width 0.3s ease;" title="{{ summary.paid_pct }}% Paid"></div>
     </div>
+    <script>
+        (function() {
+            var bar = document.getElementById('compliance-progress-bar');
+            if (bar) bar.style.width = '{{ summary.paid_pct }}%';
+        })();
+    </script>
     
     <div style="display: flex; justify-content: space-between; margin-top: 0.45rem; font-size: 0.75rem; color: var(--text-muted);">
         <span>0%</span>
@@ -296,13 +323,28 @@
                             </span>
                         </td>
                         <td>
-                            <span class="fee-badge fee-badge-unpaid">
-                                ⚠ Unpaid
-                            </span>
+                            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                                {% if item.is_paid %}
+                                    <span class="fee-badge fee-badge-paid">✓ Bus</span>
+                                {% elif item.has_partial_credit %}
+                                    <span class="fee-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a;" title="Prepaid Credit: {{ currency }}{{ item.credit_available|floatformat:2 }}">💳 Has {{ currency }}{{ item.credit_available|floatformat:2 }}</span>
+                                {% else %}
+                                    <span class="fee-badge fee-badge-unpaid">⚠ Bus</span>
+                                {% endif %}
+                                {% if not item.canteen_enrolled %}
+                                    <span class="fee-badge" style="background: var(--surface-subtle); color: var(--text-subtle);">— No Lunch</span>
+                                {% elif item.canteen_is_paid %}
+                                    <span class="fee-badge fee-badge-paid">✓ Lunch</span>
+                                {% elif item.canteen_has_partial %}
+                                    <span class="fee-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a;" title="Lunch Credit: {{ currency }}{{ item.canteen_credit_available|floatformat:2 }}">💳 Lunch {{ currency }}{{ item.canteen_credit_available|floatformat:2 }}</span>
+                                {% else %}
+                                    <span class="fee-badge fee-badge-unpaid">⚠ Lunch</span>
+                                {% endif %}
+                            </div>
                         </td>
                         <td>
                             <span style="font-weight: 700; color: var(--danger-text);">
-                                Owes {{ currency }}{{ item.balance|floatformat:2 }}
+                                Owes {{ currency }}{{ item.combined_due|floatformat:2 }}
                             </span>
                         </td>
                         <td>
@@ -316,9 +358,33 @@
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
                             {% if user.profile.can_record_payments %}
-                                <a href="{% url 'payment_create' %}?student_id={{ item.student.id }}&fee_type=BUS" class="btn-table-action" style="color: var(--primary);">
-                                    Record Payment
-                                </a>
+                                {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
+                                    <button type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
+                                        ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+                                    </button>
+                                {% elif not item.is_paid %}
+                                    {% if item.has_partial_credit %}
+                                        <button type="button" class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                            ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
+                                        </button>
+                                    {% else %}
+                                        <button type="button" class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; color: var(--primary); border: 1px solid var(--primary);" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                            🚌 Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
+                                        </button>
+                                    {% endif %}
+                                {% elif item.canteen_enrolled and not item.canteen_is_paid %}
+                                    {% if item.canteen_has_partial %}
+                                        <button type="button" class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                            ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
+                                        </button>
+                                    {% else %}
+                                        <button type="button" class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; color: #ea580c; border: 1px solid #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                            🍲 Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
+                                        </button>
+                                    {% endif %}
+                                {% else %}
+                                    <span style="color: var(--success); font-weight: 600; font-size: 0.8rem;">✓ Settled</span>
+                                {% endif %}
                             {% else %}
                                 <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
                             {% endif %}
@@ -347,20 +413,50 @@
                             </span>
                         </div>
                     </div>
-                    <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">
-                        Owes {{ currency }}{{ item.balance|floatformat:2 }}
-                    </span>
+                    <div style="text-align: right;">
+                        <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">
+                            Owes {{ currency }}{{ item.combined_due|floatformat:2 }}
+                        </span>
+                        <div style="display: flex; gap: 0.25rem; justify-content: flex-end; margin-top: 0.2rem;">
+                            {% if item.has_partial_credit %}<span style="font-size: 0.65rem; color: #b45309; font-weight: 600;">💳 Has {{ currency }}{{ item.credit_available|floatformat:2 }}</span>
+                            {% elif not item.is_paid %}<span style="font-size: 0.65rem; color: var(--danger); font-weight: 600;">Bus</span>{% endif %}
+                            {% if item.canteen_enrolled and item.canteen_has_partial %}<span style="font-size: 0.65rem; color: #b45309; font-weight: 600;">💳 Lunch {{ currency }}{{ item.canteen_credit_available|floatformat:2 }}</span>
+                            {% elif item.canteen_enrolled and not item.canteen_is_paid %}<span style="font-size: 0.65rem; color: #ea580c; font-weight: 600;">Lunch</span>{% endif %}
+                        </div>
+                    </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-top: 0.35rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-top: 0.45rem;">
                     <div>
                         {% if item.parent_phone %}
                             <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
                         {% endif %}
                     </div>
                     {% if user.profile.can_record_payments %}
-                        <a href="{% url 'payment_create' %}?student_id={{ item.student.id }}&fee_type=BUS" style="color: var(--primary); font-weight: 600; text-decoration: none;">
-                            Record &rarr;
-                        </a>
+                        {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
+                            <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
+                                ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+                            </button>
+                        {% elif not item.is_paid %}
+                            {% if item.has_partial_credit %}
+                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                    ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary);" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                    🚌 Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
+                                </button>
+                            {% endif %}
+                        {% elif item.canteen_enrolled and not item.canteen_is_paid %}
+                            {% if item.canteen_has_partial %}
+                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                    ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                    🍲 Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
+                                </button>
+                            {% endif %}
+                        {% endif %}
                     {% endif %}
                 </div>
             </div>
@@ -525,25 +621,48 @@
                             </div>
                         </td>
                         <td>
-                            {% if item.is_paid %}
-                                <span class="fee-badge fee-badge-paid">
-                                    ✓ Paid
-                                </span>
+                            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                                {% if item.bus_credit_days > 0 %}
+                                    <span class="fee-badge" style="background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;">💳 Bus ({{ item.bus_credit_days }}d left)</span>
+                                {% elif item.is_paid %}
+                                    <span class="fee-badge fee-badge-paid">✓ Bus</span>
+                                {% elif item.has_partial_credit %}
+                                    <span class="fee-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a;" title="Prepaid Credit: {{ currency }}{{ item.credit_available|floatformat:2 }}">💳 Has {{ currency }}{{ item.credit_available|floatformat:2 }}</span>
+                                {% else %}
+                                    <span class="fee-badge fee-badge-unpaid">⚠ Bus</span>
+                                {% endif %}
+                                {% if not item.canteen_enrolled %}
+                                    <span class="fee-badge" style="background: var(--surface-subtle); color: var(--text-subtle);">— No Lunch</span>
+                                {% elif item.canteen_credit_days > 0 %}
+                                    <span class="fee-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a;">💳 Lunch ({{ item.canteen_credit_days }}d left)</span>
+                                {% elif item.canteen_is_paid %}
+                                    <span class="fee-badge fee-badge-paid">✓ Lunch</span>
+                                {% elif item.canteen_has_partial %}
+                                    <span class="fee-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a;" title="Lunch Credit: {{ currency }}{{ item.canteen_credit_available|floatformat:2 }}">💳 Lunch {{ currency }}{{ item.canteen_credit_available|floatformat:2 }}</span>
+                                {% else %}
+                                    <span class="fee-badge fee-badge-unpaid">⚠ Lunch</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if item.both_is_paid %}
+                                <strong style="color: var(--success-text);">
+                                    {{ currency }}{{ item.amount_paid|add:item.canteen_amount_paid|floatformat:2 }}
+                                </strong>
                             {% else %}
-                                <span class="fee-badge fee-badge-unpaid">
-                                    ⚠ Unpaid
-                                </span>
+                                <strong style="color: var(--text-muted);">
+                                    {{ currency }}{{ item.amount_paid|add:item.canteen_amount_paid|floatformat:2 }}
+                                </strong>
                             {% endif %}
                         </td>
                         <td>
-                            <strong style="color: {% if item.is_paid %}var(--success-text){% else %}var(--text-muted){% endif %};">
-                                {{ currency }}{{ item.amount_paid|floatformat:2 }}
-                            </strong>
-                        </td>
-                        <td>
-                            {% if item.balance > 0 %}
+                            {% if item.combined_due > 0 %}
                                 <span style="font-weight: 700; color: var(--danger-text);">
-                                    Owes {{ currency }}{{ item.balance|floatformat:2 }}
+                                    Owes {{ currency }}{{ item.combined_due|floatformat:2 }}
+                                </span>
+                            {% elif item.bus_credit_days > 0 or item.canteen_credit_days > 0 %}
+                                <span style="color: #6d28d9; font-weight: 600;">
+                                    💳 Advance Credit
                                 </span>
                             {% else %}
                                 <span style="color: var(--success); font-weight: 500;">
@@ -561,10 +680,46 @@
                             {% endif %}
                         </td>
                         <td style="text-align: right; white-space: nowrap;">
-                            {% if not item.is_paid and user.profile.can_record_payments %}
-                                <a href="{% url 'payment_create' %}?student_id={{ item.student.id }}&fee_type=BUS" class="btn-table-action" style="color: var(--primary);">
-                                    Record Payment
-                                </a>
+                            {% if user.profile.can_record_payments %}
+                                {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
+                                    <button type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
+                                        ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+                                    </button>
+                                    <button type="button" class="btn-secondary" style="padding: 0.3rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Enter custom advance payment amount">
+                                        💳 Multi-Pay
+                                    </button>
+                                {% elif not item.is_paid %}
+                                    {% if item.has_partial_credit %}
+                                        <button type="button" class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                            ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
+                                        </button>
+                                    {% else %}
+                                        <button type="button" class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; color: var(--primary); border: 1px solid var(--primary);" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                            🚌 Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
+                                        </button>
+                                    {% endif %}
+                                    <button type="button" class="btn-secondary" style="padding: 0.3rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary); border: 1px solid var(--border); margin-left: 0.25rem;" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Enter custom advance payment amount">
+                                        💳 Multi-Pay
+                                    </button>
+                                {% elif item.canteen_enrolled and not item.canteen_is_paid %}
+                                    {% if item.canteen_has_partial %}
+                                        <button type="button" class="btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                            ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
+                                        </button>
+                                    {% else %}
+                                        <button type="button" class="btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; color: #ea580c; border: 1px solid #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                            🍲 Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
+                                        </button>
+                                    {% endif %}
+                                    <button type="button" class="btn-secondary" style="padding: 0.3rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary); border: 1px solid var(--border); margin-left: 0.25rem;" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Enter custom advance payment amount">
+                                        💳 Multi-Pay
+                                    </button>
+                                {% else %}
+                                    <span style="color: var(--success); font-weight: 600; font-size: 0.8rem;">✓ Settled</span>
+                                    <button type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.72rem; color: var(--primary); border: 1px solid var(--border); margin-left: 0.35rem;" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Add custom advance credit">
+                                        + Multi-Pay
+                                    </button>
+                                {% endif %}
                             {% else %}
                                 <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
                             {% endif %}
@@ -578,7 +733,7 @@
         <!-- Student Roster Mobile Cards for this Class -->
         <div class="mobile-only student-cards-list" style="padding: 0.75rem;">
             {% for item in c.students %}
-            <div class="student-card-item student-row" data-status="{% if item.is_paid %}paid{% else %}unpaid{% endif %}" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
+            <div class="student-card-item student-row" data-status="{% if item.both_is_paid %}paid{% else %}unpaid{% endif %}" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
@@ -588,16 +743,70 @@
                             {{ item.student.full_name }}
                         </span>
                     </div>
-                    {% if item.is_paid %}
-                        <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">✓ Paid</span>
-                    {% else %}
-                        <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">Owes {{ currency }}{{ item.balance|floatformat:2 }}</span>
-                    {% endif %}
+                    <div style="text-align: right;">
+                        {% if item.combined_due > 0 %}
+                            <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">Owes {{ currency }}{{ item.combined_due|floatformat:2 }}</span>
+                        {% elif item.bus_credit_days > 0 or item.canteen_credit_days > 0 %}
+                            <span class="fee-badge" style="font-size: 0.72rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;">💳 Advance</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">✓ Paid</span>
+                        {% endif %}
+                        <div style="display: flex; gap: 0.25rem; justify-content: flex-end; margin-top: 0.2rem;">
+                            {% if item.bus_credit_days > 0 %}<span style="font-size: 0.65rem; color: #6d28d9; font-weight: 600;">💳 Bus ({{ item.bus_credit_days }}d)</span>
+                            {% elif item.has_partial_credit %}<span style="font-size: 0.65rem; color: #b45309; font-weight: 600;">💳 Has {{ currency }}{{ item.credit_available|floatformat:2 }}</span>
+                            {% elif not item.is_paid %}<span style="font-size: 0.65rem; color: var(--danger); font-weight: 600;">Bus</span>{% endif %}
+                            {% if item.canteen_enrolled and item.canteen_credit_days > 0 %}<span style="font-size: 0.65rem; color: #b45309; font-weight: 600;">💳 Lunch ({{ item.canteen_credit_days }}d)</span>
+                            {% elif item.canteen_enrolled and item.canteen_has_partial %}<span style="font-size: 0.65rem; color: #b45309; font-weight: 600;">💳 Lunch {{ currency }}{{ item.canteen_credit_available|floatformat:2 }}</span>
+                            {% elif item.canteen_enrolled and not item.canteen_is_paid %}<span style="font-size: 0.65rem; color: #ea580c; font-weight: 600;">Lunch</span>{% endif %}
+                        </div>
+                    </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted);">
-                    <span>Paid: {{ currency }}{{ item.amount_paid|floatformat:2 }}</span>
-                    {% if item.parent_phone %}
-                        <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-top: 0.35rem;">
+                    <div>
+                        {% if item.parent_phone %}
+                            <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
+                        {% endif %}
+                    </div>
+                    {% if user.profile.can_record_payments %}
+                        {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
+                            <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
+                                ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+                            </button>
+                            <button type="button" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                                💳 Multi-Pay
+                            </button>
+                        {% elif not item.is_paid %}
+                            {% if item.has_partial_credit %}
+                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                    ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary);" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                    🚌 Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
+                                </button>
+                            {% endif %}
+                            <button type="button" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                                💳 Multi-Pay
+                            </button>
+                        {% elif item.canteen_enrolled and not item.canteen_is_paid %}
+                            {% if item.canteen_has_partial %}
+                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                    ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
+                                </button>
+                            {% else %}
+                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                    🍲 Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
+                                </button>
+                            {% endif %}
+                            <button type="button" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                                💳 Multi-Pay
+                            </button>
+                        {% else %}
+                            <span style="color: var(--success); font-weight: 600; font-size: 0.75rem;">✓ Settled</span>
+                            <button type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.72rem; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                                + Multi-Pay
+                            </button>
+                        {% endif %}
                     {% endif %}
                 </div>
             </div>
@@ -763,6 +972,340 @@ document.addEventListener('DOMContentLoaded', function() {
         setStatusFilter('unpaid');
     }
 });
+
+function quickCollect(studentId, feeType, btn, days = 1) {
+    const originalContent = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Recording...';
+
+    const getCsrf = () => {
+        const input = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (input && input.value) return input.value;
+        const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
+        return cookie ? cookie.split('=')[1] : '';
+    };
+
+    fetch('{% url "api_collect_both_fees" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrf(),
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            student_id: studentId,
+            fee_type: feeType,
+            days: days,
+            date: '{{ target_date }}'
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            btn.innerHTML = '✓ Done!';
+            btn.style.background = 'var(--success)';
+            btn.style.color = '#fff';
+            setTimeout(() => {
+                window.location.reload();
+            }, 400);
+        } else {
+            alert(data.error || 'Failed to record payment');
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+        }
+    })
+    .catch(err => {
+        console.error('Error recording fee:', err);
+        alert('Network connection error. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+    });
+}
+
+// Multi-Pay Custom Amount Modal Logic
+let multipayTargetStudent = {
+    id: null,
+    name: '',
+    busFee: 0,
+    canteenFee: 0,
+    canteenEnrolled: false,
+    selectedType: 'BUS'
+};
+
+function openMultipayModal(studentId, studentName, busFee, canteenFee, canteenEnrolled) {
+    multipayTargetStudent.id = studentId;
+    multipayTargetStudent.name = studentName;
+    multipayTargetStudent.busFee = parseFloat(busFee) || 0;
+    multipayTargetStudent.canteenFee = parseFloat(canteenFee) || 0;
+    multipayTargetStudent.canteenEnrolled = canteenEnrolled === true || canteenEnrolled === 'true' || canteenEnrolled === 'yes';
+
+    document.getElementById('modal-mp-student-name').textContent = studentName;
+    document.getElementById('modal-mp-bus-rate').textContent = `{{ currency }}${multipayTargetStudent.busFee.toFixed(2)}/day`;
+
+    const canteenCol = document.getElementById('modal-mp-canteen-col');
+    const typeCanteenBtn = document.getElementById('modal-mp-type-canteen');
+    const typeBothBtn = document.getElementById('modal-mp-type-both');
+
+    if (multipayTargetStudent.canteenEnrolled && multipayTargetStudent.canteenFee > 0) {
+        canteenCol.style.display = 'block';
+        document.getElementById('modal-mp-canteen-rate').textContent = `{{ currency }}${multipayTargetStudent.canteenFee.toFixed(2)}/day`;
+        typeCanteenBtn.style.display = 'block';
+        typeBothBtn.style.display = 'block';
+        setMultipayType('BOTH');
+    } else {
+        canteenCol.style.display = 'none';
+        typeCanteenBtn.style.display = 'none';
+        typeBothBtn.style.display = 'none';
+        setMultipayType('BUS');
+    }
+
+    const amountInput = document.getElementById('modal-mp-amount');
+    amountInput.value = '';
+    updateMultipayPreview();
+
+    const backdrop = document.getElementById('multipay-modal-backdrop');
+    backdrop.style.display = 'flex';
+    setTimeout(() => amountInput.focus(), 60);
+}
+
+function closeMultipayModal() {
+    const backdrop = document.getElementById('multipay-modal-backdrop');
+    if (backdrop) backdrop.style.display = 'none';
+}
+
+function setMultipayType(type) {
+    multipayTargetStudent.selectedType = type;
+    document.querySelectorAll('#modal-mp-fee-type-group .btn-mp-type').forEach(btn => {
+        if (btn.getAttribute('data-type') === type) {
+            btn.style.borderColor = 'var(--primary)';
+            btn.style.background = 'rgba(99, 102, 241, 0.12)';
+            btn.style.color = 'var(--primary)';
+        } else {
+            btn.style.borderColor = 'var(--border)';
+            btn.style.background = 'var(--surface-card)';
+            btn.style.color = 'var(--text-main)';
+        }
+    });
+    updateMultipayPreview();
+}
+
+function updateMultipayPreview() {
+    const amountVal = parseFloat(document.getElementById('modal-mp-amount').value) || 0;
+    const previewEl = document.getElementById('modal-mp-coverage-preview');
+    const submitBtn = document.getElementById('modal-mp-submit-btn');
+
+    if (amountVal <= 0) {
+        previewEl.textContent = 'Enter custom amount to see days covered';
+        previewEl.style.color = 'var(--text-muted)';
+        submitBtn.textContent = 'Record Payment';
+        return;
+    }
+
+    const type = multipayTargetStudent.selectedType;
+    let dailyRate = 0;
+    if (type === 'BUS') {
+        dailyRate = multipayTargetStudent.busFee;
+    } else if (type === 'CANTEEN') {
+        dailyRate = multipayTargetStudent.canteenFee;
+    } else {
+        dailyRate = multipayTargetStudent.busFee + multipayTargetStudent.canteenFee;
+    }
+
+    if (dailyRate > 0) {
+        const fullDays = Math.floor(amountVal / dailyRate);
+        const remainder = amountVal % dailyRate;
+        let coverageText = `Covers ~${fullDays} full day${fullDays !== 1 ? 's' : ''}`;
+        if (remainder > 0.01) {
+            coverageText += ` + {{ currency }}${remainder.toFixed(2)} partial credit`;
+        }
+        previewEl.innerHTML = `✓ <strong>{{ currency }}${amountVal.toFixed(2)}</strong>: ${coverageText}`;
+        previewEl.style.color = 'var(--primary)';
+    } else {
+        previewEl.innerHTML = `✓ <strong>{{ currency }}${amountVal.toFixed(2)}</strong> credit`;
+        previewEl.style.color = 'var(--primary)';
+    }
+
+    submitBtn.textContent = `Record {{ currency }}${amountVal.toFixed(2)}`;
+}
+
+function applyModalDaysPreset(days) {
+    const type = multipayTargetStudent.selectedType;
+    let dailyRate = 0;
+    if (type === 'BUS') {
+        dailyRate = multipayTargetStudent.busFee;
+    } else if (type === 'CANTEEN') {
+        dailyRate = multipayTargetStudent.canteenFee;
+    } else {
+        dailyRate = multipayTargetStudent.busFee + multipayTargetStudent.canteenFee;
+    }
+    if (dailyRate > 0) {
+        const amt = Math.round((dailyRate * days) * 100) / 100;
+        const amtInput = document.getElementById('modal-mp-amount');
+        if (amtInput) {
+            amtInput.value = amt.toFixed(2);
+            updateMultipayPreview();
+        }
+    }
+}
+
+function submitMultipayForm() {
+    const amountInput = document.getElementById('modal-mp-amount');
+    const amountVal = parseFloat(amountInput.value) || 0;
+    if (amountVal <= 0) {
+        alert('Please enter a valid payment amount greater than zero.');
+        amountInput.focus();
+        return;
+    }
+
+    const methodInput = document.querySelector('input[name="modal-mp-method"]:checked');
+    const method = methodInput ? methodInput.value : 'CASH';
+    const submitBtn = document.getElementById('modal-mp-submit-btn');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ Recording...';
+
+    const getCsrf = () => {
+        const input = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (input && input.value) return input.value;
+        const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
+        return cookie ? cookie.split('=')[1] : '';
+    };
+
+    fetch('{% url "api_collect_both_fees" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrf(),
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            student_id: multipayTargetStudent.id,
+            fee_type: multipayTargetStudent.selectedType,
+            amount: amountVal,
+            method: method,
+            date: '{{ target_date }}'
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            submitBtn.innerHTML = '✓ Success!';
+            submitBtn.style.background = 'var(--success)';
+            setTimeout(() => {
+                window.location.reload();
+            }, 350);
+        } else {
+            alert(data.error || 'Failed to record multi-pay.');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+    })
+    .catch(err => {
+        console.error('Error recording multi-pay:', err);
+        alert('Network connection error. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalText;
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const amtInput = document.getElementById('modal-mp-amount');
+    if (amtInput) {
+        amtInput.addEventListener('input', updateMultipayPreview);
+        amtInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitMultipayForm();
+            }
+        });
+    }
+
+    document.querySelectorAll('#modal-mp-fee-type-group .btn-mp-type').forEach(btn => {
+        btn.addEventListener('click', () => setMultipayType(btn.getAttribute('data-type')));
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMultipayModal();
+    });
+});
 </script>
+
+<!-- Multi-Pay Custom Amount Modal Dialog -->
+<div id="multipay-modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); z-index: 1050; align-items: center; justify-content: center; padding: 1rem; backdrop-filter: blur(2px);">
+    <div style="background: var(--surface-card, #ffffff); border: 1px solid var(--border); border-radius: var(--radius-md, 12px); width: 100%; max-width: 440px; box-shadow: var(--shadow-lg, 0 20px 25px -5px rgba(0, 0, 0, 0.2)); overflow: hidden;">
+        <!-- Modal Header -->
+        <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--surface-subtle);">
+            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: hsla(var(--primary-hsl), 0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0;">
+                    💳
+                </div>
+                <div>
+                    <h3 style="margin: 0; font-size: 1rem; font-weight: 700; color: var(--text-main);">Multi-Pay Advance Collection</h3>
+                    <div id="modal-mp-student-name" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Student Name</div>
+                </div>
+            </div>
+            <button type="button" onclick="closeMultipayModal()" style="background: none; border: none; font-size: 1.35rem; line-height: 1; cursor: pointer; color: var(--text-muted);">&times;</button>
+        </div>
+
+        <!-- Modal Body -->
+        <div style="padding: 1.25rem;">
+            <!-- Rates info -->
+            <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; background: var(--surface-subtle); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.82rem;">
+                <div style="flex: 1;">
+                    <span style="color: var(--text-muted); display: block; font-size: 0.72rem; text-transform: uppercase; font-weight: 600;">Bus Daily Rate</span>
+                    <strong id="modal-mp-bus-rate" style="color: var(--primary);">{{ currency }}0.00</strong>
+                </div>
+                <div id="modal-mp-canteen-col" style="flex: 1; border-left: 1px solid var(--border); padding-left: 0.75rem;">
+                    <span style="color: var(--text-muted); display: block; font-size: 0.72rem; text-transform: uppercase; font-weight: 600;">Lunch Daily Rate</span>
+                    <strong id="modal-mp-canteen-rate" style="color: #ea580c;">{{ currency }}0.00</strong>
+                </div>
+            </div>
+
+            <!-- Fee target selector (Bus, Lunch, or Both) -->
+            <div style="margin-bottom: 0.85rem;">
+                <label style="display: block; font-size: 0.82rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-main);">Apply Payment To:</label>
+                <div style="display: flex; gap: 0.5rem;" id="modal-mp-fee-type-group">
+                    <button type="button" class="btn-mp-type active" data-type="BUS" style="flex: 1; padding: 0.45rem 0.5rem; font-size: 0.82rem; font-weight: 600; border-radius: var(--radius-sm); border: 1.5px solid var(--primary); background: hsla(var(--primary-hsl), 0.1); color: var(--primary); cursor: pointer;">🚌 Bus</button>
+                    <button type="button" class="btn-mp-type" id="modal-mp-type-canteen" data-type="CANTEEN" style="flex: 1; padding: 0.45rem 0.5rem; font-size: 0.82rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-card); color: var(--text-main); cursor: pointer;">🍲 Lunch</button>
+                    <button type="button" class="btn-mp-type" id="modal-mp-type-both" data-type="BOTH" style="flex: 1; padding: 0.45rem 0.5rem; font-size: 0.82rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-card); color: var(--text-main); cursor: pointer;">⚡ Both</button>
+                </div>
+            </div>
+
+            <!-- Custom Amount Input -->
+            <div style="margin-bottom: 0.85rem;">
+                <label for="modal-mp-amount" style="display: block; font-size: 0.82rem; font-weight: 700; margin-bottom: 0.35rem; color: var(--text-main);">
+                    Enter Amount Received:
+                </label>
+                <div>
+                    <input type="number" id="modal-mp-amount" step="0.50" min="0.50" placeholder="0.00" class="form-input" style="width: 100%; font-size: 1.15rem; font-weight: 700; box-sizing: border-box;">
+                </div>
+                <div id="modal-mp-coverage-preview" style="margin-top: 0.45rem; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); min-height: 1.2rem; background: var(--surface-subtle); padding: 0.4rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                    Enter custom amount to see days covered
+                </div>
+            </div>
+
+            <!-- Payment Method -->
+            <div style="margin-bottom: 1.25rem;">
+                <label style="display: block; font-size: 0.82rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--text-main);">Payment Method:</label>
+                <div style="display: flex; gap: 0.5rem;">
+                    <label style="flex: 1; display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem;">
+                        <input type="radio" name="modal-mp-method" value="CASH" checked> 💵 Cash
+                    </label>
+                    <label style="flex: 1; display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem;">
+                        <input type="radio" name="modal-mp-method" value="MOMO"> 📱 MoMo
+                    </label>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 0.75rem;">
+                <button type="button" onclick="closeMultipayModal()" class="btn-secondary" style="flex: 1; padding: 0.6rem; font-weight: 600; cursor: pointer;">Cancel</button>
+                <button type="button" id="modal-mp-submit-btn" onclick="submitMultipayForm()" class="btn-primary" style="flex: 1.5; padding: 0.6rem; font-weight: 700; cursor: pointer;">
+                    Record Payment
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 

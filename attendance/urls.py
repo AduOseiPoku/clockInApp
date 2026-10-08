@@ -12,6 +12,7 @@ urlpatterns = [
     # AJAX APIs for instant clock-in & quick payment
     path('api/clock-in/toggle/', views.toggle_clock_in_api, name='api_clock_in_toggle'),
     path('api/payment/quick/', views.quick_payment_api, name='api_quick_payment'),
+    path('api/payment/collect-both/', views.collect_both_fees_api, name='api_collect_both_fees'),
 
     # Bus Management
     path('buses/', views.bus_list_view, name='bus_list'),
