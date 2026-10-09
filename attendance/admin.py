@@ -33,6 +33,19 @@ class CustomUserAdmin(BaseUserAdmin):
         return '-'
     get_role.short_description = 'School Role'
 
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for instance in instances:
+            if isinstance(instance, UserProfile):
+                existing = UserProfile.objects.filter(user=form.instance).first()
+                if existing:
+                    instance.id = existing.id
+                    instance._state.adding = False
+            instance.save()
+        for obj in formset.deleted_objects:
+            obj.delete()
+        formset.save_m2m()
+
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):

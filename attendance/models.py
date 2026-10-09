@@ -633,7 +633,7 @@ from django.contrib.auth import get_user_model
 def create_or_save_user_profile(sender, instance, created, **kwargs):
     if created:
         role = UserProfile.ROLE_ADMIN if instance.is_superuser else UserProfile.ROLE_TEACHER
-        UserProfile.objects.create(user=instance, role=role)
+        UserProfile.objects.get_or_create(user=instance, defaults={'role': role})
     else:
         if hasattr(instance, 'profile'):
             if instance.is_superuser and instance.profile.role != UserProfile.ROLE_ADMIN:
