@@ -17,7 +17,12 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-school-clockin-demo-key-20
 
 DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 't', 'yes')
 
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()]
+raw_hosts = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()]
+if '*' not in raw_hosts:
+    for internal_host in ('localhost', '127.0.0.1', '0.0.0.0', '[::1]'):
+        if internal_host not in raw_hosts:
+            raw_hosts.append(internal_host)
+ALLOWED_HOSTS = raw_hosts
 
 csrf_trusted = os.getenv('CSRF_TRUSTED_ORIGINS', '')
 if csrf_trusted:
