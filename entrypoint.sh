@@ -9,6 +9,9 @@ fi
 echo "==> Running database migrations..."
 python manage.py migrate --noinput
 
+echo "==> Initializing demo user accounts..."
+python manage.py setup_demo_accounts
+
 echo "==> Collecting static files..."
 python manage.py collectstatic --noinput
 
