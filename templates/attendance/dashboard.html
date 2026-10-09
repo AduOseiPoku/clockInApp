@@ -10,6 +10,14 @@
         <p>Morning student arrival attendance and live fee verification</p>
     </div>
     <div class="header-actions">
+        {% if user.profile and user.profile.can_register_students %}
+        <a href="{% url 'student_create' %}" class="btn-primary" style="display:inline-flex;align-items:center;gap:0.4rem;padding:0.45rem 0.85rem;font-size:0.82rem;font-weight:600;text-decoration:none;border-radius:var(--radius-md);">
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Enroll Student
+        </a>
+        {% endif %}
         <form id="filter-form" method="GET" action="{% url 'dashboard' %}" class="date-selector-pill">
             <label for="date-picker" style="font-size:0.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Date</label>
             <input type="date" id="date-picker" name="date" value="{{ date_str }}">

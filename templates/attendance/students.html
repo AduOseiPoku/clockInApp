@@ -10,15 +10,70 @@
     </div>
     <div class="header-actions">
         {% if user.profile.is_principal %}
+        <a href="{% url 'class_list' %}" class="btn-secondary">
+            🏫 Classes
+        </a>
         <a href="{% url 'student_import' %}" class="btn-secondary">
             Bulk CSV Import
         </a>
+        {% endif %}
+        {% if can_register %}
         <a href="{% url 'student_create' %}" class="btn-primary">
             + Enroll Student
         </a>
         {% endif %}
     </div>
 </div>
+<!-- Onboarding Mode Banner & Quick Toggle -->
+{% if user.profile.is_principal %}
+    {% if onboarding_mode_active %}
+    <div class="stat-card" style="margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--surface-card); border-left: 4px solid var(--success); padding: 0.85rem 1.25rem;">
+    {% else %}
+    <div class="stat-card" style="margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--surface-card); border-left: 4px solid var(--border); padding: 0.85rem 1.25rem;">
+    {% endif %}
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <span style="font-size: 1.35rem;">{% if onboarding_mode_active %}🚀{% else %}🔒{% endif %}</span>
+        <div>
+            <div style="font-weight: 700; font-size: 0.92rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+                Teacher Registration Mode:
+                {% if onboarding_mode_active %}
+                <span class="badge badge-success" style="font-size: 0.72rem; padding: 0.15rem 0.55rem;">● Active (Teachers Can Register)</span>
+                {% else %}
+                <span class="badge" style="background: var(--surface-subtle); color: var(--text-muted); font-size: 0.72rem; padding: 0.15rem 0.55rem; border: 1px solid var(--border);">Restricted (Principal Only)</span>
+                {% endif %}
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">
+                {% if onboarding_mode_active %}
+                All teachers currently have access to the enrollment form to onboard students into classes.
+                {% else %}
+                Turn on to grant all teachers access to the student enrollment form during intake.
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <form method="POST" action="{% url 'toggle_onboarding_registration' %}" style="margin: 0;">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'student_list' %}">
+            <button type="submit" class="{% if onboarding_mode_active %}btn-secondary{% else %}btn-primary{% endif %}" style="font-size: 0.8rem; padding: 0.35rem 0.85rem;">
+                {% if onboarding_mode_active %}Turn Off Onboarding{% else %}⚡ Turn On for Teachers{% endif %}
+            </button>
+        </form>
+    </div>
+</div>
+{% elif onboarding_mode_active %}
+<div class="stat-card" style="margin-bottom: 1.25rem; border-left: 4px solid var(--primary); background: hsla(var(--primary-hsl), 0.05); padding: 0.85rem 1.25rem; display: flex; align-items: center; gap: 0.75rem;">
+    <span style="font-size: 1.35rem;">🚀</span>
+    <div>
+        <div style="font-weight: 700; color: var(--primary); font-size: 0.92rem;">
+            Student Onboarding Mode Active
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;">
+            You are authorized to register and enroll new students onto the system. Click <strong>"+ Enroll Student"</strong> to begin.
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- Filter Toolbar -->
 <form method="GET" action="{% url 'student_list' %}" class="control-bar">
@@ -141,7 +196,14 @@
                     <tr>
                         <td colspan="6" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
                             <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No students found</div>
+                            {% if can_register %}
                             <p style="margin-top: 0.25rem; font-size: 0.8rem;">Click "+ Enroll Student" to add students to classes.</p>
+                            <a href="{% url 'student_create' %}" class="btn-primary" style="margin-top: 0.85rem; display: inline-flex;">
+                                + Enroll Student
+                            </a>
+                            {% else %}
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">No students registered in this view yet.</p>
+                            {% endif %}
                         </td>
                     </tr>
                 {% endfor %}
@@ -214,7 +276,12 @@
     {% empty %}
         <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
             <div style="font-size: 0.95rem; font-weight: 600;">No students found</div>
+            {% if can_register %}
             <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Click "+ Enroll Student" to add students.</p>
+            <a href="{% url 'student_create' %}" class="btn-primary" style="margin-top: 0.75rem; display: inline-flex; font-size: 0.85rem;">+ Enroll Student</a>
+            {% else %}
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Contact the Principal to enroll new students.</p>
+            {% endif %}
         </div>
     {% endfor %}
 </div>

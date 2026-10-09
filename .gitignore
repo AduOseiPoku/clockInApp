@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Environment and Secrets
+.env
+.env.local
+
+# Databases
+*.sqlite3
+db.sqlite3
+
+# Static & Media
+staticfiles/
+media/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.dockerignore

@@ -145,11 +145,13 @@ class Student(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
-        if self.school_class:
-            self.student_class = self.school_class.name
-        elif self.student_class:
-            cls_obj, _ = SchoolClass.objects.get_or_create(name=self.student_class)
+        if self.student_class:
+            cls_obj = SchoolClass.objects.filter(name=self.student_class).first()
+            if not cls_obj:
+                cls_obj = SchoolClass.objects.create(name=self.student_class)
             self.school_class = cls_obj
+        elif self.school_class:
+            self.student_class = self.school_class.name
         super().save(*args, **kwargs)
 
     class Meta:
@@ -566,6 +568,19 @@ class UserProfile(models.Model):
             return True
         if self.role == self.ROLE_TEACHER:
             return self.can_collect_fees
+        return False
+
+    @property
+    def can_register_students(self):
+        """
+        Check if user is authorized to enroll/register new students.
+        Principals always can; teachers can if SchoolSetting ALLOW_TEACHER_STUDENT_REGISTRATION is True.
+        """
+        if self.is_school_admin:
+            return True
+        if self.role == self.ROLE_TEACHER and self.user.is_active:
+            val = SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION')
+            return val == 'True'
         return False
 
     @property

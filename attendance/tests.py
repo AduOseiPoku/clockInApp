@@ -2014,3 +2014,78 @@ class PrincipalAdminManagementTests(TestCase):
         staff_user.profile.refresh_from_db()
         self.assertEqual(staff_user.profile.role, UserProfile.ROLE_ADMIN)
         self.assertTrue(staff_user.profile.is_principal)
+
+    def test_class_management_principal_and_uniformity(self):
+        """Principal can create, update, and manage school classes; teachers cannot."""
+        # Teacher is blocked from creating classes
+        self.client.force_login(self.teacher)
+        res = self.client.get(reverse('class_create'))
+        self.assertEqual(res.status_code, 302)
+
+        # Principal can create class
+        self.client.force_login(self.principal)
+        res_post = self.client.post(reverse('class_create'), {
+            'name': 'Grade 4 Elite',
+            'grade_level': 'Primary',
+            'is_active': True,
+        })
+        self.assertEqual(res_post.status_code, 302)
+        sc = SchoolClass.objects.filter(name='Grade 4 Elite').first()
+        self.assertIsNotNone(sc)
+        self.assertEqual(sc.grade_level, 'Primary')
+
+        # Form dropdown includes the new class
+        form = StudentForm()
+        class_choices = [c[0] for c in form.fields['student_class'].widget.choices]
+        self.assertIn('Grade 4 Elite', class_choices)
+
+    def test_student_onboarding_toggle_and_teacher_registration(self):
+        """Principal toggles teacher registration ON/OFF; teachers can only register when ON."""
+        from .models import SchoolSetting
+
+        # Create a standardized class
+        sc = SchoolClass.objects.create(name='Basic 5', grade_level='Primary', is_active=True)
+
+        # Ensure setting is OFF initially
+        SchoolSetting.objects.filter(key='ALLOW_TEACHER_STUDENT_REGISTRATION').delete()
+
+        # Teacher cannot access student enrollment
+        self.client.force_login(self.teacher)
+        res_teacher = self.client.get(reverse('student_create'))
+        self.assertEqual(res_teacher.status_code, 302)
+
+        # Principal toggles onboarding mode ON
+        self.client.force_login(self.principal)
+        res_toggle_on = self.client.post(reverse('toggle_onboarding_registration'))
+        self.assertEqual(res_toggle_on.status_code, 302)
+        self.assertEqual(SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION', 'False'), 'True')
+
+        # Now teacher can access student creation form
+        self.client.force_login(self.teacher)
+        res_teacher_access = self.client.get(reverse('student_create'))
+        self.assertEqual(res_teacher_access.status_code, 200)
+
+        # Teacher enrolls a student
+        res_enroll = self.client.post(reverse('student_create'), {
+            'first_name': 'Kweku',
+            'last_name': 'Baah',
+            'student_class': 'Basic 5',
+            'canteen_enrolled': True,
+            'is_active': True,
+        })
+        self.assertEqual(res_enroll.status_code, 302)
+        new_student = Student.objects.filter(first_name='Kweku', last_name='Baah').first()
+        self.assertIsNotNone(new_student)
+        self.assertEqual(new_student.student_class, 'Basic 5')
+        self.assertEqual(new_student.school_class, sc)
+
+        # Principal toggles onboarding mode OFF
+        self.client.force_login(self.principal)
+        res_toggle_off = self.client.post(reverse('toggle_onboarding_registration'))
+        self.assertEqual(res_toggle_off.status_code, 302)
+        self.assertEqual(SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION', 'False'), 'False')
+
+        # Teacher is blocked again
+        self.client.force_login(self.teacher)
+        res_teacher_blocked = self.client.get(reverse('student_create'))
+        self.assertEqual(res_teacher_blocked.status_code, 302)

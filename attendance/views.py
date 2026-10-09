@@ -6,7 +6,7 @@ from collections import defaultdict
 from io import TextIOWrapper
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse, HttpResponse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
@@ -21,7 +21,7 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 from .models import Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass, SchoolSetting, get_default_canteen_fee
-from .forms import BusForm, StudentForm, FeePaymentForm, SchoolSettingsForm, TeacherCreationForm, TeacherUpdateForm, TeacherPasswordResetForm
+from .forms import BusForm, StudentForm, FeePaymentForm, SchoolSettingsForm, TeacherCreationForm, TeacherUpdateForm, TeacherPasswordResetForm, SchoolClassForm
 from .decorators import principal_required, finance_required, payment_recording_required, login_required_ajax
 
 def get_stats_data(target_date=None, period=None):
@@ -1366,9 +1366,87 @@ def bus_delete_view(request, pk):
 
 
 # ==========================================
+# CLASSROOM MANAGEMENT (PRINCIPAL ONLY)
+# ==========================================
+@principal_required
+def class_list_view(request):
+    """View and manage uniform school classes created by the Principal."""
+    classes = SchoolClass.objects.all().order_by('name')
+    total_classes = classes.count()
+    active_classes = classes.filter(is_active=True).count()
+    total_enrolled = Student.objects.filter(is_active=True).count()
+
+    return render(request, 'attendance/classes.html', {
+        'classes': classes,
+        'total_classes': total_classes,
+        'active_classes': active_classes,
+        'total_enrolled': total_enrolled,
+        'title': 'School Classes',
+    })
+
+
+@principal_required
+def class_create_view(request):
+    """Add a new school class for roster and enrollment uniformity."""
+    if request.method == 'POST':
+        form = SchoolClassForm(request.POST)
+        if form.is_valid():
+            sc = form.save()
+            messages.success(request, f"✓ Class '{sc.name}' created successfully!")
+            return redirect('class_list')
+    else:
+        form = SchoolClassForm()
+    return render(request, 'attendance/class_form.html', {
+        'form': form,
+        'title': 'Add New Class',
+        'is_edit': False,
+    })
+
+
+@principal_required
+def class_update_view(request, pk):
+    """Update an existing class name, grade level, or active status."""
+    sc = get_object_or_404(SchoolClass, pk=pk)
+    old_name = sc.name
+    if request.method == 'POST':
+        form = SchoolClassForm(request.POST, instance=sc)
+        if form.is_valid():
+            updated_sc = form.save()
+            if old_name != updated_sc.name:
+                Student.objects.filter(student_class=old_name).update(student_class=updated_sc.name)
+            messages.success(request, f"✓ Class '{updated_sc.name}' updated successfully!")
+            return redirect('class_list')
+    else:
+        form = SchoolClassForm(instance=sc)
+    return render(request, 'attendance/class_form.html', {
+        'form': form,
+        'school_class': sc,
+        'title': f"Edit Class: {sc.name}",
+        'is_edit': True,
+    })
+
+
+@principal_required
+def class_delete_view(request, pk):
+    """Delete a class if safe or confirm with administrator."""
+    sc = get_object_or_404(SchoolClass, pk=pk)
+    student_count = sc.students.filter(is_active=True).count()
+    if request.method == 'POST':
+        name = sc.name
+        sc.delete()
+        messages.success(request, f"Class '{name}' deleted.")
+        return redirect('class_list')
+    return render(request, 'attendance/confirm_delete.html', {
+        'object': sc,
+        'object_name': f"Class '{sc.name}' ({student_count} active students)",
+        'cancel_url': 'class_list',
+    })
+
+
+# ==========================================
 # STUDENT MANAGEMENT VIEWS
 # ==========================================
-@finance_required
+@login_required
 def student_list_view(request):
     """Student roster listing with bus assignments and canteen status."""
     class_filter = request.GET.get('class', '')
@@ -1382,7 +1460,7 @@ def student_list_view(request):
         if user_profile.assigned_class and not class_filter and not request.GET.get('class'):
             class_filter = user_profile.assigned_class
 
-    students = Student.objects.filter(is_active=True).select_related('bus').order_by('student_class', 'first_name', 'last_name')
+    students = Student.objects.filter(is_active=True).select_related('bus', 'school_class').order_by('student_class', 'first_name', 'last_name')
 
     if class_filter:
         students = students.filter(student_class=class_filter)
@@ -1398,33 +1476,66 @@ def student_list_view(request):
             Q(student_class__icontains=search)
         )
 
-    classes = Student.objects.filter(is_active=True).values_list('student_class', flat=True).distinct().order_by('student_class')
+    classes = SchoolClass.objects.filter(is_active=True).order_by('name')
+    if not classes.exists():
+        classes_names = Student.objects.filter(is_active=True).values_list('student_class', flat=True).distinct().order_by('student_class')
+    else:
+        classes_names = classes.values_list('name', flat=True)
+
     buses = Bus.objects.filter(is_active=True).order_by('name')
+
+    onboarding_mode_active = (SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION') == 'True')
+    can_register = bool(user_profile and user_profile.can_register_students)
 
     context = {
         'students': students,
-        'classes': classes,
+        'classes': classes_names,
         'buses': buses,
         'class_filter': class_filter,
         'bus_filter': bus_filter,
         'search': search,
         'total_count': students.count(),
+        'onboarding_mode_active': onboarding_mode_active,
+        'can_register': can_register,
     }
     return render(request, 'attendance/students.html', context)
 
 
-@principal_required
+@login_required
 def student_create_view(request):
-    """Enroll a new student."""
+    """Enroll a new student. Accessible by Principals, and by Teachers during onboarding mode."""
+    user_profile = getattr(request.user, 'profile', None)
+    if not (user_profile and user_profile.can_register_students):
+        messages.error(request, 'Access denied: Student registration is currently restricted to administrators.')
+        return redirect('student_list')
+
     if request.method == 'POST':
-        form = StudentForm(request.POST)
+        form = StudentForm(request.POST, user_obj=request.user)
         if form.is_valid():
             student = form.save()
-            messages.success(request, f"Student '{student.full_name}' enrolled in {student.student_class}!")
+            messages.success(request, f"✓ Student '{student.full_name}' enrolled in {student.student_class}!")
             return redirect('student_list')
     else:
-        form = StudentForm()
+        form = StudentForm(user_obj=request.user)
     return render(request, 'attendance/student_form.html', {'form': form, 'title': 'Enroll New Student'})
+
+
+@principal_required
+def toggle_onboarding_registration_view(request):
+    """
+    1-Click toggle for the Principal to enable or disable student registration for teachers.
+    """
+    current = SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION') == 'True'
+    new_state = not current
+    SchoolSetting.set_setting(
+        'ALLOW_TEACHER_STUDENT_REGISTRATION',
+        'True' if new_state else 'False',
+        "Permit teachers to register students during onboarding"
+    )
+    state_str = "activated (all teachers can now enroll students)" if new_state else "deactivated (restricted to Principal only)"
+    messages.success(request, f"🚀 Student Onboarding Mode has been {state_str}.")
+    next_url = request.GET.get('next') or request.POST.get('next') or 'student_list'
+    return redirect(next_url)
 
 
 @principal_required
@@ -2254,6 +2365,7 @@ def school_settings_view(request):
     current_school_name = SchoolSetting.get_setting('SCHOOL_NAME') or getattr(settings, 'SCHOOL_NAME', 'Geosaka Model School')
     current_period = SchoolSetting.get_setting('CURRENT_ACADEMIC_PERIOD') or getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026')
     current_currency = SchoolSetting.get_setting('CURRENCY_SYMBOL') or getattr(settings, 'CURRENCY_SYMBOL', 'GH₵')
+    current_allow_registration = (SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION') == 'True')
 
     if request.method == 'POST':
         form = SchoolSettingsForm(request.POST)
@@ -2262,13 +2374,16 @@ def school_settings_view(request):
             new_school_name = form.cleaned_data['school_name']
             new_period = form.cleaned_data['current_period']
             new_currency = form.cleaned_data['currency_symbol']
+            new_allow_reg = form.cleaned_data.get('allow_teacher_student_registration', False)
 
             SchoolSetting.set_setting('DEFAULT_CANTEEN_FEE', new_canteen, "Standard default daily canteen lunch rate")
             SchoolSetting.set_setting('SCHOOL_NAME', new_school_name, "Official school name")
             SchoolSetting.set_setting('CURRENT_ACADEMIC_PERIOD', new_period, "Current active academic term")
             SchoolSetting.set_setting('CURRENCY_SYMBOL', new_currency, "Default currency symbol")
+            SchoolSetting.set_setting('ALLOW_TEACHER_STUDENT_REGISTRATION', 'True' if new_allow_reg else 'False', "Permit teachers to register students during onboarding")
 
-            messages.success(request, f"✓ Settings updated! Default canteen fee is now {new_currency}{new_canteen:.2f}/day.")
+            reg_status_msg = "enabled (teachers can register students)" if new_allow_reg else "disabled (restricted to Principal only)"
+            messages.success(request, f"✓ Settings updated! Onboarding registration is {reg_status_msg}.")
             return redirect('school_settings')
     else:
         form = SchoolSettingsForm(initial={
@@ -2276,6 +2391,7 @@ def school_settings_view(request):
             'school_name': current_school_name,
             'current_period': current_period,
             'currency_symbol': current_currency,
+            'allow_teacher_student_registration': current_allow_registration,
         })
 
     enrolled_canteen_count = Student.objects.filter(canteen_enrolled=True, is_active=True).count()
@@ -2287,6 +2403,7 @@ def school_settings_view(request):
         'current_canteen': current_canteen,
         'enrolled_canteen_count': enrolled_canteen_count,
         'daily_canteen_expected': daily_canteen_expected,
+        'allow_teacher_registration': current_allow_registration,
     }
     return render(request, 'attendance/settings.html', context)
 
@@ -2518,4 +2635,24 @@ def teacher_toggle_status_view(request, pk):
     status_str = "activated" if teacher.is_active else "deactivated"
     messages.info(request, f"Staff account '{teacher.username}' has been {status_str}.")
     return redirect('teacher_list')
+
+
+@require_GET
+def health_check_view(request):
+    """
+    Health check endpoint for Docker and Dokploy liveness/readiness probes.
+    Returns 200 if application and database connection are healthy.
+    """
+    from django.db import connection
+    status = {'status': 'healthy'}
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1;")
+            cursor.fetchone()
+        status['database'] = 'connected'
+        return JsonResponse(status, status=200)
+    except Exception as exc:
+        status['status'] = 'degraded'
+        status['database'] = str(exc)
+        return JsonResponse(status, status=503)
 

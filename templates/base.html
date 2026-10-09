@@ -68,6 +68,8 @@
                             Reports
                         </a>
                     </li>
+                    {% endif %}
+                    {% if user.profile.can_view_revenue or user.profile.can_register_students %}
                     <li>
                         <a href="{% url 'student_list' %}"
                             class="nav-link {% if 'student' in request.resolver_match.url_name %}active{% endif %}">
@@ -78,6 +80,8 @@
                             Students
                         </a>
                     </li>
+                    {% endif %}
+                    {% if user.profile.can_view_revenue %}
                     <li>
                         <a href="{% url 'bus_list' %}"
                             class="nav-link {% if 'bus' in request.resolver_match.url_name %}active{% endif %}">
@@ -100,6 +104,16 @@
                     </li>
                     {% endif %}
                     {% if user.profile.is_principal %}
+                    <li>
+                        <a href="{% url 'class_list' %}"
+                            class="nav-link {% if 'class' in request.resolver_match.url_name %}active{% endif %}">
+                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                            </svg>
+                            Classes
+                        </a>
+                    </li>
                     <li>
                         <a href="{% url 'notifications' %}"
                             class="nav-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}">
@@ -128,6 +142,11 @@
         </div>
 
         <div class="nav-actions">
+                {% if user.is_authenticated and user.profile.can_register_students and not user.profile.is_principal %}
+                <a href="{% url 'student_create' %}" class="nav-action-btn" style="background: var(--primary, #4f46e5); color: #fff; font-weight: 600;">
+                    + Enroll Student
+                </a>
+                {% endif %}
                 {% if user.is_authenticated and user.profile.can_record_payments and not user.profile.is_principal %}
                 <a href="{% url 'payment_create' %}" class="nav-action-btn">
                     + Record Fee

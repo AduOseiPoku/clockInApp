@@ -20,6 +20,17 @@ class BusForm(forms.ModelForm):
         }
 
 
+class SchoolClassForm(forms.ModelForm):
+    class Meta:
+        model = SchoolClass
+        fields = ['name', 'grade_level', 'is_active']
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': "e.g. 'Class 1A', 'Grade 3', 'KG 2'"}),
+            'grade_level': forms.TextInput(attrs={'class': 'form-input', 'placeholder': "e.g. 'Primary', 'JHS', 'Kindergarten'"}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+        }
+
+
 class StudentForm(forms.ModelForm):
     class Meta:
         model = Student
@@ -27,19 +38,35 @@ class StudentForm(forms.ModelForm):
         widgets = {
             'first_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name'}),
             'last_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Last Name'}),
-            'student_class': forms.TextInput(attrs={'class': 'form-input', 'placeholder': "e.g. 'Class 1A', 'Class 2B', 'Nursery 1'"}),
+            'student_class': forms.Select(attrs={'class': 'form-select'}),
             'bus': forms.Select(attrs={'class': 'form-select'}),
             'canteen_enrolled': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
             'custom_canteen_fee': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.50', 'placeholder': 'Leave blank for standard fee'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user_obj=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['bus'].empty_label = "-- No Bus (Walker / Private Drop-off) --"
         self.fields['bus'].queryset = Bus.objects.filter(is_active=True)
+
+        # Uniform classes defined by Principal
+        class_choices = [('', '-- Select Class --')]
+        for sc in SchoolClass.objects.filter(is_active=True).order_by('name'):
+            class_choices.append((sc.name, sc.name))
+
+        # Preserve existing class choice if editing a student with a custom/legacy class
+        instance = kwargs.get('instance')
+        if instance and instance.student_class and (instance.student_class, instance.student_class) not in class_choices:
+            class_choices.append((instance.student_class, instance.student_class))
+
+        self.fields['student_class'].widget.choices = class_choices
+
         if 'instance' not in kwargs or not kwargs['instance'] or kwargs['instance'].pk is None:
             self.fields['canteen_enrolled'].initial = True
+            if user_obj and hasattr(user_obj, 'profile') and user_obj.profile.assigned_class:
+                if not self.initial.get('student_class'):
+                    self.initial['student_class'] = user_obj.profile.assigned_class
 
 
 class FeePaymentForm(forms.Form):
@@ -182,6 +209,15 @@ class SchoolSettingsForm(forms.Form):
             'placeholder': 'e.g. GH₵'
         }),
         help_text="Currency symbol displayed throughout the application."
+    )
+    allow_teacher_student_registration = forms.BooleanField(
+        label="Allow Teachers to Register Students (Onboarding Mode)",
+        required=False,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'form-checkbox',
+            'id': 'id_allow_teacher_student_registration'
+        }),
+        help_text="When active, all teachers can access the student registration form to enroll students into their classes."
     )
 
 

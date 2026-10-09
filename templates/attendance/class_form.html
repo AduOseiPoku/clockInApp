@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="max-width: 600px; margin: 0 auto 1.5rem;">
+    <div class="page-title-group">
+        <h2>{{ title }}</h2>
+        <p>Define official school class names to ensure consistency across student enrollment and clock-ins</p>
+    </div>
+    <div class="header-actions">
+        <a href="{% url 'class_list' %}" class="btn-secondary">
+            &larr; Back to Classes
+        </a>
+    </div>
+</div>
+
+<div class="form-card" style="max-width: 600px; margin: 0 auto;">
+    <form method="POST">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+        <div style="background: #fee2e2; border: 1px solid #f87171; color: #991b1b; padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; font-size: 0.85rem;">
+            {{ form.non_field_errors }}
+        </div>
+        {% endif %}
+
+        <div class="form-group">
+            <label class="form-label" for="{{ form.name.id_for_label }}">
+                Class Name <span style="color: var(--danger);">*</span>
+            </label>
+            {{ form.name }}
+            <small class="form-hint">e.g. Class 1A, Grade 3, Nursery 1, KG 2. This exact name will appear in dropdowns for teachers registering students.</small>
+            {% if form.name.errors %}
+                <div style="color: var(--danger-text); font-size: 0.8rem; margin-top: 0.25rem;">{{ form.name.errors }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="{{ form.grade_level.id_for_label }}">
+                Grade Level Group (Optional)
+            </label>
+            {{ form.grade_level }}
+            <small class="form-hint">e.g. Primary, Junior High School (JHS), Early Childhood, Kindergarten.</small>
+            {% if form.grade_level.errors %}
+                <div style="color: var(--danger-text); font-size: 0.8rem; margin-top: 0.25rem;">{{ form.grade_level.errors }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group" style="background: var(--surface-subtle); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            <label style="display: flex; align-items: center; gap: 0.65rem; cursor: pointer; margin-bottom: 0;">
+                {{ form.is_active }}
+                <div>
+                    <span style="font-weight: 600; font-size: 0.88rem; color: var(--text-main);">Active Class</span>
+                    <small class="form-hint" style="display: block; margin-top: 0.15rem;">
+                        Active classes appear in the registration dropdown and daily attendance rosters.
+                    </small>
+                </div>
+            </label>
+        </div>
+
+        <div class="form-actions" style="margin-top: 1.5rem;">
+            <a href="{% url 'class_list' %}" class="btn-secondary">Cancel</a>
+            <button type="submit" class="btn-primary">
+                {% if is_edit %}Save Changes{% else %}Create Class{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

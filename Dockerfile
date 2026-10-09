@@ -19,7 +19,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy project code
 COPY . /app/
 
+# Make entrypoint script executable
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8000
 
-# Run migrations and start development server by default
-CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
+# Container healthcheck for Dokploy/Docker
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/health/ || exit 1
+
+# Start via production entrypoint script (runs migrations, collectstatic, and gunicorn)
+ENTRYPOINT ["/app/entrypoint.sh"]

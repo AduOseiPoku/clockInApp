@@ -21,9 +21,16 @@ urlpatterns = [
     path('buses/<int:pk>/edit/', views.bus_update_view, name='bus_update'),
     path('buses/<int:pk>/delete/', views.bus_delete_view, name='bus_delete'),
 
-    # Student Roster & Bulk CSV Import
+    # Class Management (Principal Only)
+    path('classes/', views.class_list_view, name='class_list'),
+    path('classes/add/', views.class_create_view, name='class_create'),
+    path('classes/<int:pk>/edit/', views.class_update_view, name='class_update'),
+    path('classes/<int:pk>/delete/', views.class_delete_view, name='class_delete'),
+
+    # Student Roster, Onboarding Toggle & Bulk CSV Import
     path('students/', views.student_list_view, name='student_list'),
     path('students/add/', views.student_create_view, name='student_create'),
+    path('students/toggle-onboarding/', views.toggle_onboarding_registration_view, name='toggle_onboarding_registration'),
     path('students/import/', views.student_import_view, name='student_import'),
     path('students/template/', views.student_template_download, name='student_template_download'),
     path('students/<int:pk>/edit/', views.student_update_view, name='student_update'),
@@ -53,4 +60,7 @@ urlpatterns = [
 
     # System & School Billing Settings
     path('settings/', views.school_settings_view, name='school_settings'),
+
+    # Docker & Dokploy Health Check Probe
+    path('health/', views.health_check_view, name='health_check'),
 ]

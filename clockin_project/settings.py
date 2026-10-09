@@ -17,7 +17,13 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-school-clockin-demo-key-20
 
 DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 't', 'yes')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()]
+
+csrf_trusted = os.getenv('CSRF_TRUSTED_ORIGINS', '')
+if csrf_trusted:
+    CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_trusted.split(',') if origin.strip()]
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Application definition
 INSTALLED_APPS = [
@@ -64,9 +70,26 @@ TEMPLATES = [
 WSGI_APPLICATION = 'clockin_project.wsgi.application'
 
 # Database Configuration
-# Defaults to PostgreSQL when USE_SQLITE is False and DB credentials are provided.
-# Cleanly falls back to SQLite for zero-friction local execution.
+# Supports both DATABASE_URL (standard for Dokploy/PaaS) and individual DB_* environment variables.
+# Falls back to SQLite if USE_SQLITE is True or no PostgreSQL credentials provided.
 use_sqlite = os.getenv('USE_SQLITE', 'True').lower() in ('true', '1', 't', 'yes')
+database_url = os.getenv('DATABASE_URL')
+
+if database_url:
+    use_sqlite = False
+    from urllib.parse import urlparse, unquote
+    url = urlparse(database_url)
+    db_name = url.path[1:]
+    db_user = unquote(url.username or 'postgres')
+    db_password = unquote(url.password or '')
+    db_host = url.hostname or 'localhost'
+    db_port = str(url.port or 5432)
+else:
+    db_name = os.getenv('DB_NAME', 'school_clockin_db')
+    db_user = os.getenv('DB_USER', 'postgres')
+    db_password = os.getenv('DB_PASSWORD', 'postgres')
+    db_host = os.getenv('DB_HOST', 'localhost')
+    db_port = os.getenv('DB_PORT', '5432')
 
 if use_sqlite:
     DATABASES = {
@@ -76,11 +99,6 @@ if use_sqlite:
         }
     }
 else:
-    db_name = os.getenv('DB_NAME', 'school_clockin_db')
-    db_user = os.getenv('DB_USER', 'postgres')
-    db_password = os.getenv('DB_PASSWORD', 'postgres')
-    db_host = os.getenv('DB_HOST', 'localhost')
-    db_port = os.getenv('DB_PORT', '5432')
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -119,6 +137,14 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+WHITENOISE_MANIFEST_STRICT = False
+
+# Production Security & Reverse-Proxy Settings
+if not DEBUG:
+    SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'True').lower() in ('true', '1', 't', 'yes')
+    CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'True').lower() in ('true', '1', 't', 'yes')
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

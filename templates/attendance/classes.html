@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+
+{% block title %}School Classes | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>School Classes & Grades</h2>
+        <p>Manage official school classes to ensure uniform student registration and attendance rosters</p>
+    </div>
+    <div class="header-actions">
+        {% if user.profile.is_principal %}
+        <a href="{% url 'class_create' %}" class="btn-primary">
+            + Add New Class
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Class Overview Stat Cards -->
+<div class="stats-grid">
+    <div class="stat-card" style="border-left: 4px solid var(--primary);">
+        <div class="stat-header">
+            <span class="stat-title">Configured Classes</span>
+        </div>
+        <div class="stat-value" style="color: var(--primary);">{{ total_classes }}</div>
+        <div class="stat-footer">
+            <span>{{ active_classes }} active</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Enrolled Students</span>
+        </div>
+        <div class="stat-value">{{ total_enrolled }}</div>
+        <div class="stat-footer">
+            <span>Across all active classes</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Registration Uniformity</span>
+        </div>
+        <div class="stat-value" style="color: var(--success-text); font-size: 1.35rem;">
+            ✓ Standardized
+        </div>
+        <div class="stat-footer">
+            <span>Enforced across student forms</span>
+        </div>
+    </div>
+</div>
+
+<!-- Classes Table (Desktop View) -->
+<div class="table-card desktop-only">
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Class Name</th>
+                    <th>Grade Level</th>
+                    <th>Enrolled Students</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sc in classes %}
+                    <tr>
+                        <td>
+                            <strong style="color: var(--text-main); font-size: 0.95rem;">
+                                {{ sc.name }}
+                            </strong>
+                        </td>
+                        <td>
+                            <span style="color: var(--text-muted); font-size: 0.85rem;">
+                                {{ sc.grade_level|default:"—" }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{% url 'student_list' %}?class={{ sc.name }}" class="class-badge" style="text-decoration: none;" title="View students in {{ sc.name }}">
+                                👥 {{ sc.student_count }} Student{{ sc.student_count|pluralize }} &rarr;
+                            </a>
+                        </td>
+                        <td>
+                            {% if sc.is_active %}
+                                <span class="badge badge-success" style="font-size: 0.72rem; padding: 0.2rem 0.55rem;">Active</span>
+                            {% else %}
+                                <span class="badge badge-danger" style="font-size: 0.72rem; padding: 0.2rem 0.55rem;">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span style="font-size: 0.78rem; color: var(--text-muted);">
+                                {{ sc.created_at|date:"M d, Y" }}
+                            </span>
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            <a href="{% url 'student_list' %}?class={{ sc.name }}" class="btn-table-action" style="color: var(--primary);" title="View Roster">
+                                Roster
+                            </a>
+                            {% if user.profile.is_principal %}
+                            <a href="{% url 'class_update' sc.id %}" class="btn-table-action" title="Edit class">
+                                Edit
+                            </a>
+                            <a href="{% url 'class_delete' sc.id %}" class="btn-table-action" style="color: var(--danger-text);" title="Delete class">
+                                Delete
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                            <div style="font-size: 1rem; font-weight: 600; color: var(--text-main);">No classes configured yet</div>
+                            <p style="margin-top: 0.25rem; font-size: 0.85rem;">
+                                Create standard classes (e.g. 'Class 1A', 'Grade 4', 'Nursery 1') so teachers select from uniform options.
+                            </p>
+                            {% if user.profile.is_principal %}
+                            <a href="{% url 'class_create' %}" class="btn-primary" style="margin-top: 1rem; display: inline-flex;">
+                                + Add First Class
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Classes Touch Cards (Mobile View) -->
+<div class="mobile-only student-cards-list">
+    {% for sc in classes %}
+    <div class="student-card" style="margin-bottom: 0.85rem;">
+        <div class="student-card-header">
+            <div>
+                <strong style="font-size: 1rem; color: var(--text-main);">{{ sc.name }}</strong>
+                {% if sc.grade_level %}
+                <div style="font-size: 0.75rem; color: var(--text-muted);">{{ sc.grade_level }}</div>
+                {% endif %}
+            </div>
+            <div>
+                {% if sc.is_active %}
+                    <span class="badge badge-success" style="font-size: 0.7rem;">Active</span>
+                {% else %}
+                    <span class="badge badge-danger" style="font-size: 0.7rem;">Inactive</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; padding: 0.6rem 0.85rem; background: var(--surface-subtle); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+            <span style="font-size: 0.82rem; color: var(--text-muted);">Enrolled Students:</span>
+            <a href="{% url 'student_list' %}?class={{ sc.name }}" class="class-badge" style="text-decoration: none;">
+                👥 {{ sc.student_count }} Students &rarr;
+            </a>
+        </div>
+
+        {% if user.profile.is_principal %}
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem; border-top: 1px solid var(--border-subtle); padding-top: 0.65rem;">
+            <a href="{% url 'class_update' sc.id %}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.8rem;">
+                Edit
+            </a>
+            <a href="{% url 'class_delete' sc.id %}" class="btn-secondary" style="color: var(--danger-text); font-size: 0.8rem;">
+                Delete
+            </a>
+        </div>
+        {% endif %}
+    </div>
+    {% empty %}
+    <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
+        <div style="font-weight: 600;">No classes configured</div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Add your school classes to enforce uniformity.</p>
+        {% if user.profile.is_principal %}
+        <a href="{% url 'class_create' %}" class="btn-primary" style="margin-top: 0.85rem; display: inline-flex;">
+            + Add First Class
+        </a>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
