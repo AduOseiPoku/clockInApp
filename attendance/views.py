@@ -411,6 +411,9 @@ def dashboard_view(request):
 
     # Auto-default or redirect to teacher's assigned domain
     user_profile = getattr(request.user, 'profile', None)
+    is_attendance_only_teacher = bool(
+        user_profile and user_profile.role == UserProfile.ROLE_TEACHER and not user_profile.can_collect_fees
+    )
     if user_profile and user_profile.role == UserProfile.ROLE_TEACHER:
         # Fee Teachers dedicated to a bus route without an assigned classroom land on their bus roster
         if user_profile.assigned_bus_id and not user_profile.assigned_class and not request.GET:
@@ -418,7 +421,7 @@ def dashboard_view(request):
         # Automatically scope bus_filter to assigned bus route for Bus Fee Teachers
         if user_profile.assigned_bus_id and not bus_filter:
             bus_filter = str(user_profile.assigned_bus_id)
-        if not class_filter and user_profile.assigned_class:
+        if user_profile.assigned_class:
             class_filter = user_profile.assigned_class
 
     # Base query of active students
@@ -594,6 +597,24 @@ def dashboard_view(request):
     # Aggregated stats
     stats = get_stats_data(target_date, period)
 
+    # Dedicated attendance stats for classroom teachers
+    teacher_class_stats = None
+    if user_profile and user_profile.assigned_class:
+        c_name = user_profile.assigned_class
+        enrolled_c = Student.objects.filter(is_active=True, student_class=c_name).count()
+        present_c = ClockInRecord.objects.filter(
+            student__is_active=True, student__student_class=c_name, date=target_date
+        ).count()
+        absent_c = max(0, enrolled_c - present_c)
+        pct_c = round((present_c / enrolled_c * 100), 1) if enrolled_c > 0 else 0.0
+        teacher_class_stats = {
+            'class_name': c_name,
+            'enrolled': enrolled_c,
+            'present': present_c,
+            'absent': absent_c,
+            'pct': pct_c,
+        }
+
     context = {
         'target_date': target_date,
         'date_str': target_date.strftime('%Y-%m-%d'),
@@ -608,6 +629,8 @@ def dashboard_view(request):
         'clockin_filter': clockin_filter,
         'search_query': search_query,
         'stats': stats,
+        'teacher_class_stats': teacher_class_stats,
+        'is_attendance_only_teacher': is_attendance_only_teacher,
         'currency': getattr(settings, 'CURRENCY_SYMBOL', 'GH₵'),
     }
     return render(request, 'attendance/dashboard.html', context)
@@ -670,17 +693,21 @@ def toggle_clock_in_api(request):
             status_str = record.get_status_display()
             message = f"✓ Clocked in {student.full_name} at {time_str}."
 
-            # Automatically log parent notification
-            NotificationLog.objects.create(
-                student=student,
-                notification_type=NotificationLog.TYPE_CLOCK_IN,
-                recipient="Parent / Guardian",
-                message=f"Dear Parent, {student.full_name} arrived safely and clocked in at {time_str} today ({target_date})."
-            )
-
         # Fetch updated quick counters
         period = getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026')
         stats = get_stats_data(target_date, period)
+        if user_profile and user_profile.assigned_class:
+            c_name = user_profile.assigned_class
+            c_enrolled = Student.objects.filter(is_active=True, student_class=c_name).count()
+            c_present = ClockInRecord.objects.filter(
+                student__is_active=True, student__student_class=c_name, date=target_date
+            ).count()
+            c_absent = max(0, c_enrolled - c_present)
+            c_pct = round((c_present / c_enrolled * 100), 1) if c_enrolled > 0 else 0.0
+            stats['class_enrolled'] = c_enrolled
+            stats['class_present'] = c_present
+            stats['class_absent'] = c_absent
+            stats['class_pct'] = c_pct
 
         return JsonResponse({
             'success': True,
@@ -1486,6 +1513,13 @@ def student_list_view(request):
 
     onboarding_mode_active = (SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION') == 'True')
     can_register = bool(user_profile and user_profile.can_register_students)
+    is_attendance_only_teacher = bool(
+        user_profile and user_profile.role == UserProfile.ROLE_TEACHER and not user_profile.can_collect_fees
+    )
+
+    target_date = timezone.localdate()
+    clock_ins = ClockInRecord.objects.filter(date=target_date)
+    clock_in_map = {c.student_id: c for c in clock_ins}
 
     context = {
         'students': students,
@@ -1497,6 +1531,10 @@ def student_list_view(request):
         'total_count': students.count(),
         'onboarding_mode_active': onboarding_mode_active,
         'can_register': can_register,
+        'clock_in_map': clock_in_map,
+        'target_date': target_date,
+        'date_str': target_date.strftime('%Y-%m-%d'),
+        'is_attendance_only_teacher': is_attendance_only_teacher,
     }
     return render(request, 'attendance/students.html', context)
 

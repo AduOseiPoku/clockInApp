@@ -66,6 +66,20 @@ function updateLiveStats(stats) {
     if (canteenCollectedElem && stats.total_canteen_collected !== undefined) {
         canteenCollectedElem.textContent = `${curr}${parseFloat(stats.total_canteen_collected).toFixed(2)} collected`;
     }
+
+    // Classroom Teacher specific attendance counters
+    const teacherPresentElem = document.getElementById('teacher-stat-present');
+    const teacherAbsentElem = document.getElementById('teacher-stat-absent');
+    const teacherPctElem = document.getElementById('teacher-stat-pct');
+    if (stats.class_present !== undefined && teacherPresentElem) {
+        teacherPresentElem.textContent = `${stats.class_present} / ${stats.class_enrolled}`;
+    }
+    if (stats.class_absent !== undefined && teacherAbsentElem) {
+        teacherAbsentElem.textContent = `${stats.class_absent}`;
+    }
+    if (stats.class_pct !== undefined && teacherPctElem) {
+        teacherPctElem.textContent = `${stats.class_pct}%`;
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

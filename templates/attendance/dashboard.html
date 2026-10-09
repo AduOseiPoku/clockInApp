@@ -6,8 +6,13 @@
 <!-- Page Header -->
 <div class="page-header">
     <div class="page-title-group">
+        {% if is_attendance_only_teacher and teacher_class_stats %}
+        <h2>{{ teacher_class_stats.class_name }} Attendance Roster</h2>
+        <p>Morning student arrival attendance roll-call for {{ teacher_class_stats.class_name }}</p>
+        {% else %}
         <h2>Attendance & Fee Verification</h2>
         <p>Morning student arrival attendance and live fee verification</p>
+        {% endif %}
     </div>
     <div class="header-actions">
         {% if user.profile and user.profile.can_register_students %}
@@ -25,6 +30,51 @@
     </div>
 </div>
 
+{% if is_attendance_only_teacher and teacher_class_stats %}
+<!-- Classroom Attendance Roll-Call Metrics -->
+<div class="stats-grid" style="margin-bottom: 1.5rem;">
+    <div class="stat-card" style="border-left: 4px solid var(--primary);">
+        <div class="stat-header">
+            <span class="stat-title">Assigned Class</span>
+        </div>
+        <div class="stat-value" style="color:var(--primary);">{{ teacher_class_stats.class_name }}</div>
+        <div class="stat-footer">
+            <span>{{ teacher_class_stats.enrolled }} Enrolled Students</span>
+            <span class="stat-badge stat-badge-info">Active Roster</span>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-left: 4px solid var(--success);">
+        <div class="stat-header">
+            <span class="stat-title">Present Today</span>
+        </div>
+        <div id="teacher-stat-present" class="stat-value" style="color:var(--success);">
+            {{ teacher_class_stats.present }} / {{ teacher_class_stats.enrolled }}
+        </div>
+        <div class="stat-footer">
+            <span id="teacher-stat-pct" class="stat-badge stat-badge-success">{{ teacher_class_stats.pct }}% Present</span>
+            <span>Target: 100%</span>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-left: 4px solid {% if teacher_class_stats.absent > 0 %}var(--warning){% else %}var(--border){% endif %};">
+        <div class="stat-header">
+            <span class="stat-title">Not Yet Clocked In</span>
+        </div>
+        <div id="teacher-stat-absent" class="stat-value" style="color:{% if teacher_class_stats.absent > 0 %}var(--warning-text){% else %}var(--text-muted){% endif %};">
+            {{ teacher_class_stats.absent }}
+        </div>
+        <div class="stat-footer">
+            <span>Pending arrival</span>
+            {% if teacher_class_stats.absent == 0 %}
+            <span class="stat-badge stat-badge-success">All Present</span>
+            {% else %}
+            <span class="stat-badge stat-badge-warning">Unchecked</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% else %}
 <!-- Real-Time Metrics Cards -->
 <div class="stats-grid">
     <!-- Today's Total Revenue (Only for Staff with Financial Authority) -->
@@ -93,6 +143,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <!-- Controls & Filter Toolbar -->
 <form method="GET" action="{% url 'dashboard' %}" class="control-bar">
@@ -116,6 +167,7 @@
 
     <!-- Filters -->
     <div id="mobile-filter-group" class="filter-group {% if class_filter or bus_filter or fee_filter or clockin_filter %}show-mobile{% endif %}">
+        {% if not is_attendance_only_teacher %}
         <!-- Class Filter -->
         <select name="class" class="filter-select" onchange="this.form.submit()">
             <option value="">All Classes</option>
@@ -143,6 +195,7 @@
             <option value="any_unpaid" {% if fee_filter == 'any_unpaid' %}selected{% endif %}>Any Unpaid Fee</option>
             <option value="fully_paid" {% if fee_filter == 'fully_paid' %}selected{% endif %}>Fully Paid</option>
         </select>
+        {% endif %}
 
         <!-- Attendance Filter -->
         <select name="clockin_status" class="filter-select" onchange="this.form.submit()">
@@ -165,11 +218,16 @@
                 <tr>
                     <th>Student</th>
                     <th>Class</th>
+                    {% if not is_attendance_only_teacher %}
                     <th>Bus Route</th>
                     <th>Bus Fee</th>
                     <th>Canteen Fee</th>
                     <th style="text-align: center;">Morning Arrival</th>
                     <th style="text-align: right;">Action</th>
+                    {% else %}
+                    <th>Status</th>
+                    <th style="text-align: right;">Attendance Roll-Call</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -190,6 +248,7 @@
                             <span class="class-badge">{{ item.student.student_class }}</span>
                         </td>
 
+                        {% if not is_attendance_only_teacher %}
                         <!-- Assigned Bus Route & Rate -->
                         <td>
                             {% if item.student.bus %}
@@ -262,12 +321,40 @@
                             <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Review Only</span>
                             {% endif %}
                         </td>
+                        {% else %}
+                        <!-- Attendance-Only Classroom Teacher Columns -->
+                        <td>
+                            {% if item.is_clocked_in %}
+                            <span class="badge badge-success" style="font-size: 0.76rem; padding: 0.2rem 0.6rem;">
+                                ● Present
+                            </span>
+                            {% else %}
+                            <span class="badge" style="background: var(--surface-subtle); color: var(--text-muted); font-size: 0.76rem; padding: 0.2rem 0.6rem; border: 1px solid var(--border);">
+                                ⏳ Not Clocked In
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td id="clockin-action-cell-{{ item.student.id }}" style="text-align: right;">
+                            {% if item.is_clocked_in %}
+                                <div class="clocked-in-badge" style="display: inline-flex; align-items: center; justify-content: flex-end;">
+                                    <span>✓ {{ item.clock_in.clock_in_time|time:"h:i A" }}</span>
+                                    <button type="button" class="btn-undo-clockin" data-student-id="{{ item.student.id }}" data-action="undo" title="Undo clock-in" style="font-size: 0.95rem; margin-left: 0.4rem;">
+                                        ✕
+                                    </button>
+                                </div>
+                            {% else %}
+                                <button type="button" class="btn-clock-in" data-student-id="{{ item.student.id }}" data-action="clock_in" style="min-width: 105px;">
+                                    ✓ Clock In
+                                </button>
+                            {% endif %}
+                        </td>
+                        {% endif %}
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="7" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                        <td colspan="{% if is_attendance_only_teacher %}4{% else %}7{% endif %}" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
                             <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No students found</div>
-                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Try adjusting your class, bus, or fee filters.</p>
+                            <p style="margin-top: 0.25rem; font-size: 0.8rem;">Try adjusting your search or filters.</p>
                         </td>
                     </tr>
                 {% endfor %}
@@ -287,10 +374,12 @@
                         <div class="student-name">{{ item.student.full_name }}</div>
                         <div class="student-sub">
                             <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ item.student.student_class }}</span>
-                            {% if item.student.bus %}
-                                <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚌 {{ item.student.bus.name }}</span>
-                            {% else %}
-                                <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚶 Walker</span>
+                            {% if not is_attendance_only_teacher %}
+                                {% if item.student.bus %}
+                                    <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚌 {{ item.student.bus.name }}</span>
+                                {% else %}
+                                    <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚶 Walker</span>
+                                {% endif %}
                             {% endif %}
                         </div>
                     </div>
@@ -317,6 +406,7 @@
                 {% endif %}
             </div>
 
+            {% if not is_attendance_only_teacher %}
             <!-- Fees Summary Badges -->
             <div class="student-card-fees">
                 <div id="mobile-bus-fee-{{ item.student.id }}">
@@ -340,6 +430,7 @@
                     {% endif %}
                 </div>
             </div>
+            {% endif %}
 
             <!-- Large Touch Action Button (44px min height) -->
             <div class="student-card-actions">

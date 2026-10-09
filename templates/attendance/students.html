@@ -124,15 +124,20 @@
                 <tr>
                     <th>Student Name</th>
                     <th>Class</th>
+                    {% if not is_attendance_only_teacher %}
                     <th>Bus Route</th>
                     <th>Route Fee</th>
                     <th>Canteen</th>
                     <th style="text-align: right;">Actions</th>
+                    {% else %}
+                    <th>Arrival Status</th>
+                    <th style="text-align: right;">Morning Clock-In</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
                 {% for student in students %}
-                    <tr>
+                    <tr id="student-row-{{ student.id }}" data-clocked-in="{% if student.is_clocked_in %}true{% else %}false{% endif %}">
                         <td>
                             <div class="student-cell">
                                 <div class="student-avatar">{{ student.initials }}</div>
@@ -144,6 +149,8 @@
                         <td>
                             <span class="class-badge">{{ student.student_class }}</span>
                         </td>
+
+                        {% if not is_attendance_only_teacher %}
                         <td>
                             {% if student.bus %}
                                 <strong>{{ student.bus.name }}</strong>
@@ -191,10 +198,37 @@
                             </a>
                             {% endif %}
                         </td>
+                        {% else %}
+                        <td>
+                            {% if student.is_clocked_in %}
+                            <span class="badge badge-success" style="font-size: 0.76rem; padding: 0.2rem 0.6rem;">
+                                ● Present
+                            </span>
+                            {% else %}
+                            <span class="badge" style="background: var(--surface-subtle); color: var(--text-muted); font-size: 0.76rem; padding: 0.2rem 0.6rem; border: 1px solid var(--border);">
+                                ⏳ Not Clocked In
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td id="clockin-action-cell-{{ student.id }}" style="text-align: right; white-space: nowrap;">
+                            {% if student.is_clocked_in %}
+                                <div class="clocked-in-badge" style="display: inline-flex; align-items: center; justify-content: flex-end;">
+                                    <span>✓ {{ student.today_clock_in.clock_in_time|time:"h:i A" }}</span>
+                                    <button type="button" class="btn-undo-clockin" data-student-id="{{ student.id }}" data-action="undo" title="Undo clock-in" style="font-size: 0.95rem; margin-left: 0.4rem;">
+                                        ✕
+                                    </button>
+                                </div>
+                            {% else %}
+                                <button type="button" class="btn-clock-in" data-student-id="{{ student.id }}" data-action="clock_in" style="min-width: 105px;">
+                                    ✓ Clock In
+                                </button>
+                            {% endif %}
+                        </td>
+                        {% endif %}
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="6" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                        <td colspan="{% if is_attendance_only_teacher %}4{% else %}6{% endif %}" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
                             <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No students found</div>
                             {% if can_register %}
                             <p style="margin-top: 0.25rem; font-size: 0.8rem;">Click "+ Enroll Student" to add students to classes.</p>
@@ -215,7 +249,7 @@
 <!-- Touch-Friendly Student Cards (Mobile View) -->
 <div class="student-cards-list mobile-only">
     {% for student in students %}
-        <div class="student-card-item">
+        <div id="mobile-student-card-{{ student.id }}" class="student-card-item" data-clocked-in="{% if student.is_clocked_in %}true{% else %}false{% endif %}">
             <div class="student-card-top">
                 <div class="student-card-meta">
                     <div class="student-avatar">{{ student.initials }}</div>
@@ -231,6 +265,7 @@
                 {% endif %}
             </div>
 
+            {% if not is_attendance_only_teacher %}
             <div class="student-card-fees">
                 <div>
                     <span style="font-weight:600; color:var(--text-muted);">Route:</span>
@@ -261,6 +296,25 @@
                     {% endif %}
                 </div>
             </div>
+            {% else %}
+            <!-- Mobile Clock-In Action for Attendance-Only Teachers -->
+            <div class="student-card-actions" style="margin-top: 0.75rem;">
+                <div id="mobile-clockin-action-{{ student.id }}" style="width: 100%;">
+                    {% if student.is_clocked_in %}
+                        <div class="clocked-in-badge" style="width: 100%; min-height: 44px; justify-content: center; gap: 0.75rem; font-size: 0.88rem;">
+                            <span>✓ Clocked In at {{ student.today_clock_in.clock_in_time|time:"h:i A" }}</span>
+                            <button type="button" class="btn-undo-clockin" data-student-id="{{ student.id }}" data-action="undo" title="Undo clock-in" style="font-size: 1rem; padding: 0 0.5rem;">
+                                ✕
+                            </button>
+                        </div>
+                    {% else %}
+                        <button type="button" class="btn-clock-in" data-student-id="{{ student.id }}" data-action="clock_in" style="width: 100%; min-height: 44px; font-size: 0.88rem;">
+                            ✓ Clock In Arrival
+                        </button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
 
             {% if user.profile.is_principal %}
             <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">

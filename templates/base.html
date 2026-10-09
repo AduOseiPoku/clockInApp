@@ -69,7 +69,7 @@
                         </a>
                     </li>
                     {% endif %}
-                    {% if user.profile.can_view_revenue or user.profile.can_register_students %}
+                    {% if user.profile.can_view_revenue or user.profile.can_register_students or user.profile.is_teacher %}
                     <li>
                         <a href="{% url 'student_list' %}"
                             class="nav-link {% if 'student' in request.resolver_match.url_name %}active{% endif %}">
@@ -382,7 +382,7 @@
             </svg>
         </a>
         {% endif %}
-        {% if user.profile and user.profile.can_view_revenue %}
+        {% if user.profile and user.profile.can_view_revenue or user.profile.is_teacher %}
         <a href="{% url 'student_list' %}"
             class="bottom-nav-item {% if 'student' in request.resolver_match.url_name %}active{% endif %}">
             <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">

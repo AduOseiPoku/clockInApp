@@ -109,10 +109,11 @@ class SchoolClockInSystemTests(TestCase):
         self.assertTrue(data['success'])
         self.assertTrue(data['is_clocked_in'])
 
-        # Verify parent notification log was created
+        # Verify ClockInRecord exists and notifications are omitted as requested
+        record = ClockInRecord.objects.filter(student=self.student_tema).first()
+        self.assertIsNotNone(record)
         notif = NotificationLog.objects.filter(student=self.student_tema, notification_type=NotificationLog.TYPE_CLOCK_IN).first()
-        self.assertIsNotNone(notif)
-        self.assertIn("Kwesi Arthur", notif.message)
+        self.assertIsNone(notif)
 
     def test_quick_payment_api(self):
         """Test quick payment recording via AJAX endpoint."""
