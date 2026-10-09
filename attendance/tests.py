@@ -523,7 +523,7 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertEqual(res_dash.status_code, 200)
         self.assertContains(res_dash, 'Class Roster')
         self.assertNotContains(res_dash, '+ Record Fee')
-        self.assertContains(res_dash, 'Review Only')
+        self.assertContains(res_dash, 'Clock In')
         # Total revenue card must NOT be in HTML for teachers
         self.assertNotContains(res_dash, "Today's Revenue")
         # Hidden nav links

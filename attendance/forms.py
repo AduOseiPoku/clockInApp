@@ -278,6 +278,7 @@ class TeacherCreationForm(forms.Form):
             (UserProfile.ROLE_TEACHER, 'Teacher'),
             (UserProfile.ROLE_ADMIN, 'Administrator / Principal'),
         ],
+        required=False,
         initial=UserProfile.ROLE_TEACHER,
         widget=forms.Select(attrs={'class': 'form-select'}),
         label="Account Role & Privileges",
@@ -324,7 +325,7 @@ class TeacherCreationForm(forms.Form):
         first_name = self.cleaned_data.get('first_name', '')
         last_name = self.cleaned_data.get('last_name', '')
         is_active = self.cleaned_data.get('is_active', True)
-        role = self.cleaned_data.get('role', UserProfile.ROLE_TEACHER)
+        role = self.cleaned_data.get('role') or UserProfile.ROLE_TEACHER
         phone_number = self.cleaned_data.get('phone_number', '')
         assigned_class = self.cleaned_data.get('assigned_class', '')
         assigned_bus = self.cleaned_data.get('assigned_bus')
