@@ -154,6 +154,15 @@
                 {% endif %}
 
                 {% if user.is_authenticated %}
+                {% if user.profile.is_principal or user.is_superuser %}
+                <a href="{% url 'logout' %}" class="btn-signout" title="Sign Out" style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card); color: var(--text-muted); font-size: 0.82rem; font-weight: 500; text-decoration: none;">
+                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span>Sign Out</span>
+                </a>
+                {% else %}
                 <div class="user-badge">
                     <span class="user-badge-name">{{ user.username }}</span>
                     {% if user.profile %}
@@ -166,6 +175,7 @@
                         </svg>
                     </a>
                 </div>
+                {% endif %}
                 {% else %}
                 <a href="{% url 'login' %}" class="btn-secondary">
                     Sign In
