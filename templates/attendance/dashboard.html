@@ -57,11 +57,11 @@
         </div>
     </div>
 
-    <div class="stat-card" style="border-left: 4px solid {% if teacher_class_stats.absent > 0 %}var(--warning){% else %}var(--border){% endif %};">
+    <div class="stat-card" {% if teacher_class_stats.absent > 0 %}style="border-left: 4px solid var(--warning);"{% else %}style="border-left: 4px solid var(--border);"{% endif %}>
         <div class="stat-header">
             <span class="stat-title">Not Yet Clocked In</span>
         </div>
-        <div id="teacher-stat-absent" class="stat-value" style="color:{% if teacher_class_stats.absent > 0 %}var(--warning-text){% else %}var(--text-muted){% endif %};">
+        <div id="teacher-stat-absent" class="stat-value" {% if teacher_class_stats.absent > 0 %}style="color: var(--warning-text);"{% else %}style="color: var(--text-muted);"{% endif %}>
             {{ teacher_class_stats.absent }}
         </div>
         <div class="stat-footer">
@@ -86,7 +86,20 @@
         <div id="stat-daily-revenue" class="stat-value" style="color:var(--primary);">{{ currency }}{{ stats.daily_total_collected|floatformat:2 }}</div>
         <div class="stat-footer">
             <span>{{ stats.total_students }} active students</span>
-            <span class="stat-badge stat-badge-info">Daily</span>
+            <span class="stat-badge stat-badge-info">Daily Total</span>
+        </div>
+    </div>
+
+    <!-- Teacher Cash in Hand (Only for Staff with Financial Authority) -->
+    <div class="stat-card" style="border-left: 4px solid var(--warning);">
+        <div class="stat-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="stat-title">Teacher Cash in Hand</span>
+            <a href="{% url 'payment_list' %}" style="font-size:0.68rem; color:var(--primary); text-decoration:underline; font-weight:600;">Audit Ledger →</a>
+        </div>
+        <div id="stat-teacher-cash" class="stat-value" style="color:var(--warning-text);">{{ currency }}{{ teacher_intake_today|floatformat:2 }}</div>
+        <div class="stat-footer">
+            <span>{{ collectors_active_count }} active collector{{ collectors_active_count|pluralize }}</span>
+            <span class="stat-badge stat-badge-warning">Staff Intake</span>
         </div>
     </div>
     {% endif %}

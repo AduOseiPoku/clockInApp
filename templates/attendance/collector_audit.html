@@ -1,0 +1,369 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ teacher.get_full_name|default:teacher.username }} — Intake Audit{% endblock %}
+
+{% block content %}
+<!-- Page Header with Back Link & Audit Controls -->
+<div class="page-header" style="margin-bottom: 1.25rem;">
+    <div class="page-title-group">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+            <a href="{% url 'payment_list' %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                ← Back to Payments Ledger
+            </a>
+            <span style="color: var(--border);">/</span>
+            <span style="font-size: 0.78rem; color: var(--text-muted);">Teacher Financial Audit</span>
+        </div>
+        <h2>{{ teacher.get_full_name|default:teacher.username }}</h2>
+        <p>Daily expectations, monthly revenue intake, and complete timestamped audit log</p>
+    </div>
+
+    <div class="header-actions">
+        <!-- Date Selector for Audit Target -->
+        <form method="GET" action="{% url 'collector_audit' teacher.id %}" class="date-selector-pill" style="margin: 0;">
+            <input type="hidden" name="period" value="{{ log_period }}">
+            <label for="audit-date-picker" style="font-size:0.72rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Audit Date</label>
+            <input type="date" id="audit-date-picker" name="date" value="{{ date_str }}" onchange="this.form.submit()">
+        </form>
+
+        <button type="button" onclick="window.print()" class="btn-secondary" style="font-size: 0.82rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;" title="Print official remittance audit slip">
+            <span>🖨️</span> Print Audit Report
+        </button>
+    </div>
+</div>
+
+<!-- Teacher Profile Summary Card -->
+<div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid var(--primary);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.85rem;">
+            <div class="student-avatar" style="width: 44px; height: 44px; font-size: 1rem; font-weight: 700; background: var(--primary); color: #fff;">
+                {{ teacher.first_name|default:teacher.username|slice:":1" }}{{ teacher.last_name|slice:":1" }}
+            </div>
+            <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                        {{ teacher.get_full_name|default:teacher.username }}
+                    </h3>
+                    <span class="badge" style="background: hsla(var(--primary-hsl), 0.1); color: var(--primary); font-weight: 600; font-size: 0.72rem;">
+                        Authorized Collector
+                    </span>
+                    <span class="stat-badge {{ status_badge_class }}" style="font-size: 0.72rem;">
+                        {{ status_label }}
+                    </span>
+                </div>
+                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.2rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                    {% if meta.is_bus_fee_teacher %}
+                        <strong style="color: #0284c7;">🚌 Bus Route Conductor: {{ meta.assigned_bus_name }}</strong>
+                    {% elif profile.assigned_class %}
+                        <strong style="color: var(--primary);">🏫 Homeroom Teacher: {{ profile.assigned_class }}</strong>
+                    {% else %}
+                        <span>Floating Staff</span>
+                    {% endif %}
+                    <span>•</span>
+                    <span>{{ student_count }} assigned student{{ student_count|pluralize }}</span>
+                    <span>•</span>
+                    <span>@{{ teacher.username }}</span>
+                    {% if profile.phone_number %}
+                        <span>• 📞 {{ profile.phone_number }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: right;">
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Audited Target Date:</div>
+            <div style="font-size: 0.9rem; font-weight: 700; color: var(--text-main);">{{ target_date_str }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Key Financial Metrics (Target Expected, Cash Collected Today, Balance Due, Cumulative Month) -->
+<div class="stats-grid" style="margin-bottom: 1.25rem;">
+    <!-- 1. Target Expected Today -->
+    <div class="stat-card" style="border-left: 3px solid var(--primary);">
+        <div class="stat-header">
+            <span class="stat-title">Target Expected Today</span>
+        </div>
+        <div class="stat-value" style="color: var(--text-main);">
+            {{ currency }}{{ class_expected|floatformat:2 }}
+        </div>
+        <div class="stat-footer">
+            <span>Base: {{ currency }}{{ baseline_target|floatformat:2 }}</span>
+            <span class="stat-badge stat-badge-info">Target</span>
+        </div>
+    </div>
+
+    <!-- 2. Cash Collected Today -->
+    <div class="stat-card" style="border-left: 3px solid var(--success);">
+        <div class="stat-header">
+            <span class="stat-title">Cash Collected Today</span>
+        </div>
+        <div class="stat-value" style="color: var(--success-text);">
+            +{{ currency }}{{ today_collected|floatformat:2 }}
+        </div>
+        <div class="stat-footer">
+            <span>{{ today_count }} receipt{{ today_count|pluralize }} recorded</span>
+            <span class="stat-badge stat-badge-success">In Hand</span>
+        </div>
+    </div>
+
+    <!-- 3. Remaining Balance Due -->
+    {% if class_balance > 0 %}
+    <div class="stat-card" style="border-left: 3px solid var(--danger);">
+        <div class="stat-header">
+            <span class="stat-title">Remaining Balance Due</span>
+        </div>
+        <div class="stat-value" style="color: var(--danger-text);">
+            {{ currency }}{{ class_balance|floatformat:2 }}
+        </div>
+        <div class="stat-footer">
+            <span>{{ compliance_pct }}% accounted for</span>
+            <span class="stat-badge stat-badge-danger">Due</span>
+        </div>
+    </div>
+    {% else %}
+    <div class="stat-card" style="border-left: 3px solid var(--success);">
+        <div class="stat-header">
+            <span class="stat-title">Remaining Balance Due</span>
+        </div>
+        <div class="stat-value" style="color: var(--success-text);">
+            {{ currency }}0.00
+        </div>
+        <div class="stat-footer">
+            <span>{{ compliance_pct }}% accounted for</span>
+            <span class="stat-badge stat-badge-success">Balanced</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 4. Cumulative for Current Month -->
+    <div class="stat-card" style="border-left: 3px solid #6366f1;">
+        <div class="stat-header">
+            <span class="stat-title">Cumulative for {{ month_name }}</span>
+        </div>
+        <div class="stat-value" style="color: #4f46e5;">
+            {{ currency }}{{ month_total|floatformat:2 }}
+        </div>
+        <div class="stat-footer">
+            <span>{{ month_count }} receipt{{ month_count|pluralize }} this month</span>
+            <span class="stat-badge" style="background:#ede9fe; color:#6d28d9;">Month-to-Date</span>
+        </div>
+    </div>
+</div>
+
+<!-- Audit Adjustments Breakdown (if any) -->
+{% if meta.prepaid_deductions > 0 or meta.advance_prepayments > 0 or meta.one_off_additions > 0 %}
+<div class="stat-card" style="margin-bottom: 1.25rem; padding: 0.85rem 1.15rem; background: hsla(var(--primary-hsl), 0.02); border: 1px dashed var(--border);">
+    <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.4rem;">
+        ⚡ Target Audit Adjustments Applied Today:
+    </div>
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        {% if meta.prepaid_deductions > 0 %}
+        <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
+            -{{ currency }}{{ meta.prepaid_deductions|floatformat:0 }} Prepaid Credits ({{ meta.prepaid_students_count }} student{{ meta.prepaid_students_count|pluralize }} covered in advance)
+        </span>
+        {% endif %}
+        {% if meta.advance_prepayments > 0 %}
+        <span class="badge" style="background: #ede9fe; color: #6d28d9; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
+            +{{ currency }}{{ meta.advance_prepayments|floatformat:0 }} Multi-day Advance Prepayments Recorded
+        </span>
+        {% endif %}
+        {% if meta.one_off_additions > 0 %}
+        <span class="badge" style="background: #e0f2fe; color: #0284c7; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
+            +{{ currency }}{{ meta.one_off_additions|floatformat:0 }} Guest Bus Fare ({{ meta.one_off_additions_count }} one-off rider{{ meta.one_off_additions_count|pluralize }})
+        </span>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Audit Log of Collections (Every time money was taken) -->
+<div class="table-card" style="margin-bottom: 2rem;">
+    <!-- Log Header & Period Filter Bar -->
+    <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
+                <span>📋</span> Audit Log of Money Taken
+            </h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0.15rem 0 0 0;">
+                Complete chronological audit trail of all student fees recorded by {{ teacher.get_full_name|default:teacher.username }}
+            </p>
+        </div>
+
+        <!-- Period Filter Pills -->
+        <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
+            <a href="{% url 'collector_audit' teacher.id %}?period=today{% if date_str %}&date={{ date_str }}{% endif %}" 
+               class="btn-secondary filter-preset-btn {% if log_period == 'today' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+                Today ({{ target_date|date:"M d" }})
+            </a>
+            <a href="{% url 'collector_audit' teacher.id %}?period=week{% if date_str %}&date={{ date_str }}{% endif %}" 
+               class="btn-secondary filter-preset-btn {% if log_period == 'week' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+                Past 7 Days
+            </a>
+            <a href="{% url 'collector_audit' teacher.id %}?period=month{% if date_str %}&date={{ date_str }}{% endif %}" 
+               class="btn-secondary filter-preset-btn {% if log_period == 'month' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+                {{ month_name }}
+            </a>
+            <a href="{% url 'collector_audit' teacher.id %}?period=all{% if date_str %}&date={{ date_str }}{% endif %}" 
+               class="btn-secondary filter-preset-btn {% if log_period == 'all' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+                All Time ({{ all_count }})
+            </a>
+        </div>
+    </div>
+
+    <!-- Summary Count & Total Intake Bar -->
+    <div style="padding: 0.65rem 1.25rem; background: var(--surface-subtle); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem;">
+        <span style="color: var(--text-muted);">
+            Showing <strong>{{ audit_logs_count }}</strong> transaction{{ audit_logs_count|pluralize }}
+        </span>
+        <span style="font-weight: 700; color: var(--success-text); font-size: 0.85rem;">
+            Total Logged Intake: +{{ currency }}{{ filtered_log_total|floatformat:2 }}
+        </span>
+    </div>
+
+    <!-- The Audit Log Table -->
+    {% if audit_logs %}
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="padding: 0.65rem 1rem;">Date & Time Taken</th>
+                    <th>Receipt #</th>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Fee Type</th>
+                    <th>Payment Method</th>
+                    <th style="text-align: right;">Amount Taken</th>
+                    <th style="text-align: right;">Official Voucher</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in audit_logs %}
+                <tr>
+                    <!-- Timestamp -->
+                    <td style="padding: 0.65rem 1rem;">
+                        <div style="font-weight: 600; font-size: 0.8rem; color: var(--text-main);">
+                            {{ p.payment_date|date:"M d, Y" }}
+                        </div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted);">
+                            🕒 {{ p.created_at|time:"h:i:s A" }}
+                        </div>
+                    </td>
+
+                    <!-- Receipt # -->
+                    <td>
+                        <code style="font-size: 0.76rem; color: var(--text-muted); background: var(--surface-subtle); padding: 0.15rem 0.35rem; border-radius: 3px;">
+                            {{ p.receipt_number|default:"—" }}
+                        </code>
+                    </td>
+
+                    <!-- Student Name -->
+                    <td>
+                        <div class="student-cell">
+                            <div class="student-avatar" style="width: 24px; height: 24px; font-size: 0.68rem;">
+                                {{ p.student.initials }}
+                            </div>
+                            <span style="font-weight: 600; font-size: 0.82rem;">{{ p.student.full_name }}</span>
+                        </div>
+                    </td>
+
+                    <!-- Class -->
+                    <td>
+                        <span class="class-badge" style="font-size: 0.72rem;">{{ p.student.student_class }}</span>
+                    </td>
+
+                    <!-- Fee Type -->
+                    <td>
+                        {% if p.fee_type == 'BUS' %}
+                            <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">
+                                🚌 Bus Fee{% if p.bus %} ({{ p.bus.name }}){% endif %}
+                            </span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">
+                                🍽️ Canteen Fee
+                            </span>
+                        {% endif %}
+                        {% if p.is_advance %}
+                            <span class="badge" style="font-size: 0.62rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;">
+                                {{ p.days_covered }}d Adv
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <!-- Method -->
+                    <td>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">
+                            {{ p.get_payment_method_display }}
+                        </span>
+                    </td>
+
+                    <!-- Amount -->
+                    <td style="text-align: right;">
+                        <span style="font-size: 0.88rem; font-weight: 700; color: var(--success-text);">
+                            +{{ currency }}{{ p.amount|floatformat:2 }}
+                        </span>
+                    </td>
+
+                    <!-- Voucher -->
+                    <td style="text-align: right;">
+                        <a href="{% url 'payment_receipt' p.id %}" target="_blank" class="btn-secondary" style="font-size: 0.72rem; padding: 0.25rem 0.55rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;" title="View official receipt voucher">
+                            📄 Receipt
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 2.5rem 1rem;">
+        <div style="font-size: 1.5rem; margin-bottom: 0.35rem;">📝</div>
+        <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">No payment receipts recorded for this period</div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">
+            No transactions found for the selected time filter. Use the filter buttons above to change the range.
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Official Sign-off Block for Printouts -->
+<div class="print-signatures-block" style="display: none; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px dashed #71717a;">
+    <div style="display: flex; justify-content: space-between; gap: 2rem;">
+        <div style="flex: 1; text-align: center;">
+            <div style="border-bottom: 1px solid #000; width: 80%; margin: 2rem auto 0.5rem;"></div>
+            <p style="font-size: 0.8rem; font-weight: 600; margin: 0;">{{ teacher.get_full_name|default:teacher.username }} (Collector)</p>
+        </div>
+        <div style="flex: 1; text-align: center;">
+            <div style="border-bottom: 1px solid #000; width: 80%; margin: 2rem auto 0.5rem;"></div>
+            <p style="font-size: 0.8rem; font-weight: 600; margin: 0;">Accountant / Bursar Receiving Signature</p>
+        </div>
+        <div style="flex: 1; text-align: center;">
+            <div style="border-bottom: 1px solid #000; width: 80%; margin: 2rem auto 0.5rem;"></div>
+            <p style="font-size: 0.8rem; font-weight: 600; margin: 0;">Official School Stamp & Date</p>
+        </div>
+    </div>
+</div>
+
+<style>
+@media print {
+    .navbar, .header-actions, .filter-preset-btn, .page-header a, .btn-secondary, form {
+        display: none !important;
+    }
+    body {
+        background: #fff !important;
+        color: #000 !important;
+        font-size: 10pt !important;
+    }
+    .stat-card, .table-card {
+        border: 1px solid #000 !important;
+        box-shadow: none !important;
+    }
+    .data-table th, .data-table td {
+        border: 1px solid #ddd !important;
+        padding: 5px 8px !important;
+    }
+    .print-signatures-block {
+        display: block !important;
+    }
+}
+</style>
+{% endblock %}

@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/clock-in/toggle/', views.toggle_clock_in_api, name='api_clock_in_toggle'),
     path('api/payment/quick/', views.quick_payment_api, name='api_quick_payment'),
     path('api/payment/collect-both/', views.collect_both_fees_api, name='api_collect_both_fees'),
+    path('api/student/<int:student_id>/payment-details/', views.student_payment_details_api, name='api_student_payment_details'),
 
     # Bus Management
     path('buses/', views.bus_list_view, name='bus_list'),
@@ -39,6 +40,7 @@ urlpatterns = [
 
     # Payments Ledger & Printable Receipts
     path('payments/', views.payment_list_view, name='payment_list'),
+    path('payments/collector/<int:pk>/', views.collector_audit_view, name='collector_audit'),
     path('payments/record/', views.payment_create_view, name='payment_create'),
     path('payments/<int:pk>/receipt/', views.payment_receipt_view, name='payment_receipt'),
     path('payments/<int:pk>/delete/', views.payment_delete_view, name='payment_delete'),

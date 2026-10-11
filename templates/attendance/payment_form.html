@@ -785,21 +785,9 @@ document.addEventListener('DOMContentLoaded', () => {
         calculateTotal();
     }
 
-    function updateStudentDetails() {
-        const classId = classSelect.value;
-        const studentId = studentSelect.value;
+    let fetchAbortController = null;
 
-        if (!classId || !studentId || !activeStudentsByClass[classId]) {
-            clearStudentCards();
-            return;
-        }
-
-        const student = activeStudentsByClass[classId].find(s => String(s.id) === String(studentId));
-        if (!student) {
-            clearStudentCards();
-            return;
-        }
-
+    function renderStudentCards(student) {
         currentStudent = student;
         quickFillAll.style.display = 'block';
 
@@ -816,7 +804,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 2. Canteen Card
         const canteenFee = (student && student.canteen_fee) ? student.canteen_fee : 10.0;
-        const canteenBal = (student && student.canteen_balance) ? student.canteen_balance : 0;
+        const canteenBal = (student && student.canteen_balance !== undefined) ? student.canteen_balance : 0;
         const canHasPartial = Boolean(student && student.canteen_has_partial);
         const canRemainder = (student && student.canteen_remainder_due !== undefined) ? student.canteen_remainder_due : 0;
         const canCredit = (student && student.canteen_credit !== undefined) ? student.canteen_credit : 0;
@@ -833,7 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 cardCanteenBalance.innerHTML = `<span style="color:#b45309; font-weight:700;">${formatMoney(canRemainder)} Top-Up</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(canCredit)} credit applied)</span>`;
                 btnCanteenFull.textContent = `Top-Up (${formatMoney(canRemainder)})`;
             } else {
-                cardCanteenBalance.textContent = formatMoney(student.canteen_balance);
+                cardCanteenBalance.textContent = formatMoney(student.canteen_balance !== undefined ? student.canteen_balance : 0);
                 btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFullAmount)})`;
             }
         } else {
@@ -859,6 +847,68 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         calculateTotal();
+    }
+
+    function updateStudentDetails() {
+        const classId = classSelect.value;
+        const studentId = studentSelect.value;
+
+        if (!classId || !studentId || !activeStudentsByClass[classId]) {
+            clearStudentCards();
+            return;
+        }
+
+        const student = activeStudentsByClass[classId].find(s => String(s.id) === String(studentId));
+        if (!student) {
+            clearStudentCards();
+            return;
+        }
+
+        const paymentDateInput = document.getElementById('id_payment_date');
+        const paymentDate = paymentDateInput ? paymentDateInput.value : '';
+
+        // If financial details are already loaded for this student on this date:
+        if (student.bus_balance !== undefined && (!student.loaded_date || student.loaded_date === paymentDate)) {
+            renderStudentCards(student);
+            return;
+        }
+
+        // Fast responsive display: render basic card data immediately while fetching financial summary
+        currentStudent = student;
+        quickFillAll.style.display = 'block';
+        if (busSelect) {
+            if (isScopedFeeTeacher && assignedBusId) {
+                busSelect.value = assignedBusId;
+            } else {
+                busSelect.value = student.bus_id ? String(student.bus_id) : '';
+            }
+        }
+        cardBusBalance.innerHTML = '<span style="color:var(--text-muted); font-size:0.75rem;">Loading...</span>';
+        cardCanteenBalance.innerHTML = '<span style="color:var(--text-muted); font-size:0.75rem;">Loading...</span>';
+
+        if (fetchAbortController) {
+            fetchAbortController.abort();
+        }
+        fetchAbortController = new AbortController();
+
+        const url = `/api/student/${student.id}/payment-details/?date=${encodeURIComponent(paymentDate)}`;
+        fetch(url, { signal: fetchAbortController.signal })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.details) {
+                    Object.assign(student, data.details);
+                    student.loaded_date = paymentDate;
+                    if (studentSelect.value === String(student.id)) {
+                        renderStudentCards(student);
+                    }
+                }
+            })
+            .catch(err => {
+                if (err.name !== 'AbortError') {
+                    console.error('Error fetching student payment details:', err);
+                    renderStudentCards(student);
+                }
+            });
     }
 
     // Bus Route Dropdown Change Handler
@@ -959,6 +1009,17 @@ document.addEventListener('DOMContentLoaded', () => {
     studentSelect.addEventListener('change', () => {
         updateStudentDetails();
     });
+
+    const paymentDateInput = document.getElementById('id_payment_date');
+    if (paymentDateInput) {
+        paymentDateInput.addEventListener('change', () => {
+            if (currentStudent) {
+                delete currentStudent.loaded_date;
+                delete currentStudent.bus_balance;
+                updateStudentDetails();
+            }
+        });
+    }
 
     // Handle initial state setup
     if (isScopedFeeTeacher) {

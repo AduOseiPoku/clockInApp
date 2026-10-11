@@ -1,7 +1,8 @@
 import csv
 import json
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
+import calendar
 from collections import defaultdict
 from io import TextIOWrapper
 from django.shortcuts import render, redirect, get_object_or_404
@@ -615,6 +616,19 @@ def dashboard_view(request):
             'pct': pct_c,
         }
 
+    # Teacher cash in hand summary for users with financial authority
+    teacher_intake_today = Decimal('0.00')
+    collectors_active_count = 0
+    if user_profile and user_profile.can_view_revenue:
+        teacher_intake_today = FeePayment.objects.filter(
+            payment_date=target_date,
+            recorded_by__profile__role=UserProfile.ROLE_TEACHER
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        collectors_active_count = FeePayment.objects.filter(
+            payment_date=target_date,
+            recorded_by__profile__role=UserProfile.ROLE_TEACHER
+        ).values('recorded_by').distinct().count()
+
     context = {
         'target_date': target_date,
         'date_str': target_date.strftime('%Y-%m-%d'),
@@ -631,6 +645,8 @@ def dashboard_view(request):
         'stats': stats,
         'teacher_class_stats': teacher_class_stats,
         'is_attendance_only_teacher': is_attendance_only_teacher,
+        'teacher_intake_today': teacher_intake_today,
+        'collectors_active_count': collectors_active_count,
         'currency': getattr(settings, 'CURRENCY_SYMBOL', 'GH₵'),
     }
     return render(request, 'attendance/dashboard.html', context)
@@ -1654,9 +1670,9 @@ def payment_list_view(request):
     if date_preset == 'today':
         payments = payments.filter(payment_date=today)
     elif date_preset == 'yesterday':
-        payments = payments.filter(payment_date=today - datetime.timedelta(days=1))
+        payments = payments.filter(payment_date=today - timedelta(days=1))
     elif date_preset == 'week':
-        payments = payments.filter(payment_date__gte=today - datetime.timedelta(days=7))
+        payments = payments.filter(payment_date__gte=today - timedelta(days=7))
     elif date_str:
         try:
             filter_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -1696,11 +1712,46 @@ def payment_list_view(request):
         is_active=True
     ).select_related('profile', 'profile__assigned_bus').order_by('first_name', 'username')
 
-    collectors_meta = get_collectors_financial_summary(authorized_teachers, today)
+    target_audit_date = today
+    if date_str:
+        try:
+            target_audit_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            target_audit_date = today
+
+    first_day_of_month = target_audit_date.replace(day=1)
+    month_name = target_audit_date.strftime('%B %Y')
+
+    collectors_meta = get_collectors_financial_summary(authorized_teachers, target_audit_date)
     authorized_collectors_summary = []
+    collectors_total_expected = Decimal('0.00')
+    collectors_total_collected = Decimal('0.00')
+    collectors_total_balance = Decimal('0.00')
+    collectors_settled_count = 0
+    collectors_partial_count = 0
+    collectors_pending_count = 0
+
     for t in authorized_teachers:
         meta = collectors_meta.get(t.id, {})
         t_all_total = FeePayment.objects.filter(recorded_by=t).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+        # Cumulative month-to-date collections
+        t_month_total = FeePayment.objects.filter(
+            recorded_by=t,
+            payment_date__gte=first_day_of_month,
+            payment_date__lte=target_audit_date
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        t_month_count = FeePayment.objects.filter(
+            recorded_by=t,
+            payment_date__gte=first_day_of_month,
+            payment_date__lte=target_audit_date
+        ).count()
+
+        # Detailed individual payment receipts taken on target_audit_date by this teacher
+        t_day_payments = list(FeePayment.objects.filter(
+            recorded_by=t,
+            payment_date=target_audit_date
+        ).select_related('student', 'bus').order_by('-created_at'))
 
         t_class = meta.get('assigned_class') or ''
         t_bus_name = meta.get('assigned_bus_name') or ''
@@ -1708,12 +1759,49 @@ def payment_list_view(request):
         class_collected = meta.get('today_collected', Decimal('0.00'))
         class_balance = meta.get('balance', Decimal('0.00'))
         student_count = meta.get('student_count', 0)
+        today_total = meta.get('today_collected', Decimal('0.00'))
+
+        # Determine audit status & compliance percentage
+        if today_total >= class_expected and class_expected > 0:
+            status = 'SETTLED'
+            status_label = 'Settled'
+            status_badge_class = 'stat-badge-success'
+            compliance_pct = 100
+            collectors_settled_count += 1
+        elif today_total > 0 and class_balance > 0:
+            status = 'PARTIAL'
+            status_label = 'Partial'
+            status_badge_class = 'stat-badge-warning'
+            compliance_pct = min(100, int((today_total / class_expected) * 100)) if class_expected > 0 else 100
+            collectors_partial_count += 1
+        elif today_total == 0 and class_expected > 0:
+            status = 'PENDING'
+            status_label = 'Pending Intake'
+            status_badge_class = 'stat-badge-danger'
+            compliance_pct = 0
+            collectors_pending_count += 1
+        else:
+            status = 'SETTLED' if today_total > 0 else 'INACTIVE'
+            status_label = 'Settled' if today_total > 0 else 'No Target'
+            status_badge_class = 'stat-badge-success' if today_total > 0 else 'stat-badge-info'
+            compliance_pct = 100 if today_total > 0 else 0
+            if today_total > 0:
+                collectors_settled_count += 1
+
+        collectors_total_expected += class_expected
+        collectors_total_collected += today_total
+        collectors_total_balance += class_balance
 
         authorized_collectors_summary.append({
             'user': t,
-            'today_total': meta.get('today_collected', Decimal('0.00')),
+            'today_total': today_total,
             'today_count': meta.get('today_count', 0),
+            'month_total': t_month_total,
+            'month_count': t_month_count,
+            'month_name': month_name,
             'all_total': t_all_total,
+            'day_payments': t_day_payments,
+            'day_payments_count': len(t_day_payments),
             'assigned_class': t_class or 'Floating',
             'assigned_bus_name': t_bus_name,
             'is_bus_fee_teacher': meta.get('is_bus_fee_teacher', False),
@@ -1732,6 +1820,15 @@ def payment_list_view(request):
             'class_collected': class_collected,
             'class_balance': class_balance,
             'student_count': student_count,
+            'status': status,
+            'status_label': status_label,
+            'status_badge_class': status_badge_class,
+            'compliance_pct': compliance_pct,
+            'has_adjustments': bool(
+                meta.get('prepaid_deductions', 0) > 0 or
+                meta.get('advance_prepayments', 0) > 0 or
+                meta.get('one_off_additions', 0) > 0
+            ),
         })
 
     # All staff who have recorded payments for filter dropdown
@@ -1746,9 +1843,18 @@ def payment_list_view(request):
         'search': search,
         'date_preset': date_preset,
         'date_str': date_str,
+        'target_audit_date': target_audit_date,
+        'target_audit_date_str': target_audit_date.strftime('%B %d, %Y'),
+        'month_name': month_name,
         'selected_collector': collector,
         'collectors_list': collectors_list,
         'authorized_collectors_summary': authorized_collectors_summary,
+        'collectors_total_expected': collectors_total_expected,
+        'collectors_total_collected': collectors_total_collected,
+        'collectors_total_balance': collectors_total_balance,
+        'collectors_settled_count': collectors_settled_count,
+        'collectors_partial_count': collectors_partial_count,
+        'collectors_pending_count': collectors_pending_count,
         'total_amount': total_amount,
         'payment_count': payments.count(),
         'today_total': today_total,
@@ -1758,10 +1864,199 @@ def payment_list_view(request):
     return render(request, 'attendance/payments.html', context)
 
 
+@finance_required
+def collector_audit_view(request, pk):
+    """
+    Dedicated financial audit dossier and collection log for an authorized teacher.
+    Displays:
+    - Target Expected Today (with Base rate breakdown)
+    - Cash Collected Today (with receipt count)
+    - Remaining Balance Due Today (with compliance percentage)
+    - Cumulative intake for current month (with monthly count & all-time total)
+    - Complete timestamped audit log of all fees collected by this teacher.
+    """
+    teacher = get_object_or_404(User, pk=pk)
+    today = timezone.localdate()
+    
+    date_str = request.GET.get('date', '').strip()
+    log_period = request.GET.get('period', 'today')  # today, week, month, all
+    
+    target_date = today
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            target_date = today
+
+    first_day_of_month = target_date.replace(day=1)
+    month_name = target_date.strftime('%B %Y')
+    _, last_day = calendar.monthrange(target_date.year, target_date.month)
+    last_day_of_month = target_date.replace(day=last_day)
+
+    # Calculate audited daily expectations & today's collection for this teacher
+    collectors_meta = get_collectors_financial_summary([teacher], target_date)
+    meta = collectors_meta.get(teacher.id, {})
+
+    today_collected = meta.get('today_collected', Decimal('0.00'))
+    today_count = meta.get('today_count', 0)
+    class_expected = meta.get('adjusted_target', Decimal('0.00'))
+    baseline_target = meta.get('baseline_target', Decimal('0.00'))
+    class_balance = meta.get('balance', Decimal('0.00'))
+    student_count = meta.get('student_count', 0)
+
+    # Monthly cumulative collections
+    month_payments_qs = FeePayment.objects.filter(
+        recorded_by=teacher,
+        payment_date__gte=first_day_of_month,
+        payment_date__lte=last_day_of_month
+    )
+    month_total = month_payments_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    month_count = month_payments_qs.count()
+
+    all_total = FeePayment.objects.filter(recorded_by=teacher).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    all_count = FeePayment.objects.filter(recorded_by=teacher).count()
+
+    # Determine status & compliance percentage
+    if today_collected >= class_expected and class_expected > 0:
+        status_label = 'Settled'
+        status_badge_class = 'stat-badge-success'
+        compliance_pct = 100
+    elif today_collected > 0 and class_balance > 0:
+        status_label = 'Partial'
+        status_badge_class = 'stat-badge-warning'
+        compliance_pct = min(100, int((today_collected / class_expected) * 100)) if class_expected > 0 else 100
+    elif today_collected == 0 and class_expected > 0:
+        status_label = 'Pending Intake'
+        status_badge_class = 'stat-badge-danger'
+        compliance_pct = 0
+    else:
+        status_label = 'Settled' if today_collected > 0 else 'No Target'
+        status_badge_class = 'stat-badge-success' if today_collected > 0 else 'stat-badge-info'
+        compliance_pct = 100 if today_collected > 0 else 0
+
+    # Audit log of payments collected by this teacher
+    audit_logs_qs = FeePayment.objects.filter(recorded_by=teacher).select_related('student', 'bus').order_by('-payment_date', '-created_at')
+
+    if log_period == 'today':
+        audit_logs_qs = audit_logs_qs.filter(payment_date=target_date)
+    elif log_period == 'week':
+        audit_logs_qs = audit_logs_qs.filter(payment_date__gte=target_date - timedelta(days=7), payment_date__lte=target_date)
+    elif log_period == 'month':
+        audit_logs_qs = audit_logs_qs.filter(payment_date__gte=first_day_of_month, payment_date__lte=last_day_of_month)
+    elif log_period == 'all':
+        pass  # All-time
+
+    filtered_log_total = audit_logs_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+    context = {
+        'teacher': teacher,
+        'profile': getattr(teacher, 'profile', None),
+        'target_date': target_date,
+        'date_str': target_date.strftime('%Y-%m-%d'),
+        'target_date_str': target_date.strftime('%B %d, %Y'),
+        'month_name': month_name,
+        'class_expected': class_expected,
+        'baseline_target': baseline_target,
+        'today_collected': today_collected,
+        'today_count': today_count,
+        'class_balance': class_balance,
+        'compliance_pct': compliance_pct,
+        'month_total': month_total,
+        'month_count': month_count,
+        'all_total': all_total,
+        'all_count': all_count,
+        'meta': meta,
+        'status_label': status_label,
+        'status_badge_class': status_badge_class,
+        'student_count': student_count,
+        'log_period': log_period,
+        'audit_logs': audit_logs_qs,
+        'audit_logs_count': audit_logs_qs.count(),
+        'filtered_log_total': filtered_log_total,
+        'currency': getattr(settings, 'CURRENCY_SYMBOL', 'GH₵'),
+    }
+    return render(request, 'attendance/collector_audit.html', context)
+
+
+def get_student_payment_summary(student, target_date=None):
+    """
+    Computes real-time daily fee context, credits, and partial remainder top-up amounts
+    for a single student on target_date without redundant database queries.
+    """
+    if target_date is None:
+        target_date = timezone.localdate()
+
+    bus_fee = float(student.bus_fee_required)
+    canteen_fee = float(student.canteen_fee_required)
+
+    bus_credit = float(student.get_bus_credit_balance(target_date))
+    can_credit = float(student.get_canteen_credit_balance(target_date))
+
+    bus_paid = float(student.get_daily_bus_paid(target_date))
+    can_paid = float(student.get_daily_canteen_paid(target_date))
+
+    # Partial credit top-up calculations
+    bus_has_partial = bool(student.bus and (bus_paid < bus_fee) and (0.0 < bus_credit < bus_fee))
+    bus_remainder_due = max(0.0, bus_fee - bus_credit - bus_paid) if bus_has_partial else 0.0
+
+    can_has_partial = bool(student.canteen_enrolled and (can_paid < canteen_fee) and (0.0 < can_credit < canteen_fee))
+    can_remainder_due = max(0.0, canteen_fee - can_credit - can_paid) if can_has_partial else 0.0
+
+    # Remaining balances due today
+    bus_covered = max(bus_paid, bus_credit)
+    bus_balance = max(0.0, bus_fee - bus_covered) if student.bus else 0.0
+
+    can_covered = max(can_paid, can_credit)
+    canteen_balance = max(0.0, canteen_fee - can_covered) if student.canteen_enrolled else 0.0
+
+    # Remaining advance credit days after today
+    bus_credit_days = 0
+    if student.bus and bus_fee > 0 and bus_credit >= bus_fee:
+        bus_credit_days = int((bus_credit - bus_fee) // bus_fee)
+
+    canteen_credit_days = 0
+    if student.canteen_enrolled and canteen_fee > 0 and can_credit >= canteen_fee:
+        canteen_credit_days = int((can_credit - canteen_fee) // canteen_fee)
+
+    return {
+        'bus_fee': bus_fee,
+        'bus_paid': bus_paid,
+        'bus_balance': bus_balance,
+        'bus_credit': bus_credit,
+        'bus_has_partial': bus_has_partial,
+        'bus_remainder_due': bus_remainder_due,
+        'bus_credit_days': bus_credit_days,
+        'canteen_fee': canteen_fee,
+        'canteen_paid': can_paid,
+        'canteen_balance': canteen_balance,
+        'canteen_credit': can_credit,
+        'canteen_has_partial': can_has_partial,
+        'canteen_remainder_due': can_remainder_due,
+        'canteen_credit_days': canteen_credit_days,
+    }
+
+
+@payment_recording_required
+def student_payment_details_api(request, student_id):
+    """AJAX API endpoint: Returns live payment balances and credit status for a student."""
+    student = get_object_or_404(Student, id=student_id, is_active=True)
+    date_str = request.GET.get('date')
+    target_date = timezone.localdate()
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            pass
+
+    details = get_student_payment_summary(student, target_date)
+    return JsonResponse({'success': True, 'details': details})
+
+
 @payment_recording_required
 def payment_create_view(request):
     """Form to record a daily or advance fee payment."""
     student_id = request.GET.get('student_id')
+    target_student = None
     initial = {}
     selected_class_id = None
     is_guest_mode_initial = False
@@ -1905,44 +2200,29 @@ def payment_create_view(request):
     scoped_students_by_class = {}
     all_bus_riders = []
 
+    school_classes = list(SchoolClass.objects.filter(is_active=True).order_by('name'))
+    class_name_to_id = {sc.name.strip(): str(sc.id) for sc in school_classes if sc.name}
+
     students_qs = Student.objects.filter(is_active=True).select_related('bus', 'school_class').order_by('first_name', 'last_name')
     for s in students_qs:
-        cls_key = str(s.school_class.id) if s.school_class else ""
-        if not cls_key:
-            cls_obj = SchoolClass.objects.filter(name=s.student_class).first()
-            if cls_obj:
-                cls_key = str(cls_obj.id)
-
-        bus_credit = s.get_bus_credit_balance(today)
-        bus_has_partial = bool(s.bus and not s.is_bus_paid_for_date(today) and Decimal('0.00') < bus_credit < s.bus_fee_required)
-        bus_remainder_due = max(Decimal('0.00'), s.bus_fee_required - bus_credit - s.get_daily_bus_paid(today)) if bus_has_partial else Decimal('0.00')
-        can_credit = s.get_canteen_credit_balance(today)
-        can_has_partial = bool(s.canteen_enrolled and not s.is_canteen_paid_for_date(today) and Decimal('0.00') < can_credit < s.canteen_fee_required)
-        can_remainder_due = max(Decimal('0.00'), s.canteen_fee_required - can_credit - s.get_daily_canteen_paid(today)) if can_has_partial else Decimal('0.00')
+        cls_key = str(s.school_class_id) if s.school_class_id else class_name_to_id.get((s.student_class or '').strip(), "")
 
         s_dict = {
             'id': s.id,
             'name': s.full_name,
             'class_name': s.school_class.name if s.school_class else (s.student_class or 'Unassigned'),
-            'bus_id': s.bus.id if s.bus else '',
+            'bus_id': s.bus_id or '',
             'bus_name': s.bus.name if s.bus else 'Walker',
-            'has_bus': bool(s.bus),
+            'has_bus': bool(s.bus_id),
             'bus_fee': float(s.bus_fee_required),
-            'bus_paid': float(s.get_daily_bus_paid(today)),
-            'bus_balance': float(s.get_daily_bus_balance(today)),
-            'bus_credit': float(bus_credit),
-            'bus_has_partial': bus_has_partial,
-            'bus_remainder_due': float(bus_remainder_due),
-            'bus_credit_days': s.get_bus_credit_days(today),
             'canteen_enrolled': bool(s.canteen_enrolled),
             'canteen_fee': float(s.canteen_fee_required),
-            'canteen_paid': float(s.get_daily_canteen_paid(today)),
-            'canteen_balance': float(s.get_daily_canteen_balance(today)),
-            'canteen_credit': float(can_credit),
-            'canteen_has_partial': can_has_partial,
-            'canteen_remainder_due': float(can_remainder_due),
-            'canteen_credit_days': s.get_canteen_credit_days(today),
         }
+
+        # If a specific student was targeted in the URL, preload their financial details immediately
+        if target_student and s.id == target_student.id:
+            s_dict.update(get_student_payment_summary(s, today))
+            s_dict['loaded_date'] = today.strftime('%Y-%m-%d')
 
         if cls_key:
             if cls_key not in all_students_by_class:
@@ -1958,7 +2238,7 @@ def payment_create_view(request):
 
     scoped_classes = []
     if is_scoped_fee_teacher and assigned_bus:
-        for sc in SchoolClass.objects.filter(is_active=True).order_by('name'):
+        for sc in school_classes:
             sc_id_str = str(sc.id)
             count = len(scoped_students_by_class.get(sc_id_str, []))
             if count > 0:
@@ -1969,7 +2249,7 @@ def payment_create_view(request):
 
     all_classes = [
         {'id': str(sc.id), 'name': sc.name}
-        for sc in SchoolClass.objects.filter(is_active=True).order_by('name')
+        for sc in school_classes
     ]
 
     active_classes_list = scoped_classes if is_scoped_fee_teacher else all_classes
