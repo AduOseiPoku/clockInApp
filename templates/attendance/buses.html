@@ -164,17 +164,26 @@
                 👤 <strong>{{ item.bus.driver_name|default:"Unassigned Driver" }}</strong> &bull; {{ item.bus.driver_phone|default:"No Phone" }} {% if item.bus.plate_number %} &bull; <code>{{ item.bus.plate_number }}</code>{% endif %}
             </div>
 
-            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
-                <a href="{% url 'bus_analytics' item.bus.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--primary); font-weight:600;">
-                    📊 Analytics
+            <!-- Unified Mobile Action Row -->
+            <div class="student-card-actions">
+                <a href="{% url 'bus_analytics' item.bus.id %}" class="btn-card-pay" style="flex:1; justify-content:center; color:var(--primary); font-weight:600;">
+                    📊 View Analytics
                 </a>
+
                 {% if user.profile.is_principal %}
-                <a href="{% url 'bus_update' item.bus.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
-                    ✏️ Edit
-                </a>
-                <a href="{% url 'bus_delete' item.bus.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
-                    🗑️
-                </a>
+                <div class="card-menu-wrapper">
+                    <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Route Options" style="height:48px; width:44px; border:1.5px solid var(--border);">
+                        ⋮
+                    </button>
+                    <div class="card-menu-dropdown">
+                        <a href="{% url 'bus_update' item.bus.id %}">
+                            <span>✏️</span> Edit Route
+                        </a>
+                        <a href="{% url 'bus_delete' item.bus.id %}" class="menu-item-danger">
+                            <span>🗑️</span> Delete Route
+                        </a>
+                    </div>
+                </div>
                 {% endif %}
             </div>
         </div>

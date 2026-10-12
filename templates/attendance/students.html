@@ -258,10 +258,22 @@
                         <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ student.student_class }}</span>
                     </div>
                 </div>
-                {% if user.profile and user.profile.can_record_payments %}
-                <a href="{% url 'payment_create' %}?student_id={{ student.id }}" class="btn-primary" style="padding:0.4rem 0.75rem; font-size:0.78rem; min-height:36px;">
-                    + Pay
-                </a>
+
+                {% if user.profile.is_principal %}
+                <!-- Contextual 3-Dots Menu for Edit / Delete -->
+                <div class="card-menu-wrapper">
+                    <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Student Options">
+                        ⋮
+                    </button>
+                    <div class="card-menu-dropdown">
+                        <a href="{% url 'student_update' student.id %}">
+                            <span>✏️</span> Edit Profile
+                        </a>
+                        <a href="{% url 'student_delete' student.id %}" class="menu-item-danger">
+                            <span>🗑️</span> Delete Student
+                        </a>
+                    </div>
+                </div>
                 {% endif %}
             </div>
 
@@ -296,36 +308,33 @@
                     {% endif %}
                 </div>
             </div>
-            {% else %}
-            <!-- Mobile Clock-In Action for Attendance-Only Teachers -->
-            <div class="student-card-actions" style="margin-top: 0.75rem;">
-                <div id="mobile-clockin-action-{{ student.id }}" style="width: 100%;">
+            {% endif %}
+
+            <!-- Mobile Action Row -->
+            <div class="student-card-actions">
+                {% if is_attendance_only_teacher %}
+                <div id="mobile-clockin-action-{{ student.id }}" class="clockin-container">
                     {% if student.is_clocked_in %}
-                        <div class="clocked-in-badge" style="width: 100%; min-height: 44px; justify-content: center; gap: 0.75rem; font-size: 0.88rem;">
+                        <div class="clocked-in-badge">
                             <span>✓ Clocked In at {{ student.today_clock_in.clock_in_time|time:"h:i A" }}</span>
                             <button type="button" class="btn-undo-clockin" data-student-id="{{ student.id }}" data-action="undo" title="Undo clock-in" style="font-size: 1rem; padding: 0 0.5rem;">
                                 ✕
                             </button>
                         </div>
                     {% else %}
-                        <button type="button" class="btn-clock-in" data-student-id="{{ student.id }}" data-action="clock_in" style="width: 100%; min-height: 44px; font-size: 0.88rem;">
+                        <button type="button" class="btn-clock-in" data-student-id="{{ student.id }}" data-action="clock_in">
                             ✓ Clock In Arrival
                         </button>
                     {% endif %}
                 </div>
+                {% else %}
+                    {% if user.profile and user.profile.can_record_payments %}
+                    <a href="{% url 'payment_create' %}?student_id={{ student.id }}" class="btn-card-pay" style="flex:1;">
+                        💳 Record Payment
+                    </a>
+                    {% endif %}
+                {% endif %}
             </div>
-            {% endif %}
-
-            {% if user.profile.is_principal %}
-            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.25rem;">
-                <a href="{% url 'student_update' student.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
-                    ✏️ Edit
-                </a>
-                <a href="{% url 'student_delete' student.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
-                    🗑️ Delete
-                </a>
-            </div>
-            {% endif %}
         </div>
     {% empty %}
         <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">
@@ -337,8 +346,26 @@
             <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Contact the Principal to enroll new students.</p>
             {% endif %}
         </div>
-    {% endfor %}
 </div>
+
+{% if is_paginated %}
+<div class="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; flex-wrap: wrap; gap: 0.75rem;">
+    <div style="font-size: 0.82rem; color: var(--text-muted);">
+        Showing <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> of <strong>{{ total_count }}</strong> students
+    </div>
+    <div style="display: flex; gap: 0.35rem; align-items: center;">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if class_filter %}&class={{ class_filter }}{% endif %}{% if bus_filter %}&bus={{ bus_filter }}{% endif %}{% if search %}&q={{ search }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">← Previous</a>
+        {% endif %}
+        <span style="font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.65rem; background: var(--surface-subtle); border-radius: var(--radius-sm);">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if class_filter %}&class={{ class_filter }}{% endif %}{% if bus_filter %}&bus={{ bus_filter }}{% endif %}{% if search %}&q={{ search }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">Next →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 
 <!-- Hidden CSRF token for AJAX -->
 <form style="display:none;">{% csrf_token %}</form>

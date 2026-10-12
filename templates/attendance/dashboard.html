@@ -390,33 +390,13 @@
                             {% if not is_attendance_only_teacher %}
                                 {% if item.student.bus %}
                                     <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚌 {{ item.student.bus.name }}</span>
-                                {% else %}
+                                 {% else %}
                                     <span style="font-size:0.72rem; color:var(--text-muted); margin-left:0.25rem;">🚶 Walker</span>
                                 {% endif %}
                             {% endif %}
                         </div>
                     </div>
                 </div>
-                {% if user.profile and user.profile.can_record_payments %}
-                <div>
-                    <button type="button" class="btn-quick-pay" 
-                            data-student-id="{{ item.student.id }}" 
-                            data-student-name="{{ item.student.full_name }}"
-                            data-has-bus="{% if item.student.bus %}true{% else %}false{% endif %}"
-                            data-bus-paid="{% if item.is_bus_paid %}true{% else %}false{% endif %}"
-                            data-bus-req="{{ item.bus_req }}"
-                            data-bus-bal="{{ item.bus_balance }}"
-                            data-has-canteen="{% if item.student.canteen_enrolled %}true{% else %}false{% endif %}"
-                            data-canteen-paid="{% if item.is_canteen_paid %}true{% else %}false{% endif %}"
-                            data-canteen-req="{{ item.canteen_req }}"
-                            data-canteen-bal="{{ item.canteen_balance }}"
-                            data-fee-type="{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
-                            data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}"
-                            style="min-height:36px; padding:0 0.75rem; font-size:0.78rem;">
-                        💳 Pay
-                    </button>
-                </div>
-                {% endif %}
             </div>
 
             {% if not is_attendance_only_teacher %}
@@ -445,22 +425,41 @@
             </div>
             {% endif %}
 
-            <!-- Large Touch Action Button (44px min height) -->
+            <!-- Unified 48px Action Row -->
             <div class="student-card-actions">
-                <div id="mobile-clockin-action-{{ item.student.id }}" style="width: 100%;">
+                <div id="mobile-clockin-action-{{ item.student.id }}" class="clockin-container">
                     {% if item.is_clocked_in %}
-                        <div class="clocked-in-badge" style="width: 100%; min-height: 44px; justify-content: center; gap: 0.75rem; font-size: 0.88rem;">
+                        <div class="clocked-in-badge">
                             <span>✓ Clocked In at {{ item.clock_in.clock_in_time|time:"h:i A" }}</span>
                             <button type="button" class="btn-undo-clockin" data-student-id="{{ item.student.id }}" data-action="undo" title="Undo clock-in" style="font-size: 1rem; padding: 0 0.5rem;">
                                 ✕
                             </button>
                         </div>
                     {% else %}
-                        <button type="button" class="btn-clock-in" data-student-id="{{ item.student.id }}" data-action="clock_in" style="width: 100%; min-height: 44px; font-size: 0.88rem;">
+                        <button type="button" class="btn-clock-in" data-student-id="{{ item.student.id }}" data-action="clock_in">
                             ✓ Clock In Arrival
                         </button>
                     {% endif %}
                 </div>
+
+                {% if user.profile and user.profile.can_record_payments and not is_attendance_only_teacher %}
+                <button type="button" class="btn-quick-pay btn-card-pay" 
+                        data-student-id="{{ item.student.id }}" 
+                        data-student-name="{{ item.student.full_name }}"
+                        data-has-bus="{% if item.student.bus %}true{% else %}false{% endif %}"
+                        data-bus-paid="{% if item.is_bus_paid %}true{% else %}false{% endif %}"
+                        data-bus-req="{{ item.bus_req }}"
+                        data-bus-bal="{{ item.bus_balance }}"
+                        data-has-canteen="{% if item.student.canteen_enrolled %}true{% else %}false{% endif %}"
+                        data-canteen-paid="{% if item.is_canteen_paid %}true{% else %}false{% endif %}"
+                        data-canteen-req="{{ item.canteen_req }}"
+                        data-canteen-bal="{{ item.canteen_balance }}"
+                        data-fee-type="{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
+                        data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}"
+                        title="Record Payment">
+                    💳 Pay
+                </button>
+                {% endif %}
             </div>
         </div>
     {% empty %}

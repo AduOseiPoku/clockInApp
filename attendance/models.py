@@ -447,9 +447,9 @@ class FeePayment(models.Model):
     is_temporary_bus = models.BooleanField(default=False, help_text="True if recorded for a one-off/guest bus ride different from student regular route")
     is_advance = models.BooleanField(default=False, help_text="True if recorded as advance payment covering future days")
     days_covered = models.PositiveIntegerField(default=1, help_text="Number of school days this payment is intended to cover")
-    fee_type = models.CharField(max_length=20, choices=FEE_TYPES)
+    fee_type = models.CharField(max_length=20, choices=FEE_TYPES, db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    payment_date = models.DateField(default=timezone.localdate)
+    payment_date = models.DateField(default=timezone.localdate, db_index=True)
     period = models.CharField(max_length=50, default='Term 1 - 2026', help_text="e.g. 'Term 1 - 2026'")
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHODS, default='CASH')
     receipt_number = models.CharField(max_length=50, blank=True)
@@ -461,6 +461,11 @@ class FeePayment(models.Model):
         verbose_name = 'Fee Payment'
         verbose_name_plural = 'Fee Payments'
         ordering = ['-payment_date', '-created_at']
+        indexes = [
+            models.Index(fields=['fee_type', 'payment_date'], name='feepay_type_date_idx'),
+            models.Index(fields=['recorded_by', 'payment_date'], name='feepay_rec_date_idx'),
+            models.Index(fields=['student', 'fee_type', 'payment_date'], name='feepay_std_type_date_idx'),
+        ]
 
     def __str__(self):
         return f"{self.student.full_name} - {self.get_fee_type_display()} - {getattr(settings, 'CURRENCY_SYMBOL', 'GH₵')}{self.amount:.2f}"
@@ -479,7 +484,7 @@ class ClockInRecord(models.Model):
     ]
 
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='clock_in_records')
-    date = models.DateField(default=timezone.localdate)
+    date = models.DateField(default=timezone.localdate, db_index=True)
     clock_in_time = models.TimeField(default=timezone.now)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PRESENT')
     recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
@@ -491,6 +496,9 @@ class ClockInRecord(models.Model):
         verbose_name_plural = 'Clock-In Records'
         unique_together = ('student', 'date')
         ordering = ['-date', '-clock_in_time']
+        indexes = [
+            models.Index(fields=['date', 'status'], name='clockin_date_status_idx'),
+        ]
 
     def __str__(self):
         return f"{self.student.full_name} - {self.date} at {self.clock_in_time.strftime('%I:%M %p')}"

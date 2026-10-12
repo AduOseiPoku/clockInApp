@@ -360,8 +360,26 @@
             <div style="font-size: 0.95rem; font-weight: 600;">No payment records found</div>
             <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">No payment transactions recorded for this period.</p>
         </div>
-    {% endfor %}
 </div>
+
+{% if is_paginated %}
+<div class="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; flex-wrap: wrap; gap: 0.75rem;">
+    <div style="font-size: 0.82rem; color: var(--text-muted);">
+        Showing <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong> of <strong>{{ payment_count }}</strong> receipts
+    </div>
+    <div style="display: flex; gap: 0.35rem; align-items: center;">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if student_class %}&class={{ student_class }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}{% if date_preset %}&preset={{ date_preset }}{% endif %}{% if date_str %}&date={{ date_str }}{% endif %}{% if search %}&q={{ search }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">← Previous</a>
+        {% endif %}
+        <span style="font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.65rem; background: var(--surface-subtle); border-radius: var(--radius-sm);">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if student_class %}&class={{ student_class }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}{% if date_preset %}&preset={{ date_preset }}{% endif %}{% if date_str %}&date={{ date_str }}{% endif %}{% if search %}&q={{ search }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">Next →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 
 <style>
 /* Teacher Name Selector Ribbon */

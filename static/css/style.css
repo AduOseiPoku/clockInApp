@@ -1105,76 +1105,91 @@ button, input, select, textarea {
 .text-success { color: var(--success-text) !important; }
 
 /* ============================================================
-   NATIVE-STYLE MOBILE BOTTOM NAVIGATION & APP BAR
+   MOBILE TOP HEADER HAMBURGER & SLIDE DRAWER
    ============================================================ */
-.mobile-bottom-nav {
+.mobile-menu-btn {
   display: none;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 60px;
-  background: var(--surface-card);
-  border-top: 1px solid var(--border);
-  z-index: 999;
-  padding: 0 0.5rem;
-  padding-bottom: env(safe-area-inset-bottom);
-  justify-content: space-around;
-  align-items: center;
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
-}
-
-.bottom-nav-item {
-  display: flex;
-  flex-direction: column;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  height: 100%;
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 0.68rem;
-  font-weight: 500;
-  gap: 3px;
-  transition: color 0.15s ease;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.bottom-nav-item svg {
-  transition: transform 0.15s ease;
+.mobile-menu-btn:hover,
+.mobile-menu-btn:active {
+  background: var(--surface-subtle);
+  border-color: #cbd5e1;
 }
 
-.bottom-nav-item:hover,
-.bottom-nav-item.active {
+.mobile-nav-drawer {
+  display: none;
+  background: var(--surface-card);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  animation: slideDownNav 0.18s ease;
+}
+
+.mobile-nav-drawer.open {
+  display: block;
+}
+
+@keyframes slideDownNav {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mobile-nav-user-header {
+  padding: 0.75rem 1rem 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.85rem;
+}
+
+.mobile-nav-links {
+  list-style: none;
+  padding: 0.4rem 0.5rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-main);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.mobile-nav-link:hover,
+.mobile-nav-link:active {
+  background: var(--surface-subtle);
+}
+
+.mobile-nav-link.active {
+  background: var(--primary-subtle);
   color: var(--primary);
   font-weight: 600;
 }
 
-.bottom-nav-item.active svg {
-  transform: scale(1.1);
-}
-
-.bottom-nav-fab {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--primary);
-  color: var(--text-inverse);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-md);
-  margin-top: -16px;
+.mobile-nav-link svg {
   flex-shrink: 0;
-  border: 3px solid var(--surface-card);
-  transition: transform 0.15s ease, background-color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.bottom-nav-fab:hover,
-.bottom-nav-fab:active {
-  transform: scale(1.08);
-  background: #09090b;
+  color: currentColor;
 }
 
 /* Visibility utilities */
@@ -1198,10 +1213,12 @@ button, input, select, textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 0.95rem;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.7rem;
+  position: relative;
+  transition: border-color 0.15s, background-color 0.15s;
 }
 
 .student-card-item[data-clocked-in="true"] {
@@ -1212,75 +1229,206 @@ button, input, select, textarea {
 .student-card-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
 }
 
 .student-card-meta {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.65rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.student-card-meta .student-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .student-card-fees {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
-  font-size: 0.75rem;
-  padding: 0.45rem 0.6rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.76rem;
+  padding: 0.45rem 0.65rem;
   background: var(--surface-subtle);
   border-radius: var(--radius-xs);
   border: 1px solid var(--border-subtle);
 }
 
+/* Unified Mobile Action Layout */
 .student-card-actions {
   display: flex;
   gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.25rem;
+  align-items: stretch;
+  margin-top: 0.2rem;
 }
 
-.student-card-actions .btn-clockin {
+.student-card-actions .clockin-container {
   flex: 1;
-  min-height: 44px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  display: flex;
+}
+
+/* 48px Mobile Touch Target for Clock In */
+.student-card-actions .btn-clock-in,
+.student-card-actions .clocked-in-badge {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 600;
   border-radius: var(--radius-sm);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s ease, background 0.15s ease;
 }
 
-.student-card-actions .btn-quick-fee {
-  min-height: 44px;
+.student-card-actions .btn-clock-in {
+  background: var(--primary);
+  color: var(--text-inverse);
+  border: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.student-card-actions .btn-clock-in:active {
+  transform: scale(0.98);
+}
+
+.student-card-actions .clocked-in-badge {
+  background: var(--success-bg);
+  border: 1.5px solid var(--success-border);
+  color: var(--success-text);
+  gap: 0.75rem;
+}
+
+/* Secondary Actions: Quick Pay & More Menu */
+.student-card-actions .btn-card-pay {
+  min-height: 48px;
+  min-width: 82px;
   padding: 0 0.85rem;
   font-size: 0.82rem;
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  border: 1.5px solid var(--border);
+  color: var(--text-main);
+  white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.student-card-actions .btn-card-pay:hover,
+.student-card-actions .btn-card-pay:active {
+  background: var(--surface-subtle);
+  border-color: #cbd5e1;
+}
+
+/* Contextual 3-Dots Dropdown Menu */
+.card-menu-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.card-menu-btn {
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.15rem;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+
+.card-menu-btn:hover,
+.card-menu-btn:active {
+  background: var(--surface-subtle);
+  border-color: var(--border-subtle);
   color: var(--text-main);
-  white-space: nowrap;
+}
+
+.card-menu-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 140px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.card-menu-dropdown.show {
+  display: block;
+}
+
+.card-menu-dropdown a,
+.card-menu-dropdown button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-main);
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.card-menu-dropdown a:hover,
+.card-menu-dropdown button:hover {
+  background: var(--surface-subtle);
+}
+
+.card-menu-dropdown .menu-item-danger {
+  color: var(--danger-text);
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* Mobile Filter Drawer Toggle */
 .filter-drawer-toggle {
   display: none;
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   background: var(--surface-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.85rem;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-main);
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 /* ============================================================
@@ -1359,12 +1507,8 @@ button, input, select, textarea {
    RESPONSIVE MEDIA QUERIES (Mobile & Tablet)
    ============================================================ */
 @media (max-width: 768px) {
-  body {
-    padding-bottom: calc(68px + env(safe-area-inset-bottom));
-  }
-
-  .mobile-bottom-nav {
-    display: flex;
+  .mobile-menu-btn {
+    display: inline-flex;
   }
 
   .mobile-only {
@@ -1403,8 +1547,10 @@ button, input, select, textarea {
     display: none;
   }
 
-  .user-badge-role {
-    display: none;
+  /* Hide account status & signout button in top bar on mobile (handled in mobile drawer) */
+  .user-badge,
+  .nav-actions .btn-signout {
+    display: none !important;
   }
 
   /* 2x2 Stats Grid */

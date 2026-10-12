@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (mobileAction) {
                     if (data.is_clocked_in) {
                         mobileAction.innerHTML = `
-                            <div class="clocked-in-badge" style="width: 100%; min-height: 44px; justify-content: center; gap: 0.75rem; font-size: 0.88rem;">
+                            <div class="clocked-in-badge">
                                 <span>✓ Clocked In at ${data.clock_in_time}</span>
                                 <button type="button" class="btn-undo-clockin" data-student-id="${studentId}" data-action="undo" title="Undo clock-in" style="font-size: 1rem; padding: 0 0.5rem;">
                                     ✕
@@ -153,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         `;
                     } else {
                         mobileAction.innerHTML = `
-                            <button type="button" class="btn-clock-in" data-student-id="${studentId}" data-action="clock_in" style="width: 100%; min-height: 44px; font-size: 0.88rem;">
+                            <button type="button" class="btn-clock-in" data-student-id="${studentId}" data-action="clock_in">
                                 ✓ Clock In Arrival
                             </button>
                         `;
@@ -436,4 +436,46 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('filter-form').submit();
         });
     }
+
+    // 4. Outside-click dismiss for contextual card menus and mobile nav drawer
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.card-menu-wrapper')) {
+            document.querySelectorAll('.card-menu-dropdown.show').forEach(dropdown => {
+                dropdown.classList.remove('show');
+            });
+        }
+        if (!e.target.closest('.navbar')) {
+            const drawer = document.getElementById('mobile-nav-drawer');
+            if (drawer && drawer.classList.contains('open')) {
+                drawer.classList.remove('open');
+            }
+        }
+    });
 });
+
+/**
+ * Toggle top mobile navigation drawer
+ */
+function toggleMobileMenu() {
+    const drawer = document.getElementById('mobile-nav-drawer');
+    if (drawer) {
+        drawer.classList.toggle('open');
+    }
+}
+
+/**
+ * Toggle mobile card 3-dots action menu
+ */
+function toggleCardMenu(button) {
+    const wrapper = button.closest('.card-menu-wrapper');
+    if (!wrapper) return;
+    const dropdown = wrapper.querySelector('.card-menu-dropdown');
+    if (!dropdown) return;
+
+    // Close any other open dropdowns first
+    document.querySelectorAll('.card-menu-dropdown.show').forEach(d => {
+        if (d !== dropdown) d.classList.remove('show');
+    });
+
+    dropdown.classList.toggle('show');
+}

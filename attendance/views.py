@@ -17,6 +17,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q, Sum, Count
 from django.conf import settings
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 from django.contrib.auth import get_user_model
 
@@ -281,16 +282,39 @@ def get_collectors_financial_summary(teachers, target_date=None):
         .values_list('student_id', 'total')
     )
 
+    # Pre-fetch past attendance counts and cumulative payments to avoid N+1 queries in the student loop
+    past_attendance_counts = dict(
+        ClockInRecord.objects.filter(date__lt=target_date)
+        .values('student_id')
+        .annotate(c=Count('id'))
+        .values_list('student_id', 'c')
+    )
+    total_bus_payments = dict(
+        FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date)
+        .values('student_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student_id', 'total')
+    )
+    total_canteen_payments = dict(
+        FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date)
+        .values('student_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student_id', 'total')
+    )
+
     for s in active_students:
         c_name = (s.student_class or '').strip()
         bus_fee = s.bus.fee if s.bus else Decimal('0.00')
         canteen_fee = (s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee) if s.canteen_enrolled else Decimal('0.00')
+        past_days = past_attendance_counts.get(s.id, 0)
 
         # Check prepaid credit applied today for bus and canteen (both full advance and partial remainder top-up)
         bus_prepaid_applied = Decimal('0.00')
         if s.bus_id and bus_fee > Decimal('0.00'):
             today_bus_direct = today_bus_payments.get(s.id, Decimal('0.00'))
-            current_bus_credit = s.get_bus_credit_balance(target_date)
+            cum_bus = total_bus_payments.get(s.id, Decimal('0.00'))
+            past_bus_cost = Decimal(past_days) * bus_fee
+            current_bus_credit = max(Decimal('0.00'), cum_bus - past_bus_cost)
             prior_bus_credit = max(Decimal('0.00'), current_bus_credit - today_bus_direct)
             if prior_bus_credit > Decimal('0.00'):
                 bus_prepaid_applied = min(bus_fee, prior_bus_credit)
@@ -298,7 +322,9 @@ def get_collectors_financial_summary(teachers, target_date=None):
         canteen_prepaid_applied = Decimal('0.00')
         if s.canteen_enrolled and canteen_fee > Decimal('0.00'):
             today_can_direct = today_canteen_payments.get(s.id, Decimal('0.00'))
-            current_can_credit = s.get_canteen_credit_balance(target_date)
+            cum_can = total_canteen_payments.get(s.id, Decimal('0.00'))
+            past_can_cost = Decimal(past_days) * canteen_fee
+            current_can_credit = max(Decimal('0.00'), cum_can - past_can_cost)
             prior_can_credit = max(Decimal('0.00'), current_can_credit - today_can_direct)
             if prior_can_credit > Decimal('0.00'):
                 canteen_prepaid_applied = min(canteen_fee, prior_can_credit)
@@ -1537,14 +1563,23 @@ def student_list_view(request):
     clock_ins = ClockInRecord.objects.filter(date=target_date)
     clock_in_map = {c.student_id: c for c in clock_ins}
 
+    paginator = Paginator(students, 40)
+    page_number = request.GET.get('page', 1)
+    try:
+        page_obj = paginator.page(page_number)
+    except (PageNotAnInteger, EmptyPage):
+        page_obj = paginator.page(1)
+
     context = {
-        'students': students,
+        'students': page_obj,
+        'page_obj': page_obj,
+        'is_paginated': page_obj.has_other_pages(),
         'classes': classes_names,
         'buses': buses,
         'class_filter': class_filter,
         'bus_filter': bus_filter,
         'search': search,
-        'total_count': students.count(),
+        'total_count': paginator.count,
         'onboarding_mode_active': onboarding_mode_active,
         'can_register': can_register,
         'clock_in_map': clock_in_map,
@@ -1731,27 +1766,40 @@ def payment_list_view(request):
     collectors_partial_count = 0
     collectors_pending_count = 0
 
+    # Bulk pre-fetch all-time totals, month aggregates, and today's receipts across all authorized teachers
+    all_totals_by_teacher = dict(
+        FeePayment.objects.filter(recorded_by__in=authorized_teachers)
+        .values('recorded_by_id')
+        .annotate(total=Sum('amount'))
+        .values_list('recorded_by_id', 'total')
+    )
+
+    month_aggregates = (
+        FeePayment.objects.filter(
+            recorded_by__in=authorized_teachers,
+            payment_date__gte=first_day_of_month,
+            payment_date__lte=target_audit_date
+        )
+        .values('recorded_by_id')
+        .annotate(total=Sum('amount'), count=Count('id'))
+    )
+    month_totals_by_teacher = {item['recorded_by_id']: (item['total'] or Decimal('0.00')) for item in month_aggregates}
+    month_counts_by_teacher = {item['recorded_by_id']: item['count'] for item in month_aggregates}
+
+    all_day_payments = FeePayment.objects.filter(
+        recorded_by__in=authorized_teachers,
+        payment_date=target_audit_date
+    ).select_related('student', 'bus').order_by('-created_at')
+    today_payments_by_teacher = defaultdict(list)
+    for p in all_day_payments:
+        today_payments_by_teacher[p.recorded_by_id].append(p)
+
     for t in authorized_teachers:
         meta = collectors_meta.get(t.id, {})
-        t_all_total = FeePayment.objects.filter(recorded_by=t).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-        # Cumulative month-to-date collections
-        t_month_total = FeePayment.objects.filter(
-            recorded_by=t,
-            payment_date__gte=first_day_of_month,
-            payment_date__lte=target_audit_date
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        t_month_count = FeePayment.objects.filter(
-            recorded_by=t,
-            payment_date__gte=first_day_of_month,
-            payment_date__lte=target_audit_date
-        ).count()
-
-        # Detailed individual payment receipts taken on target_audit_date by this teacher
-        t_day_payments = list(FeePayment.objects.filter(
-            recorded_by=t,
-            payment_date=target_audit_date
-        ).select_related('student', 'bus').order_by('-created_at'))
+        t_all_total = all_totals_by_teacher.get(t.id, Decimal('0.00'))
+        t_month_total = month_totals_by_teacher.get(t.id, Decimal('0.00'))
+        t_month_count = month_counts_by_teacher.get(t.id, 0)
+        t_day_payments = today_payments_by_teacher.get(t.id, [])
 
         t_class = meta.get('assigned_class') or ''
         t_bus_name = meta.get('assigned_bus_name') or ''
@@ -1835,8 +1883,17 @@ def payment_list_view(request):
     recorded_by_ids = FeePayment.objects.exclude(recorded_by=None).values_list('recorded_by_id', flat=True).distinct()
     collectors_list = User.objects.filter(id__in=recorded_by_ids).select_related('profile').order_by('first_name', 'username')
 
+    paginator = Paginator(payments, 30)
+    page_number = request.GET.get('page', 1)
+    try:
+        page_obj = paginator.page(page_number)
+    except (PageNotAnInteger, EmptyPage):
+        page_obj = paginator.page(1)
+
     context = {
-        'payments': payments,
+        'payments': page_obj,
+        'page_obj': page_obj,
+        'is_paginated': page_obj.has_other_pages(),
         'classes': classes,
         'fee_type': fee_type,
         'student_class': student_class,
@@ -1856,7 +1913,7 @@ def payment_list_view(request):
         'collectors_partial_count': collectors_partial_count,
         'collectors_pending_count': collectors_pending_count,
         'total_amount': total_amount,
-        'payment_count': payments.count(),
+        'payment_count': paginator.count,
         'today_total': today_total,
         'today_bus_total': today_bus_total,
         'today_canteen_total': today_canteen_total,
@@ -2315,17 +2372,30 @@ def reports_view(request):
 
     period = request.GET.get('period', getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026'))
 
-    # Daily attendance summary by class
-    classes = Student.objects.filter(is_active=True).values_list('student_class', flat=True).distinct().order_by('student_class')
+    # Bulk aggregate student totals by class in 1 query
+    class_totals = dict(
+        Student.objects.filter(is_active=True)
+        .values('student_class')
+        .annotate(c=Count('id'))
+        .values_list('student_class', 'c')
+    )
+
+    # Bulk aggregate attendance by class in 1 query
+    class_presents = dict(
+        ClockInRecord.objects.filter(date=target_date, student__is_active=True)
+        .values('student__student_class')
+        .annotate(c=Count('id'))
+        .values_list('student__student_class', 'c')
+    )
+
+    classes = sorted(class_totals.keys())
     class_reports = []
-    
     total_school_students = 0
     total_school_present = 0
 
     for cls in classes:
-        cls_students = Student.objects.filter(student_class=cls, is_active=True)
-        tot = cls_students.count()
-        pres = ClockInRecord.objects.filter(date=target_date, student__in=cls_students).count()
+        tot = class_totals.get(cls, 0)
+        pres = class_presents.get(cls, 0)
         pct = round((pres / tot * 100), 1) if tot > 0 else 0
         total_school_students += tot
         total_school_present += pres
@@ -2333,22 +2403,36 @@ def reports_view(request):
             'class_name': cls,
             'total': tot,
             'present': pres,
-            'absent': tot - pres,
+            'absent': max(0, tot - pres),
             'pct': pct,
         })
 
-    # Bus fee report by bus for target_date
+    # Bulk aggregate bus riders by bus in 1 query
+    bus_rider_counts = dict(
+        Student.objects.filter(is_active=True, bus__isnull=False)
+        .values('bus_id')
+        .annotate(c=Count('id'))
+        .values_list('bus_id', 'c')
+    )
+
+    # Bulk aggregate bus collections on target_date in 1 query
+    bus_collections = dict(
+        FeePayment.objects.filter(fee_type='BUS', payment_date=target_date, student__bus__isnull=False)
+        .values('student__bus_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student__bus_id', 'total')
+    )
+
     buses = Bus.objects.filter(is_active=True).order_by('name')
     bus_reports = []
     total_bus_exp = Decimal('0.00')
     total_bus_col = Decimal('0.00')
 
     for b in buses:
-        riders = b.students.filter(is_active=True)
-        r_count = riders.count()
+        r_count = bus_rider_counts.get(b.id, 0)
         exp = Decimal(r_count) * b.fee
         total_bus_exp += exp
-        col = FeePayment.objects.filter(fee_type='BUS', student__bus=b, payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        col = bus_collections.get(b.id, Decimal('0.00'))
         total_bus_col += col
         bus_reports.append({
             'bus': b,
@@ -2559,16 +2643,72 @@ def export_debtors_csv(request):
     writer = csv.writer(response)
     writer.writerow(['Student Name', 'Class', 'Bus Route', 'Bus Fee Required', 'Bus Fee Status', 'Bus Balance', 'Canteen Fee Required', 'Canteen Status', 'Canteen Balance', 'Total Owed Today', 'Date'])
 
+    today_bus_payments = dict(
+        FeePayment.objects.filter(fee_type='BUS', payment_date=target_date)
+        .values('student_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student_id', 'total')
+    )
+    today_canteen_payments = dict(
+        FeePayment.objects.filter(fee_type='CANTEEN', payment_date=target_date)
+        .values('student_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student_id', 'total')
+    )
+    total_bus_payments = dict(
+        FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date)
+        .values('student_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student_id', 'total')
+    )
+    total_canteen_payments = dict(
+        FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date)
+        .values('student_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student_id', 'total')
+    )
+    past_attendance_counts = dict(
+        ClockInRecord.objects.filter(date__lt=target_date)
+        .values('student_id')
+        .annotate(c=Count('id'))
+        .values_list('student_id', 'c')
+    )
+
+    default_canteen_fee = get_default_canteen_fee()
     students = Student.objects.filter(is_active=True).select_related('bus').order_by('student_class', 'first_name')
     currency = getattr(settings, 'CURRENCY_SYMBOL', 'GH₵')
 
     for s in students:
-        bus_req = s.bus_fee_required
-        bus_bal = s.get_daily_bus_balance(target_date)
-        is_bus_paid = s.is_bus_paid_for_date(target_date)
-        can_req = s.canteen_fee_required
-        can_bal = s.get_daily_canteen_balance(target_date)
-        is_can_paid = s.is_canteen_paid_for_date(target_date)
+        past_days = past_attendance_counts.get(s.id, 0)
+
+        # Bus fee calculation
+        if s.bus:
+            bus_req = s.bus.fee
+            direct_bus = today_bus_payments.get(s.id, Decimal('0.00'))
+            cum_bus = total_bus_payments.get(s.id, Decimal('0.00'))
+            bus_credit = max(Decimal('0.00'), cum_bus - Decimal(past_days) * bus_req)
+            is_bus_paid = (direct_bus >= bus_req) or (bus_credit >= bus_req)
+            covered_bus = max(direct_bus, bus_credit)
+            bus_bal = Decimal('0.00') if is_bus_paid else max(Decimal('0.00'), bus_req - covered_bus)
+        else:
+            bus_req = Decimal('0.00')
+            bus_bal = Decimal('0.00')
+            is_bus_paid = True
+
+        # Canteen fee calculation
+        if s.canteen_enrolled:
+            can_req = s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee
+            direct_can = today_canteen_payments.get(s.id, Decimal('0.00'))
+            cum_can = total_canteen_payments.get(s.id, Decimal('0.00'))
+            can_credit = max(Decimal('0.00'), cum_can - Decimal(past_days) * can_req)
+            is_can_paid = (direct_can >= can_req) or (can_credit >= can_req)
+            covered_can = max(direct_can, can_credit)
+            can_bal = Decimal('0.00') if is_can_paid else max(Decimal('0.00'), can_req - covered_can)
+        else:
+            can_req = Decimal('0.00')
+            can_bal = Decimal('0.00')
+            is_can_paid = True
+
         total_owed = bus_bal + can_bal
 
         if total_owed > Decimal('0.00'):

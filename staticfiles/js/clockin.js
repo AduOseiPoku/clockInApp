@@ -1,5 +1,6 @@
 /**
  * School Clock-In & Fee Verification Dynamic Interactions
+ * Minimalist interaction logic with clean feedback
  */
 
 function getCookie(name) {
@@ -23,8 +24,8 @@ function showToast(message, type = 'success') {
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    const icon = type === 'success' ? '✓' : '⚠️';
-    toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+    const icon = type === 'success' ? '✓' : '•';
+    toast.innerHTML = `<span style="font-weight:700;">${icon}</span> <span>${message}</span>`;
 
     container.appendChild(toast);
 
@@ -35,22 +36,50 @@ function showToast(message, type = 'success') {
 
     setTimeout(() => {
         toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 300);
-    }, 3500);
+        setTimeout(() => toast.remove(), 250);
+    }, 3000);
 }
 
 function updateLiveStats(stats) {
     if (!stats) return;
 
+    const curr = document.body.dataset.currency || 'GH₵';
     const clockedCountElem = document.getElementById('stat-clocked-count');
     const clockedPctElem = document.getElementById('stat-clocked-pct');
     const busPctElem = document.getElementById('stat-bus-pct');
     const canteenPctElem = document.getElementById('stat-canteen-pct');
+    const dailyRevenueElem = document.getElementById('stat-daily-revenue');
+    const busCollectedElem = document.getElementById('stat-bus-collected');
+    const canteenCollectedElem = document.getElementById('stat-canteen-collected');
 
     if (clockedCountElem) clockedCountElem.textContent = `${stats.clocked_in_count} / ${stats.total_students}`;
     if (clockedPctElem) clockedPctElem.textContent = `${stats.clocked_in_pct}% Present`;
-    if (busPctElem) busPctElem.textContent = `${stats.bus_paid_pct}% Paid (${stats.bus_paid_count}/${stats.bus_students_count})`;
-    if (canteenPctElem) canteenPctElem.textContent = `${stats.canteen_paid_pct}% Paid (${stats.canteen_paid_count}/${stats.canteen_students_count})`;
+    if (busPctElem) busPctElem.textContent = `${stats.bus_paid_pct}% Paid`;
+    if (canteenPctElem) canteenPctElem.textContent = `${stats.canteen_paid_pct}% Paid`;
+
+    if (dailyRevenueElem && stats.daily_total_collected !== undefined) {
+        dailyRevenueElem.textContent = `${curr}${parseFloat(stats.daily_total_collected).toFixed(2)}`;
+    }
+    if (busCollectedElem && stats.total_bus_collected !== undefined) {
+        busCollectedElem.textContent = `${curr}${parseFloat(stats.total_bus_collected).toFixed(2)} collected`;
+    }
+    if (canteenCollectedElem && stats.total_canteen_collected !== undefined) {
+        canteenCollectedElem.textContent = `${curr}${parseFloat(stats.total_canteen_collected).toFixed(2)} collected`;
+    }
+
+    // Classroom Teacher specific attendance counters
+    const teacherPresentElem = document.getElementById('teacher-stat-present');
+    const teacherAbsentElem = document.getElementById('teacher-stat-absent');
+    const teacherPctElem = document.getElementById('teacher-stat-pct');
+    if (stats.class_present !== undefined && teacherPresentElem) {
+        teacherPresentElem.textContent = `${stats.class_present} / ${stats.class_enrolled}`;
+    }
+    if (stats.class_absent !== undefined && teacherAbsentElem) {
+        teacherAbsentElem.textContent = `${stats.class_absent}`;
+    }
+    if (stats.class_pct !== undefined && teacherPctElem) {
+        teacherPctElem.textContent = `${stats.class_pct}%`;
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -70,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateStr = document.getElementById('date-picker') ? document.getElementById('date-picker').value : '';
 
         // Visual feedback
-        actionElem.style.opacity = '0.5';
+        actionElem.style.opacity = '0.4';
         actionElem.style.pointerEvents = 'none';
 
         try {
@@ -94,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (cell) {
                     if (data.is_clocked_in) {
                         cell.innerHTML = `
-                            <div class="clocked-in-badge pulse-target">
+                            <div class="clocked-in-badge">
                                 <span>✓ ${data.clock_in_time}</span>
                                 <button type="button" class="btn-undo-clockin" data-student-id="${studentId}" data-action="undo" title="Undo clock-in">
                                     ✕
@@ -104,16 +133,41 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         cell.innerHTML = `
                             <button type="button" class="btn-clock-in" data-student-id="${studentId}" data-action="clock_in">
-                                <span>⏱️</span> Clock In
+                                Clock In
                             </button>
                         `;
                     }
                 }
 
-                // Update row dataset for filter
+                // Update Mobile Card Action Cell & Card Dataset
+                const mobileAction = document.getElementById(`mobile-clockin-action-${studentId}`);
+                if (mobileAction) {
+                    if (data.is_clocked_in) {
+                        mobileAction.innerHTML = `
+                            <div class="clocked-in-badge">
+                                <span>✓ Clocked In at ${data.clock_in_time}</span>
+                                <button type="button" class="btn-undo-clockin" data-student-id="${studentId}" data-action="undo" title="Undo clock-in" style="font-size: 1rem; padding: 0 0.5rem;">
+                                    ✕
+                                </button>
+                            </div>
+                        `;
+                    } else {
+                        mobileAction.innerHTML = `
+                            <button type="button" class="btn-clock-in" data-student-id="${studentId}" data-action="clock_in">
+                                ✓ Clock In Arrival
+                            </button>
+                        `;
+                    }
+                }
+
+                // Update row & card datasets for filters
                 const row = document.getElementById(`student-row-${studentId}`);
                 if (row) {
                     row.dataset.clockedIn = data.is_clocked_in ? 'true' : 'false';
+                }
+                const mobileCard = document.getElementById(`mobile-student-card-${studentId}`);
+                if (mobileCard) {
+                    mobileCard.dataset.clockedIn = data.is_clocked_in ? 'true' : 'false';
                 }
 
                 showToast(data.message, 'success');
@@ -135,23 +189,146 @@ document.addEventListener('DOMContentLoaded', () => {
     const paymentModal = document.getElementById('quick-payment-modal');
     const paymentForm = document.getElementById('quick-payment-form');
     const modalStudentName = document.getElementById('modal-student-name');
+    const modalStudentSub = document.getElementById('modal-student-sub');
     const modalStudentIdInput = document.getElementById('modal-student-id');
+    const modalPaymentDateInput = document.getElementById('modal-payment-date');
     const modalFeeTypeSelect = document.getElementById('modal-fee-type');
     const modalAmountInput = document.getElementById('modal-amount');
+    const modalBusAmountInput = document.getElementById('modal-bus-amount');
+    const modalCanteenAmountInput = document.getElementById('modal-canteen-amount');
+    const modalSingleGroup = document.getElementById('modal-single-amount-group');
+    const modalDualGroup = document.getElementById('modal-dual-amount-group');
+
+    const btn1Day = document.getElementById('modal-btn-1day');
+    const btn5Days = document.getElementById('modal-btn-5days');
+    const btn10Days = document.getElementById('modal-btn-10days');
+    const btnBalance = document.getElementById('modal-btn-balance');
+
+    let currentModalStudent = null;
+
+    function syncModalFeeTypeView() {
+        const ft = modalFeeTypeSelect ? modalFeeTypeSelect.value : 'BUS';
+        if (ft === 'BOTH') {
+            if (modalSingleGroup) modalSingleGroup.style.display = 'none';
+            if (modalDualGroup) modalDualGroup.style.display = 'block';
+            if (modalAmountInput) modalAmountInput.required = false;
+        } else {
+            if (modalSingleGroup) modalSingleGroup.style.display = 'block';
+            if (modalDualGroup) modalDualGroup.style.display = 'none';
+            if (modalAmountInput) modalAmountInput.required = true;
+        }
+    }
+
+    function applyPreset(mode) {
+        if (!currentModalStudent) return;
+        const ft = modalFeeTypeSelect ? modalFeeTypeSelect.value : 'BUS';
+        const busReq = currentModalStudent.busReq;
+        const busBal = currentModalStudent.busBal;
+        const canReq = currentModalStudent.canteenReq;
+        const canBal = currentModalStudent.canteenBal;
+
+        if (ft === 'BOTH') {
+            if (mode === '1day') {
+                if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? busReq : 0).toFixed(2);
+                if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? canReq : 0).toFixed(2);
+            } else if (mode === '5days') {
+                if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? busReq * 5 : 0).toFixed(2);
+                if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? canReq * 5 : 0).toFixed(2);
+            } else if (mode === '10days') {
+                if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? busReq * 10 : 0).toFixed(2);
+                if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? canReq * 10 : 0).toFixed(2);
+            } else {
+                if (modalBusAmountInput) modalBusAmountInput.value = (currentModalStudent.hasBus ? (busBal > 0 ? busBal : busReq) : 0).toFixed(2);
+                if (modalCanteenAmountInput) modalCanteenAmountInput.value = (currentModalStudent.hasCanteen ? (canBal > 0 ? canBal : canReq) : 0).toFixed(2);
+            }
+        } else if (ft === 'BUS') {
+            if (mode === '1day') {
+                if (modalAmountInput) modalAmountInput.value = busReq.toFixed(2);
+            } else if (mode === '5days') {
+                if (modalAmountInput) modalAmountInput.value = (busReq * 5).toFixed(2);
+            } else if (mode === '10days') {
+                if (modalAmountInput) modalAmountInput.value = (busReq * 10).toFixed(2);
+            } else {
+                if (modalAmountInput) modalAmountInput.value = (busBal > 0 ? busBal : busReq).toFixed(2);
+            }
+        } else {
+            // CANTEEN
+            if (mode === '1day') {
+                if (modalAmountInput) modalAmountInput.value = canReq.toFixed(2);
+            } else if (mode === '5days') {
+                if (modalAmountInput) modalAmountInput.value = (canReq * 5).toFixed(2);
+            } else if (mode === '10days') {
+                if (modalAmountInput) modalAmountInput.value = (canReq * 10).toFixed(2);
+            } else {
+                if (modalAmountInput) modalAmountInput.value = (canBal > 0 ? canBal : canReq).toFixed(2);
+            }
+        }
+    }
+
+    if (modalFeeTypeSelect) {
+        modalFeeTypeSelect.addEventListener('change', () => {
+            syncModalFeeTypeView();
+            applyPreset('balance');
+        });
+    }
+
+    if (btn1Day) btn1Day.addEventListener('click', () => applyPreset('1day'));
+    if (btn5Days) btn5Days.addEventListener('click', () => applyPreset('5days'));
+    if (btn10Days) btn10Days.addEventListener('click', () => applyPreset('10days'));
+    if (btnBalance) btnBalance.addEventListener('click', () => applyPreset('balance'));
 
     document.addEventListener('click', (e) => {
-        const payBtn = e.target.closest('.btn-quick-pay');
+        const payBtn = e.target.closest('.btn-quick-pay[data-student-id]');
         if (payBtn) {
             e.preventDefault();
+            const curr = document.body.dataset.currency || 'GH₵';
             const sId = payBtn.dataset.studentId;
             const sName = payBtn.dataset.studentName;
-            const feeType = payBtn.dataset.feeType || 'BUS';
-            const defaultAmt = payBtn.dataset.defaultAmount || '';
+            const hasBus = payBtn.dataset.hasBus === 'true';
+            const busPaid = payBtn.dataset.busPaid === 'true';
+            const busReq = parseFloat(payBtn.dataset.busReq || 0);
+            const busBal = parseFloat(payBtn.dataset.busBal || 0);
+            const hasCanteen = payBtn.dataset.hasCanteen === 'true';
+            const canteenPaid = payBtn.dataset.canteenPaid === 'true';
+            const canteenReq = parseFloat(payBtn.dataset.canteenReq || 0);
+            const canteenBal = parseFloat(payBtn.dataset.canteenBal || 0);
+
+            let feeType = payBtn.dataset.feeType || 'BUS';
+            if (hasBus && !busPaid && hasCanteen && !canteenPaid) {
+                feeType = 'BOTH';
+            } else if (hasBus && !busPaid) {
+                feeType = 'BUS';
+            } else if (hasCanteen && !canteenPaid) {
+                feeType = 'CANTEEN';
+            }
+
+            currentModalStudent = {
+                id: sId,
+                name: sName,
+                hasBus,
+                busPaid,
+                busReq,
+                busBal,
+                hasCanteen,
+                canteenPaid,
+                canteenReq,
+                canteenBal,
+            };
 
             if (modalStudentName) modalStudentName.textContent = sName;
+            if (modalStudentSub) {
+                const parts = [];
+                if (hasBus) parts.push(`🚌 Bus: ${curr}${busReq.toFixed(2)}/day (${busPaid ? 'Paid' : 'Owes ' + curr + busBal.toFixed(2)})`);
+                if (hasCanteen) parts.push(`🍽️ Lunch: ${curr}${canteenReq.toFixed(2)}/day (${canteenPaid ? 'Paid' : 'Owes ' + curr + canteenBal.toFixed(2)})`);
+                modalStudentSub.textContent = parts.join(' • ');
+            }
             if (modalStudentIdInput) modalStudentIdInput.value = sId;
+            const dp = document.getElementById('date-picker');
+            if (modalPaymentDateInput && dp) modalPaymentDateInput.value = dp.value;
             if (modalFeeTypeSelect) modalFeeTypeSelect.value = feeType;
-            if (modalAmountInput) modalAmountInput.value = defaultAmt;
+
+            syncModalFeeTypeView();
+            applyPreset('balance');
 
             if (paymentModal) paymentModal.classList.add('active');
         }
@@ -169,14 +346,23 @@ document.addEventListener('DOMContentLoaded', () => {
             submitBtn.disabled = true;
             submitBtn.textContent = 'Saving...';
 
+            const feeType = modalFeeTypeSelect ? modalFeeTypeSelect.value : 'BUS';
+            const dp = document.getElementById('date-picker');
             const payload = {
                 student_id: modalStudentIdInput.value,
-                fee_type: modalFeeTypeSelect.value,
-                amount: modalAmountInput.value,
+                fee_type: feeType,
+                payment_date: (dp && dp.value) ? dp.value : '',
                 payment_method: document.getElementById('modal-payment-method').value,
                 receipt_number: document.getElementById('modal-receipt-number').value,
                 period: document.getElementById('modal-period').value,
             };
+
+            if (feeType === 'BOTH') {
+                payload.bus_amount = modalBusAmountInput ? modalBusAmountInput.value : '0.00';
+                payload.canteen_amount = modalCanteenAmountInput ? modalCanteenAmountInput.value : '0.00';
+            } else {
+                payload.amount = modalAmountInput ? modalAmountInput.value : '0.00';
+            }
 
             try {
                 const response = await fetch('/api/payment/quick/', {
@@ -199,22 +385,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     const studentId = resData.student_id;
                     const busCell = document.getElementById(`bus-fee-cell-${studentId}`);
                     const canteenCell = document.getElementById(`canteen-fee-cell-${studentId}`);
-                    const curr = document.body.dataset.currency || '$';
+                    const mobileBus = document.getElementById(`mobile-bus-fee-${studentId}`);
+                    const mobileCanteen = document.getElementById(`mobile-canteen-fee-${studentId}`);
+                    const curr = document.body.dataset.currency || 'GH₵';
 
-                    if (busCell && resData.bus_status) {
-                        if (resData.bus_status.is_paid) {
-                            busCell.innerHTML = `<span class="fee-badge fee-badge-paid">🟢 Paid (${curr}${resData.bus_status.required.toFixed(2)})</span>`;
+                    if (resData.bus_status) {
+                        const bStat = resData.bus_status;
+                        let badgeHtml;
+                        if (bStat.is_paid) {
+                            const creditNotice = bStat.credit_days > 0 ? ` <small style="font-size:0.68rem;opacity:0.85;">(${bStat.credit_days}d credit)</small>` : '';
+                            badgeHtml = `<span class="fee-badge fee-badge-paid">Paid (${curr}${bStat.required.toFixed(2)})${creditNotice}</span>`;
                         } else {
-                            busCell.innerHTML = `<span class="fee-badge fee-badge-unpaid">🔴 Owes ${curr}${resData.bus_status.balance.toFixed(2)}</span>`;
+                            badgeHtml = `<span class="fee-badge fee-badge-unpaid">Owes ${curr}${bStat.balance.toFixed(2)}</span>`;
                         }
+                        if (busCell) busCell.innerHTML = badgeHtml;
+                        if (mobileBus) mobileBus.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Bus:</span> ${badgeHtml}`;
                     }
 
-                    if (canteenCell && resData.canteen_status) {
-                        if (resData.canteen_status.is_paid) {
-                            canteenCell.innerHTML = `<span class="fee-badge fee-badge-paid">🟢 Paid (${curr}${resData.canteen_status.required.toFixed(2)})</span>`;
+                    if (resData.canteen_status) {
+                        const cStat = resData.canteen_status;
+                        let badgeHtml;
+                        if (cStat.is_paid) {
+                            const creditNotice = cStat.credit_days > 0 ? ` <small style="font-size:0.68rem;opacity:0.85;">(${cStat.credit_days}d credit)</small>` : '';
+                            badgeHtml = `<span class="fee-badge fee-badge-paid">Paid (${curr}${cStat.required.toFixed(2)})${creditNotice}</span>`;
                         } else {
-                            canteenCell.innerHTML = `<span class="fee-badge fee-badge-unpaid">🔴 Owes ${curr}${resData.canteen_status.balance.toFixed(2)}</span>`;
+                            badgeHtml = `<span class="fee-badge fee-badge-unpaid">Owes ${curr}${cStat.balance.toFixed(2)}</span>`;
                         }
+                        if (canteenCell) canteenCell.innerHTML = badgeHtml;
+                        if (mobileCanteen) mobileCanteen.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Canteen:</span> ${badgeHtml}`;
                     }
 
                     if (resData.stats) updateLiveStats(resData.stats);
@@ -238,4 +436,46 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('filter-form').submit();
         });
     }
+
+    // 4. Outside-click dismiss for contextual card menus and mobile nav drawer
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.card-menu-wrapper')) {
+            document.querySelectorAll('.card-menu-dropdown.show').forEach(dropdown => {
+                dropdown.classList.remove('show');
+            });
+        }
+        if (!e.target.closest('.navbar')) {
+            const drawer = document.getElementById('mobile-nav-drawer');
+            if (drawer && drawer.classList.contains('open')) {
+                drawer.classList.remove('open');
+            }
+        }
+    });
 });
+
+/**
+ * Toggle top mobile navigation drawer
+ */
+function toggleMobileMenu() {
+    const drawer = document.getElementById('mobile-nav-drawer');
+    if (drawer) {
+        drawer.classList.toggle('open');
+    }
+}
+
+/**
+ * Toggle mobile card 3-dots action menu
+ */
+function toggleCardMenu(button) {
+    const wrapper = button.closest('.card-menu-wrapper');
+    if (!wrapper) return;
+    const dropdown = wrapper.querySelector('.card-menu-dropdown');
+    if (!dropdown) return;
+
+    // Close any other open dropdowns first
+    document.querySelectorAll('.card-menu-dropdown.show').forEach(d => {
+        if (d !== dropdown) d.classList.remove('show');
+    });
+
+    dropdown.classList.toggle('show');
+}
