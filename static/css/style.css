@@ -1507,6 +1507,11 @@ button, input, select, textarea {
    RESPONSIVE MEDIA QUERIES (Mobile & Tablet)
    ============================================================ */
 @media (max-width: 768px) {
+  /* Optimized layout container padding on tablets & mobile */
+  .container {
+    padding: 1rem 0.75rem;
+  }
+
   .mobile-menu-btn {
     display: inline-flex;
   }
@@ -1663,5 +1668,15 @@ button, input, select, textarea {
 
   .site-footer {
     display: none;
+  }
+}
+
+/* ============================================================
+   EXTRA NARROW MOBILE VIEWPORTS (<= 480px)
+   ============================================================ */
+@media (max-width: 480px) {
+  /* Extra tight gutter for narrow phones (e.g. 360px - 414px) */
+  .container {
+    padding: 0.75rem 0.5rem;
   }
 }

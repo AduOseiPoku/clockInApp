@@ -2336,6 +2336,7 @@ def payment_create_view(request):
         'is_one_off_mode': bool(request.GET.get('is_one_off')) or is_guest_mode_initial,
         'is_guest_mode_initial': is_guest_mode_initial,
         'locked_bus': selected_bus_obj or (assigned_bus if is_scoped_fee_teacher else None),
+        'is_admin_user': is_admin_user,
     }
     return render(request, 'attendance/payment_form.html', context)
 

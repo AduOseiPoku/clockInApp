@@ -276,20 +276,15 @@
 
             {% if is_scoped_fee_teacher %}
             <!-- Compact Scoped Roster Bar -->
-            <div id="scoped-bus-mode-banner" style="background: var(--surface-subtle); border: 1px solid var(--border); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
-                <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; font-weight: 600; color: var(--text-main);">
-                    <span>🚌 {{ assigned_bus.name }}</span>
-                    <span style="color: var(--text-muted); font-weight: normal; font-size: 0.8rem;">({{ scoped_rider_count }} students)</span>
-                </div>
-                <div>
-                    <button type="button" id="btn-toggle-guest-mode" class="btn-secondary" style="font-size: 0.78rem; padding: 0.35rem 0.7rem; min-height: 34px;">
-                        + Guest Rider
-                    </button>
-                </div>
+            <div id="scoped-bus-mode-banner" style="display: {% if is_guest_mode_initial %}none{% else %}flex{% endif %}; background: var(--surface-subtle); border: 1px solid var(--border); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-main);">🚌 {{ assigned_bus.name }}</span>
+                <button type="button" id="btn-toggle-guest-mode" class="btn-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.65rem; min-height: 32px;">
+                    + Guest Rider
+                </button>
             </div>
 
             <!-- Compact Guest Mode Bar -->
-            <div id="guest-mode-banner" style="display: none; background: hsla(38, 92%, 50%, 0.1); border: 1px solid #f59e0b; padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            <div id="guest-mode-banner" style="display: {% if is_guest_mode_initial %}flex{% else %}none{% endif %}; background: hsla(38, 92%, 50%, 0.1); border: 1px solid #f59e0b; padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; color: #b45309;">
                     <span>⚠️ Guest Rider Mode ({{ assigned_bus.name }})</span>
                 </div>
@@ -305,7 +300,8 @@
             </div>
             {% endif %}
 
-            <!-- Payment Date Row -->
+            <!-- Payment Date Row (Only visible to Admin / Bursar / Accountant; Hidden for teachers defaulting to today) -->
+            {% if is_admin_user %}
             <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-subtle); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 1.15rem; gap: 0.75rem; flex-wrap: wrap;">
                 <label class="form-label" for="{{ form.payment_date.id_for_label }}" style="margin: 0; font-weight: 600; font-size: 0.85rem;">Payment Date</label>
                 <div style="min-width: 160px;">
@@ -315,6 +311,9 @@
                     {% endif %}
                 </div>
             </div>
+            {% else %}
+            <input type="hidden" name="payment_date" id="id_payment_date" value="{% now 'Y-m-d' %}">
+            {% endif %}
 
             <!-- Class, Student & Bus Route Selection -->
             <div class="form-grid-3col">
