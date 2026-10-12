@@ -22,7 +22,7 @@
 
             <div class="form-group">
                 <label class="form-label" for="id_username">Username</label>
-                <input type="text" name="username" id="id_username" class="form-input" placeholder="e.g. teacher or admin" required autofocus>
+                <input type="text" name="username" id="id_username" class="form-input" placeholder="Enter your username" required autofocus>
             </div>
 
             <div class="form-group">
@@ -36,31 +36,6 @@
                 </button>
             </div>
         </form>
-
-        <!-- Quick Demo Role Logins -->
-        <div style="margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle); text-align: center;">
-            <div style="font-size: 0.72rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 0.65rem;">
-                Demo Credentials
-            </div>
-            <div style="display: flex; gap: 0.4rem; justify-content: center; flex-wrap: wrap;">
-                <button type="button" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="fillLogin('admin', 'admin123')">
-                    Admin
-                </button>
-                <button type="button" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="fillLogin('teacher', 'teacher123')">
-                    Teacher
-                </button>
-                <button type="button" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;" onclick="fillLogin('bursar', 'bursar123')">
-                    Accountant
-                </button>
-            </div>
-        </div>
     </div>
 </div>
-
-<script>
-function fillLogin(u, p) {
-    document.getElementById('id_username').value = u;
-    document.getElementById('id_password').value = p;
-}
-</script>
 {% endblock %}
