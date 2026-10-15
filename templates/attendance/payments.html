@@ -288,71 +288,68 @@
 <!-- Touch-Friendly Payment Cards (Mobile View) -->
 <div class="student-cards-list mobile-only">
     {% for p in payments %}
-        <div class="student-card-item">
-            <div class="student-card-top">
-                <div class="student-card-meta">
-                    <div class="student-avatar" style="width:28px; height:28px; font-size:0.75rem;">{{ p.student.initials }}</div>
-                    <div>
-                        <div class="student-name">{{ p.student.full_name }}</div>
-                        <div class="student-sub">
-                            <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ p.student.student_class }}</span>
-                            <span style="color:var(--text-muted); font-size:0.72rem; margin-left:0.25rem;">{{ p.payment_date|date:"M d, Y" }}</span>
+        <div class="student-card-item" style="position: relative; padding: 0.75rem 0.85rem; margin-bottom: 0.65rem;">
+            <!-- Clickable Card Body linking to Receipt Voucher -->
+            <a href="{% url 'payment_receipt' p.id %}" style="text-decoration: none; color: inherit; display: block;">
+                <div class="student-card-top" style="margin-bottom: 0.4rem;">
+                    <div class="student-card-meta">
+                        <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.75rem;">{{ p.student.initials }}</div>
+                        <div>
+                            <div class="student-name" style="font-size: 0.92rem;">{{ p.student.full_name }}</div>
+                            <div class="student-sub">
+                                <span class="class-badge" style="font-size: 0.68rem; padding: 0.08rem 0.35rem;">{{ p.student.student_class }}</span>
+                                <span style="color: var(--text-muted); font-size: 0.72rem; margin-left: 0.25rem;">{{ p.payment_date|date:"M d, Y" }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.05rem; font-weight: 700; color: var(--success-text);">
+                            +{{ CURRENCY_SYMBOL }}{{ p.amount|floatformat:2 }}
+                        </div>
+                        <div style="display: flex; gap: 0.25rem; justify-content: flex-end; align-items: center; margin-top: 0.15rem; flex-wrap: wrap;">
+                            {% if p.fee_type == 'BUS' %}
+                                <span class="fee-badge fee-badge-paid" style="font-size: 0.65rem; padding: 0.1rem 0.4rem;">Bus Fee</span>
+                            {% else %}
+                                <span class="fee-badge fee-badge-paid" style="font-size: 0.65rem; padding: 0.1rem 0.4rem;">Canteen</span>
+                            {% endif %}
+                            {% if p.is_advance or p.days_covered > 1 %}
+                                <span class="badge" style="font-size: 0.62rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd; font-weight: 600;">
+                                    💳 {{ p.days_covered }}d Adv
+                                </span>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-size:1.1rem; font-weight:700; color:var(--success-text);">
-                        +{{ CURRENCY_SYMBOL }}{{ p.amount|floatformat:2 }}
-                    </div>
-                    {% if p.fee_type == 'BUS' %}
-                        <span class="fee-badge fee-badge-paid" style="font-size:0.68rem;">Bus Fee</span>
-                    {% else %}
-                        <span class="fee-badge fee-badge-paid" style="font-size:0.68rem;">Canteen Fee</span>
-                    {% endif %}
-                    {% if p.is_advance or p.days_covered > 1 %}
-                        <span class="badge" style="font-size:0.65rem; background:#ede9fe; color:#6d28d9; border:1px solid #c4b5fd; display:inline-block; font-weight:600; margin-top:0.15rem;">
-                            💳 {{ p.days_covered }}d Adv
-                        </span>
-                    {% endif %}
-                </div>
-            </div>
+            </a>
 
-            <div class="student-card-fees" style="justify-content:space-between; margin-bottom: 0.35rem;">
-                <div>
-                    <span style="color:var(--text-muted); font-weight:600;">Receipt:</span>
-                    <code>{{ p.receipt_number|default:"Auto" }}</code>
-                </div>
-                <div>
-                    <span style="color:var(--text-muted); font-weight:600;">Method:</span>
+            <!-- Minimalistic Metadata & Actions Footer -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 0.45rem; border-top: 1px solid var(--border-subtle); font-size: 0.75rem; color: var(--text-muted);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                     <span>{{ p.get_payment_method_display }}</span>
+                    <span>&bull;</span>
+                    <span>By: <strong style="color: var(--text-main);">{{ p.recorded_by.get_full_name|default:p.recorded_by.username|default:"Staff" }}</strong></span>
                 </div>
-            </div>
 
-            <div style="font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between; padding-top: 0.25rem;">
-                <span>Received By:</span>
-                <strong style="color: var(--text-main);">
-                    {% if p.recorded_by %}
-                        {{ p.recorded_by.get_full_name|default:p.recorded_by.username }}
-                        {% if p.recorded_by.profile and p.recorded_by.profile.role == 'TEACHER' %}
-                            <span class="badge" style="font-size: 0.62rem; padding: 0.05rem 0.3rem; background: hsla(var(--primary-hsl), 0.1); color: var(--primary);">Teacher</span>
-                        {% elif p.recorded_by.profile and p.recorded_by.profile.is_school_admin %}
-                            <span class="badge" style="font-size: 0.62rem; padding: 0.05rem 0.3rem; background: hsla(var(--success-hsl), 0.1); color: var(--success);">Admin</span>
-                        {% endif %}
-                    {% else %}
-                        <span style="color: var(--text-muted);">—</span>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <a href="{% url 'payment_receipt' p.id %}" style="color: var(--primary); font-weight: 600; text-decoration: none; font-size: 0.75rem;">
+                        Voucher &rarr;
+                    </a>
+                    {% if user.profile and user.profile.can_delete_payments %}
+                    <div class="card-menu-wrapper">
+                        <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Payment Options" style="height: 32px; width: 32px; font-size: 0.95rem; border: 1px solid var(--border);">
+                            ⋮
+                        </button>
+                        <div class="card-menu-dropdown">
+                            <a href="{% url 'payment_receipt' p.id %}">
+                                <span>📄</span> View Voucher
+                            </a>
+                            <a href="{% url 'payment_delete' p.id %}" class="menu-item-danger">
+                                <span>🗑️</span> Void / Delete
+                            </a>
+                        </div>
+                    </div>
                     {% endif %}
-                </strong>
-            </div>
-
-            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-subtle); padding-top:0.6rem; margin-top:0.35rem;">
-                <a href="{% url 'payment_receipt' p.id %}" class="btn-secondary" style="flex:1; text-align:center; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center;">
-                    📄 View Receipt Voucher
-                </a>
-                {% if user.profile and user.profile.can_delete_payments %}
-                <a href="{% url 'payment_delete' p.id %}" class="btn-secondary" style="padding:0 0.85rem; min-height:40px; font-size:0.85rem; display:flex; align-items:center; justify-content:center; color:var(--danger-text);">
-                    🗑️
-                </a>
-                {% endif %}
+                </div>
             </div>
         </div>
     {% empty %}

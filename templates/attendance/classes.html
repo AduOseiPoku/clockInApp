@@ -150,23 +150,28 @@
             </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; padding: 0.6rem 0.85rem; background: var(--surface-subtle); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-            <span style="font-size: 0.82rem; color: var(--text-muted);">Enrolled Students:</span>
-            <a href="{% url 'student_list' %}?class={{ sc.name }}" class="class-badge" style="text-decoration: none;">
-                👥 {{ sc.student_count }} Students &rarr;
+        <!-- Unified Mobile Action Row -->
+        <div class="student-card-actions" style="margin-top: 0.85rem;">
+            <a href="{% url 'student_list' %}?class={{ sc.name }}" class="btn-card-pay" style="flex: 1; justify-content: center; color: var(--primary); font-weight: 600;">
+                👥 View Roster ({{ sc.student_count }})
             </a>
-        </div>
 
-        {% if user.profile.is_principal %}
-        <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem; border-top: 1px solid var(--border-subtle); padding-top: 0.65rem;">
-            <a href="{% url 'class_update' sc.id %}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.8rem;">
-                Edit
-            </a>
-            <a href="{% url 'class_delete' sc.id %}" class="btn-secondary" style="color: var(--danger-text); font-size: 0.8rem;">
-                Delete
-            </a>
+            {% if user.profile.is_principal %}
+            <div class="card-menu-wrapper">
+                <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Class Options" style="height: 48px; width: 44px; border: 1.5px solid var(--border);">
+                    ⋮
+                </button>
+                <div class="card-menu-dropdown">
+                    <a href="{% url 'class_update' sc.id %}">
+                        <span>✏️</span> Edit Class
+                    </a>
+                    <a href="{% url 'class_delete' sc.id %}" class="menu-item-danger">
+                        <span>🗑️</span> Delete Class
+                    </a>
+                </div>
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
     </div>
     {% empty %}
     <div style="text-align: center; padding: 2rem 1rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md);">

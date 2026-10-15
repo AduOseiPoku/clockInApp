@@ -481,15 +481,35 @@
             </div>
         </div>
 
-        <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem; border-top: 1px solid var(--border-subtle); padding-top: 0.5rem;">
-            {% if t.profile and t.profile.is_bus_fee_teacher and t.profile.assigned_bus %}
-            <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.8rem; color: var(--primary);">
-                🚌 Bus Roster
+        <!-- Unified Mobile Action Row for Teachers (Finance/Accountant View) -->
+        <div class="student-card-actions" style="margin-top: 0.75rem;">
+            <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-card-pay" style="flex: 1; justify-content: center; color: var(--primary); font-weight: 600;">
+                📄 Receipts Log ({{ t.today_count }})
             </a>
-            {% endif %}
-            <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.8rem;">
-                📄 Receipts
-            </a>
+
+            <div class="card-menu-wrapper">
+                <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Teacher Options" style="height: 48px; width: 44px; border: 1.5px solid var(--border);">
+                    ⋮
+                </button>
+                <div class="card-menu-dropdown">
+                    <a href="{% url 'collector_audit' t.pk %}">
+                        <span>📊</span> Financial Audit
+                    </a>
+                    {% if t.profile and t.profile.is_bus_fee_teacher and t.profile.assigned_bus %}
+                    <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}">
+                        <span>🚌</span> Bus Roster
+                    </a>
+                    {% endif %}
+                    {% if user.profile.is_principal %}
+                    <a href="{% url 'teacher_update' t.pk %}">
+                        <span>✏️</span> Edit Profile
+                    </a>
+                    <a href="{% url 'teacher_password_reset' t.pk %}">
+                        <span>🔑</span> Reset Password
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
         </div>
         {% else %}
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem;">
@@ -511,25 +531,37 @@
             </div>
         </div>
 
-        {% if user.profile.is_principal %}
-        <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem; border-top: 1px solid var(--border-subtle); padding-top: 0.65rem;">
-            <a href="{% url 'teacher_update' t.pk %}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.78rem;">
-                Edit
+        <!-- Unified Mobile Action Row for Teachers (Directory View) -->
+        <div class="student-card-actions" style="margin-top: 0.85rem;">
+            <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-card-pay" style="flex: 1; justify-content: center; color: var(--primary); font-weight: 600;">
+                📄 View Receipts
             </a>
-            <a href="{% url 'teacher_password_reset' t.pk %}" class="btn-secondary" style="flex: 1; text-align: center; justify-content: center; font-size: 0.78rem; color: var(--primary);">
-                Password
-            </a>
-            {% if t.is_active %}
-            <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-secondary" style="font-size: 0.78rem; color: var(--danger-text);" onclick="return confirm('Toggle status for {{ t.username }}?');">
-                Disable
-            </a>
-            {% else %}
-            <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-secondary" style="font-size: 0.78rem; color: var(--success);" onclick="return confirm('Toggle status for {{ t.username }}?');">
-                Enable
-            </a>
+
+            {% if user.profile.is_principal %}
+            <div class="card-menu-wrapper">
+                <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Teacher Options" style="height: 48px; width: 44px; border: 1.5px solid var(--border);">
+                    ⋮
+                </button>
+                <div class="card-menu-dropdown">
+                    <a href="{% url 'teacher_update' t.pk %}">
+                        <span>✏️</span> Edit Profile
+                    </a>
+                    <a href="{% url 'teacher_password_reset' t.pk %}">
+                        <span>🔑</span> Reset Password
+                    </a>
+                    {% if t.is_active %}
+                    <a href="{% url 'teacher_toggle_status' t.pk %}" class="menu-item-danger" onclick="return confirm('Deactivate account for {{ t.username }}?');">
+                        <span>⛔</span> Deactivate Account
+                    </a>
+                    {% else %}
+                    <a href="{% url 'teacher_toggle_status' t.pk %}" onclick="return confirm('Activate account for {{ t.username }}?');">
+                        <span>✅</span> Activate Account
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
             {% endif %}
         </div>
-        {% endif %}
         {% endif %}
     </div>
     {% empty %}

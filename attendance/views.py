@@ -1883,7 +1883,7 @@ def payment_list_view(request):
     recorded_by_ids = FeePayment.objects.exclude(recorded_by=None).values_list('recorded_by_id', flat=True).distinct()
     collectors_list = User.objects.filter(id__in=recorded_by_ids).select_related('profile').order_by('first_name', 'username')
 
-    paginator = Paginator(payments, 30)
+    paginator = Paginator(payments, 20)
     page_number = request.GET.get('page', 1)
     try:
         page_obj = paginator.page(page_number)
