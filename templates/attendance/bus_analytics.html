@@ -20,6 +20,11 @@
             <label for="date-picker" style="font-size:0.72rem; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">Date</label>
             <input type="date" id="date-picker" name="date" value="{{ target_date }}" onchange="this.form.submit()">
         </form>
+        {% if user.profile and user.profile.can_view_my_collections %}
+        <a href="{% url 'my_collections' %}" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.75rem; text-decoration: none;">
+            <span>📅</span> My History & Collections
+        </a>
+        {% endif %}
         {% if user.profile and user.profile.can_record_payments %}
         <a href="{% url 'payment_create' %}?bus_id={{ bus.id }}&is_one_off=1" class="btn-primary" style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; font-weight: 600;">
             <span>🚌</span> Record One-Off Rider
@@ -34,35 +39,35 @@
 </div>
 
 <!-- Route Metadata Banner -->
-<div style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem;">
-    <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
-        <div>
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Daily Fare</span>
-            <div style="font-size: 1.15rem; font-weight: 700; color: var(--primary);">
+<div class="route-meta-banner">
+    <div class="route-meta-items">
+        <div class="meta-item">
+            <span class="meta-label">Daily Fare</span>
+            <div class="meta-val meta-val-fare">
                 {{ currency }}{{ bus.fee|floatformat:2 }}
             </div>
         </div>
-        <div style="width: 1px; height: 32px; background: var(--border);"></div>
-        <div>
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Driver</span>
-            <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">
+        <div class="meta-divider"></div>
+        <div class="meta-item">
+            <span class="meta-label">Driver</span>
+            <div class="meta-val">
                 {{ bus.driver_name|default:"Unassigned" }}
                 {% if bus.driver_phone %}
-                    <a href="tel:{{ bus.driver_phone }}" style="font-size: 0.8rem; color: var(--primary); margin-left: 0.35rem; text-decoration: none;">📞 {{ bus.driver_phone }}</a>
+                    <a href="tel:{{ bus.driver_phone }}" class="meta-phone-link">📞 {{ bus.driver_phone }}</a>
                 {% endif %}
             </div>
         </div>
-        <div style="width: 1px; height: 32px; background: var(--border);"></div>
-        <div>
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Plate Number</span>
-            <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">
+        <div class="meta-divider"></div>
+        <div class="meta-item">
+            <span class="meta-label">Plate Number</span>
+            <div class="meta-val">
                 {{ bus.plate_number|default:"—" }}
             </div>
         </div>
-        <div style="width: 1px; height: 32px; background: var(--border);"></div>
-        <div>
-            <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Fee Teacher on Duty</span>
-            <div style="font-size: 0.92rem; font-weight: 600; color: var(--primary);">
+        <div class="meta-divider"></div>
+        <div class="meta-item">
+            <span class="meta-label">Teacher on Duty</span>
+            <div class="meta-val" style="color: var(--primary);">
                 {% if fee_teachers %}
                     {% for ft in fee_teachers %}
                         <span>👤 {{ ft.get_full_name|default:ft.username }}</span>{% if not forloop.last %}, {% endif %}
@@ -74,7 +79,7 @@
         </div>
     </div>
     {% if bus.route_description %}
-    <div style="font-size: 0.8rem; color: var(--text-muted); max-width: 380px;">
+    <div class="route-meta-desc">
         <span style="font-weight: 600; color: var(--text-main);">Route:</span> {{ bus.route_description }}
     </div>
     {% endif %}
@@ -175,6 +180,115 @@
 </div>
 
 <style>
+/* Base Styles */
+.route-meta-banner {
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+.route-meta-items {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+.meta-item {
+    display: flex;
+    flex-direction: column;
+}
+.meta-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+}
+.meta-val {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+.meta-val-fare {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+.meta-phone-link {
+    font-size: 0.8rem;
+    color: var(--primary);
+    margin-left: 0.35rem;
+    text-decoration: none;
+}
+.meta-divider {
+    width: 1px;
+    height: 32px;
+    background: var(--border);
+}
+.route-meta-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    max-width: 380px;
+}
+
+/* Roster Controls Panel */
+.roster-controls-panel {
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+.class-filter-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+.class-filter-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.class-filter-select {
+    padding: 0.48rem 0.85rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-subtle);
+    color: var(--text-main);
+    outline: none;
+    min-width: 260px;
+    cursor: pointer;
+}
+.status-filter-pills-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.status-filter-pills-row .filter-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .filter-pill {
     padding: 0.4rem 0.85rem;
     font-size: 0.8rem;
@@ -220,16 +334,93 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 14px rgba(220, 38, 38, 0.18);
 }
+
+.class-header-bar {
+    padding: 1rem 1.25rem;
+    background: var(--surface-subtle);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+.class-header-metrics-mobile {
+    display: none;
+}
+
+/* Mobile Viewport Optimizations (<= 768px) */
+@media (max-width: 768px) {
+    .route-meta-banner {
+        display: block !important;
+        padding: 0.85rem 1rem !important;
+    }
+    .route-meta-items {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 0.75rem 0.85rem !important;
+    }
+    .route-meta-items .meta-divider {
+        display: none !important;
+    }
+    .route-meta-desc {
+        max-width: 100% !important;
+        margin-top: 0.75rem !important;
+        padding-top: 0.55rem !important;
+        border-top: 1px solid var(--border-subtle) !important;
+    }
+    .roster-controls-panel {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        padding: 0.85rem !important;
+        gap: 0.75rem !important;
+    }
+    .class-filter-wrapper {
+        width: 100% !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 0.35rem !important;
+    }
+    .class-filter-select {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .status-filter-pills-row {
+        width: 100% !important;
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 0.35rem !important;
+    }
+    .status-filter-pills-row .filter-label {
+        display: none !important;
+    }
+    .status-filter-pills-row .filter-pill {
+        width: 100% !important;
+        justify-content: center !important;
+        padding: 0.45rem 0.2rem !important;
+        font-size: 0.74rem !important;
+        text-align: center !important;
+    }
+    .class-header-bar {
+        padding: 0.75rem 0.85rem !important;
+    }
+    .class-header-metrics-desktop {
+        display: none !important;
+    }
+    .class-header-metrics-mobile {
+        display: inline-flex !important;
+    }
+}
 </style>
 
 <!-- Interactive Filter & Roster Controls -->
-<div id="roster-controls" style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem;">
+<div id="roster-controls" class="roster-controls-panel">
     <!-- Left: Class Dropdown Selector -->
-    <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
-        <label for="classFilterSelect" style="font-size: 0.85rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.35rem;">
+    <div class="class-filter-wrapper">
+        <label for="classFilterSelect" class="class-filter-label">
             <span>🏫</span> Select Class:
         </label>
-        <select id="classFilterSelect" style="padding: 0.48rem 0.85rem; font-size: 0.88rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-subtle); color: var(--text-main); outline: none; min-width: 260px; cursor: pointer;">
+        <select id="classFilterSelect" class="class-filter-select">
             <option value="all">📂 All Classes ({{ class_breakdown|length }} classrooms)</option>
             <option value="__unpaid_all__" style="color: var(--danger-text); font-weight: 700;">
                 🚨 All Unpaid Riders Across Route ({{ summary.unpaid_count }})
@@ -246,16 +437,19 @@
     </div>
 
     <!-- Right: Quick Status Filter Pills -->
-    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-        <span style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Filter:</span>
+    <div class="status-filter-pills-row">
+        <span class="filter-label">Filter:</span>
         <button type="button" id="pill-filter-all" class="filter-pill active" onclick="setStatusFilter('all')">
-            👥 All ({{ summary.total_riders }})
+            👥 All Riders ({{ summary.total_riders }})
         </button>
-        <button type="button" id="pill-filter-unpaid" class="filter-pill filter-pill-danger" onclick="setStatusFilter('unpaid')">
-            🚨 Show Unpaid Only ({{ summary.unpaid_count }})
+        <button type="button" id="pill-filter-bus_unpaid" class="filter-pill filter-pill-danger" onclick="setStatusFilter('bus_unpaid')">
+            🚌 Owing Bus ({{ summary.bus_unpaid_count }})
+        </button>
+        <button type="button" id="pill-filter-canteen_unpaid" class="filter-pill" style="border-color: #ea580c; color: #ea580c; background: #fff7ed;" onclick="setStatusFilter('canteen_unpaid')">
+            🍲 Owing Lunch ({{ summary.canteen_unpaid_count }})
         </button>
         <button type="button" id="pill-filter-paid" class="filter-pill filter-pill-success" onclick="setStatusFilter('paid')">
-            ✓ Paid ({{ summary.paid_count }})
+            ✓ Fully Settled ({{ summary.fully_settled_count }})
         </button>
     </div>
 </div>
@@ -399,22 +593,28 @@
         <div class="mobile-only student-cards-list" style="padding: 0.75rem;">
             {% for item in all_unpaid_students %}
             <div class="student-card-item" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                <!-- Top Row: Avatar, Identity, Phone and Owing Badge -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem;">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
+                        <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">
                             {{ item.student.initials }}
                         </div>
                         <div>
-                            <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-main);">
+                            <div style="font-weight: 700; font-size: 0.92rem; color: var(--text-main);">
                                 {{ item.student.full_name }}
                             </div>
-                            <span class="class-badge" style="font-size: 0.7rem; padding: 0.1rem 0.4rem;">
-                                {{ item.class_name }}
-                            </span>
+                            <div style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.15rem;">
+                                <span class="class-badge" style="font-size: 0.68rem; padding: 0.08rem 0.35rem;">
+                                    {{ item.class_name }}
+                                </span>
+                                {% if item.parent_phone %}
+                                    <a href="tel:{{ item.parent_phone }}" style="font-size: 0.72rem; color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
-                    <div style="text-align: right;">
-                        <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">
+                    <div style="text-align: right; flex-shrink: 0;">
+                        <span class="fee-badge fee-badge-unpaid" style="font-size: 0.74rem; font-weight: 700;">
                             Owes {{ currency }}{{ item.combined_due|floatformat:2 }}
                         </span>
                         <div style="display: flex; gap: 0.25rem; justify-content: flex-end; margin-top: 0.2rem;">
@@ -425,40 +625,37 @@
                         </div>
                     </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-top: 0.45rem;">
-                    <div>
-                        {% if item.parent_phone %}
-                            <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
-                        {% endif %}
-                    </div>
-                    {% if user.profile.can_record_payments %}
-                        {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
-                            <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
-                                ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+
+                <!-- Action Row: Dedicated Full-Width Buttons -->
+                {% if user.profile.can_record_payments %}
+                <div style="display: flex; gap: 0.45rem; margin-top: 0.65rem; padding-top: 0.55rem; border-top: 1px solid var(--border-subtle);">
+                    {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
+                        <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
+                            ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+                        </button>
+                    {% elif not item.is_paid %}
+                        {% if item.has_partial_credit %}
+                            <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
                             </button>
-                        {% elif not item.is_paid %}
-                            {% if item.has_partial_credit %}
-                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
-                                    ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
-                                </button>
-                            {% else %}
-                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary);" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
-                                    🚌 Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
-                                </button>
-                            {% endif %}
-                        {% elif item.canteen_enrolled and not item.canteen_is_paid %}
-                            {% if item.canteen_has_partial %}
-                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
-                                    ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
-                                </button>
-                            {% else %}
-                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
-                                    🍲 Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
-                                </button>
-                            {% endif %}
+                        {% else %}
+                            <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                🚌 Collect Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
+                            </button>
+                        {% endif %}
+                    {% elif item.canteen_enrolled and not item.canteen_is_paid %}
+                        {% if item.canteen_has_partial %}
+                            <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
+                            </button>
+                        {% else %}
+                            <button type="button" class="btn-secondary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; color: #ea580c; border-color: #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                🍲 Collect Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
+                            </button>
                         {% endif %}
                     {% endif %}
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -555,23 +752,21 @@
     {% for c in class_breakdown %}
     <div class="table-card class-card-container" data-class="{{ c.class_name }}" data-unpaid-count="{{ c.unpaid_count }}" style="margin-bottom: 1.5rem; overflow: hidden;">
         <!-- Class Card Header -->
-        <div style="padding: 1rem 1.25rem; background: var(--surface-subtle); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem;">
-            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <span class="class-badge" style="font-size: 0.88rem; padding: 0.25rem 0.65rem; font-weight: 700;">
+        <div class="class-header-bar">
+            <div style="display: flex; align-items: center; gap: 0.65rem;">
+                <span class="class-badge" style="font-size: 0.88rem; padding: 0.22rem 0.65rem; font-weight: 700;">
                     {{ c.class_name }}
                 </span>
-                <span style="font-size: 0.84rem; color: var(--text-muted);">
+                <span style="font-size: 0.82rem; color: var(--text-muted);">
                     <strong>{{ c.riders_count }}</strong> rider{{ c.riders_count|pluralize }}
                 </span>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap;">
-                <!-- Paid Pill -->
+            <!-- Desktop View: Full metrics breakdown -->
+            <div class="class-header-metrics-desktop" style="display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap;">
                 <span class="badge badge-success" style="font-size: 0.75rem; padding: 0.2rem 0.55rem;">
                     ✓ {{ c.paid_count }} Paid ({{ c.compliance_pct }}%)
                 </span>
-                
-                <!-- Unpaid Pill -->
                 {% if c.unpaid_count > 0 %}
                 <span class="badge badge-danger" style="font-size: 0.75rem; padding: 0.2rem 0.55rem;">
                     ⚠ {{ c.unpaid_count }} Owing ({{ currency }}{{ c.outstanding_amount|floatformat:2 }})
@@ -581,11 +776,22 @@
                     ✓ All Cleared
                 </span>
                 {% endif %}
-
-                <!-- Financial ratio -->
                 <span style="font-size: 0.8rem; color: var(--text-muted);">
                     {{ currency }}{{ c.collected_amount|floatformat:2 }} / {{ currency }}{{ c.expected_amount|floatformat:2 }}
                 </span>
+            </div>
+
+            <!-- Mobile View: Single clean summary badge -->
+            <div class="class-header-metrics-mobile">
+                {% if c.unpaid_count > 0 %}
+                <span class="badge badge-danger" style="font-size: 0.74rem; padding: 0.2rem 0.55rem; font-weight: 700;">
+                    ⚠ {{ c.unpaid_count }} Owing ({{ currency }}{{ c.outstanding_amount|floatformat:0 }})
+                </span>
+                {% else %}
+                <span class="badge badge-success" style="font-size: 0.74rem; padding: 0.2rem 0.55rem; font-weight: 700;">
+                    ✓ All Cleared
+                </span>
+                {% endif %}
             </div>
         </div>
 
@@ -604,7 +810,7 @@
                 </thead>
                 <tbody>
                     {% for item in c.students %}
-                    <tr class="student-row" data-status="{% if item.is_paid %}paid{% else %}unpaid{% endif %}">
+                    <tr class="student-row" data-status="{% if item.is_paid %}paid{% else %}unpaid{% endif %}" data-bus-paid="{% if item.is_paid %}1{% else %}0{% endif %}" data-canteen-paid="{% if item.canteen_is_paid %}1{% else %}0{% endif %}" data-canteen-enrolled="{% if item.canteen_enrolled %}1{% else %}0{% endif %}" data-both-paid="{% if item.both_is_paid %}1{% else %}0{% endif %}">
                         <td>
                             <div style="display: flex; align-items: center; gap: 0.6rem;">
                                 <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">
@@ -733,25 +939,33 @@
         <!-- Student Roster Mobile Cards for this Class -->
         <div class="mobile-only student-cards-list" style="padding: 0.75rem;">
             {% for item in c.students %}
-            <div class="student-card-item student-row" data-status="{% if item.both_is_paid %}paid{% else %}unpaid{% endif %}" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div class="student-card-item student-row" data-bus-paid="{% if item.is_paid %}1{% else %}0{% endif %}" data-canteen-paid="{% if item.canteen_is_paid %}1{% else %}0{% endif %}" data-canteen-enrolled="{% if item.canteen_enrolled %}1{% else %}0{% endif %}" data-both-paid="{% if item.both_is_paid %}1{% else %}0{% endif %}" style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
+                <!-- Top Row: Avatar, Identity, Phone and Owing Badge -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.45rem;">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
+                        <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem;">
                             {{ item.student.initials }}
                         </div>
-                        <span style="font-weight: 600; font-size: 0.88rem; color: var(--text-main);">
-                            {{ item.student.full_name }}
-                        </span>
+                        <div>
+                            <div style="font-weight: 700; font-size: 0.92rem; color: var(--text-main);">
+                                {{ item.student.full_name }}
+                            </div>
+                            {% if item.parent_phone %}
+                                <div style="margin-top: 0.15rem;">
+                                    <a href="tel:{{ item.parent_phone }}" style="font-size: 0.72rem; color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
+                                </div>
+                            {% endif %}
+                        </div>
                     </div>
-                    <div style="text-align: right;">
+                    <div style="text-align: right; flex-shrink: 0;">
                         {% if item.combined_due > 0 %}
-                            <span class="fee-badge fee-badge-unpaid" style="font-size: 0.72rem;">Owes {{ currency }}{{ item.combined_due|floatformat:2 }}</span>
+                            <span class="fee-badge fee-badge-unpaid" style="font-size: 0.74rem; font-weight: 700;">Owes {{ currency }}{{ item.combined_due|floatformat:2 }}</span>
                         {% elif item.bus_credit_days > 0 or item.canteen_credit_days > 0 %}
                             <span class="fee-badge" style="font-size: 0.72rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;">💳 Advance</span>
                         {% else %}
                             <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">✓ Paid</span>
                         {% endif %}
-                        <div style="display: flex; gap: 0.25rem; justify-content: flex-end; margin-top: 0.2rem;">
+                        <div style="display: flex; gap: 0.25rem; justify-content: flex-end; margin-top: 0.2rem; flex-wrap: wrap;">
                             {% if item.bus_credit_days > 0 %}<span style="font-size: 0.65rem; color: #6d28d9; font-weight: 600;">💳 Bus ({{ item.bus_credit_days }}d)</span>
                             {% elif item.has_partial_credit %}<span style="font-size: 0.65rem; color: #b45309; font-weight: 600;">💳 Has {{ currency }}{{ item.credit_available|floatformat:2 }}</span>
                             {% elif not item.is_paid %}<span style="font-size: 0.65rem; color: var(--danger); font-weight: 600;">Bus</span>{% endif %}
@@ -761,54 +975,55 @@
                         </div>
                     </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-top: 0.35rem;">
-                    <div>
-                        {% if item.parent_phone %}
-                            <a href="tel:{{ item.parent_phone }}" style="color: var(--primary); text-decoration: none;">📞 {{ item.parent_phone }}</a>
-                        {% endif %}
-                    </div>
-                    {% if user.profile.can_record_payments %}
-                        {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
-                            <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
-                                ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
-                            </button>
-                            <button type="button" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
-                                💳 Multi-Pay
-                            </button>
-                        {% elif not item.is_paid %}
-                            {% if item.has_partial_credit %}
-                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
-                                    ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
-                                </button>
-                            {% else %}
-                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: var(--primary);" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
-                                    🚌 Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
-                                </button>
-                            {% endif %}
-                            <button type="button" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
-                                💳 Multi-Pay
-                            </button>
-                        {% elif item.canteen_enrolled and not item.canteen_is_paid %}
-                            {% if item.canteen_has_partial %}
-                                <button type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
-                                    ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
-                                </button>
-                            {% else %}
-                                <button type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; color: #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
-                                    🍲 Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
-                                </button>
-                            {% endif %}
-                            <button type="button" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
-                                💳 Multi-Pay
+
+                <!-- Action Row: Dedicated Full-Width Buttons -->
+                {% if user.profile.can_record_payments %}
+                <div style="display: flex; gap: 0.45rem; margin-top: 0.65rem; padding-top: 0.55rem; border-top: 1px solid var(--border-subtle);">
+                    {% if not item.is_paid and item.canteen_enrolled and not item.canteen_is_paid %}
+                        <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);" onclick="quickCollect('{{ item.student.id }}', 'BOTH', this)">
+                            ⚡ Collect Both ({{ currency }}{{ item.combined_due|floatformat:2 }})
+                        </button>
+                        <button type="button" class="btn-secondary" style="min-height: 42px; padding: 0 0.75rem; font-size: 0.78rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                            💳 Multi-Pay
+                        </button>
+                    {% elif not item.is_paid %}
+                        {% if item.has_partial_credit %}
+                            <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                ⚡ Top-Up ({{ currency }}{{ item.remainder_due|floatformat:2 }})
                             </button>
                         {% else %}
-                            <span style="color: var(--success); font-weight: 600; font-size: 0.75rem;">✓ Settled</span>
-                            <button type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.72rem; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
-                                + Multi-Pay
+                            <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;" onclick="quickCollect('{{ item.student.id }}', 'BUS', this)">
+                                🚌 Collect Bus ({{ currency }}{{ item.bus_fee|floatformat:2 }})
                             </button>
                         {% endif %}
+                        <button type="button" class="btn-secondary" style="min-height: 42px; padding: 0 0.75rem; font-size: 0.78rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                            💳 Multi-Pay
+                        </button>
+                    {% elif item.canteen_enrolled and not item.canteen_is_paid %}
+                        {% if item.canteen_has_partial %}
+                            <button type="button" class="btn-primary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; background: #d97706; border-color: #d97706;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                ⚡ Lunch Top-Up ({{ currency }}{{ item.canteen_remainder_due|floatformat:2 }})
+                            </button>
+                        {% else %}
+                            <button type="button" class="btn-secondary" style="flex: 1; min-height: 42px; font-size: 0.82rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; color: #ea580c; border-color: #ea580c;" onclick="quickCollect('{{ item.student.id }}', 'CANTEEN', this)">
+                                🍲 Collect Lunch ({{ currency }}{{ item.canteen_fee|floatformat:2 }})
+                            </button>
+                        {% endif %}
+                        <button type="button" class="btn-secondary" style="min-height: 42px; padding: 0 0.75rem; font-size: 0.78rem; font-weight: 600; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                            💳 Multi-Pay
+                        </button>
+                    {% else %}
+                        <div style="flex: 1; display: flex; align-items: center; justify-content: space-between;">
+                            <span style="color: var(--success-text); font-weight: 700; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 0.25rem;">
+                                ✓ Fare Settled
+                            </span>
+                            <button type="button" class="btn-secondary" style="min-height: 36px; padding: 0.25rem 0.65rem; font-size: 0.75rem; color: var(--primary); border: 1px solid var(--border);" onclick="openMultipayModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.bus_fee|floatformat:2 }}', '{{ item.canteen_fee|floatformat:2 }}', '{{ item.canteen_enrolled|yesno }}')" title="Multi-Pay">
+                                + Multi-Pay
+                            </button>
+                        </div>
                     {% endif %}
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -836,7 +1051,7 @@ function setStatusFilter(status) {
 }
 
 function updatePillUI() {
-    ['all', 'unpaid', 'paid'].forEach(function(s) {
+    ['all', 'bus_unpaid', 'canteen_unpaid', 'paid'].forEach(function(s) {
         const pill = document.getElementById('pill-filter-' + s);
         if (pill) {
             if (s === currentStatus) {
@@ -849,8 +1064,8 @@ function updatePillUI() {
 }
 
 function triggerUnpaidFilter() {
-    // Stat card click triggers unpaid filter
-    setStatusFilter('unpaid');
+    // Stat card click triggers bus unpaid filter
+    setStatusFilter('bus_unpaid');
     const controls = document.getElementById('roster-controls');
     if (controls) {
         controls.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -909,12 +1124,18 @@ function applyFilters() {
         let visibleRowsInCard = 0;
 
         studentRows.forEach(function(row) {
-            const status = row.getAttribute('data-status');
+            const isBusPaid = row.getAttribute('data-bus-paid') === '1';
+            const isCanteenPaid = row.getAttribute('data-canteen-paid') === '1';
+            const isCanteenEnrolled = row.getAttribute('data-canteen-enrolled') === '1';
+            const isBothPaid = row.getAttribute('data-both-paid') === '1';
+
             let showRow = true;
-            if (currentStatus === 'unpaid' && status !== 'unpaid') {
-                showRow = false;
-            } else if (currentStatus === 'paid' && status !== 'paid') {
-                showRow = false;
+            if (currentStatus === 'bus_unpaid') {
+                showRow = !isBusPaid;
+            } else if (currentStatus === 'canteen_unpaid') {
+                showRow = (isCanteenEnrolled && !isCanteenPaid);
+            } else if (currentStatus === 'paid') {
+                showRow = isBothPaid;
             }
 
             row.style.display = showRow ? '' : 'none';

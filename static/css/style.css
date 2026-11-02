@@ -1128,77 +1128,500 @@ button, input, select, textarea {
   border-color: #cbd5e1;
 }
 
-.mobile-nav-drawer {
-  display: none;
+/* ============================================================
+   CLASSIC OFF-CANVAS SIDE DRAWER (Mobile Navigation)
+   ============================================================ */
+
+/* Body scroll lock when drawer is active */
+body.drawer-open {
+  overflow: hidden !important;
+  touch-action: none;
+}
+
+/* Dimmed backdrop overlay */
+.side-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 1040;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.26s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.26s;
+  pointer-events: none;
+}
+
+.side-drawer-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* Off-canvas side drawer panel */
+.side-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 300px;
+  max-width: 86vw;
   background: var(--surface-card);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  animation: slideDownNav 0.18s ease;
-}
-
-.mobile-nav-drawer.open {
-  display: block;
-}
-
-@keyframes slideDownNav {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.mobile-nav-user-header {
-  padding: 0.75rem 1rem 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 0.85rem;
-}
-
-.mobile-nav-links {
-  list-style: none;
-  padding: 0.4rem 0.5rem;
-  margin: 0;
+  border-right: 1px solid var(--border);
+  box-shadow: 4px 0 28px rgba(0, 0, 0, 0.14);
+  z-index: 1050;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
+  will-change: transform;
+  overflow: hidden;
 }
 
-.mobile-nav-link {
+.side-drawer.open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+/* Drawer Header */
+.side-drawer-header {
+  height: 56px;
+  padding: 0 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  flex-shrink: 0;
+}
+
+.side-drawer-header .brand-wrapper {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.65rem 0.85rem;
-  font-size: 0.88rem;
-  font-weight: 500;
-  color: var(--text-main);
-  text-decoration: none;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s, color 0.15s;
+  min-width: 0;
 }
 
-.mobile-nav-link:hover,
-.mobile-nav-link:active {
+.side-drawer-header .brand-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-drawer-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.side-drawer-close-btn:hover,
+.side-drawer-close-btn:active {
+  background: var(--surface-subtle);
+  color: var(--text-main);
+  border-color: #cbd5e1;
+}
+
+/* Drawer User Profile Card */
+.side-drawer-user-card {
+  padding: 0.9rem 1rem;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.side-drawer-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.side-drawer-user-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.side-drawer-user-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side-drawer-user-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.side-drawer-user-role {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-xs);
+}
+
+.side-drawer-bus-badge {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+/* Scrollable Drawer Body */
+.side-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.85rem 0.75rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.side-drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.side-drawer-section-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-subtle);
+  padding: 0.25rem 0.65rem 0.15rem;
+}
+
+.side-drawer-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.side-drawer-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  min-height: 42px;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.side-drawer-link:hover,
+.side-drawer-link:active {
   background: var(--surface-subtle);
 }
 
-.mobile-nav-link.active {
+.side-drawer-link.active {
   background: var(--primary-subtle);
   color: var(--primary);
   font-weight: 600;
 }
 
-.mobile-nav-link svg {
+.side-drawer-link.active .side-drawer-link-icon {
+  color: var(--primary);
+}
+
+.side-drawer-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
   flex-shrink: 0;
-  color: currentColor;
 }
 
-/* Visibility utilities */
-.mobile-only {
-  display: none !important;
+.side-drawer-link-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.desktop-only {
-  display: block;
+.side-drawer-tag {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-xs);
+  flex-shrink: 0;
+}
+
+.side-drawer-action-link {
+  color: var(--primary, #18181b);
+  font-weight: 600;
+}
+
+.side-drawer-action-link .side-drawer-link-icon {
+  color: var(--primary, #18181b);
+}
+
+.side-drawer-logout-link {
+  color: var(--danger-text);
+}
+
+.side-drawer-logout-link .side-drawer-link-icon {
+  color: var(--danger-text);
+}
+
+.side-drawer-section-account {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Fallback backward compatibility styles */
+.mobile-nav-drawer {
+  display: none;
+}
+
+/* ============================================================
+   APP SHELL LAYOUT (Desktop Sidebar + Main Content Shell)
+   ============================================================ */
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+  width: 100%;
+}
+
+.app-main-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Slim Topbar (52px) */
+.app-topbar {
+  height: 52px;
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  width: 100%;
+}
+
+.app-topbar-inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.5rem;
+  width: 100%;
+  gap: 1rem;
+}
+
+.topbar-desktop-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.topbar-context-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.topbar-period-pill {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-xs);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-main);
+  letter-spacing: 0.02em;
+}
+
+.topbar-divider {
+  color: var(--text-subtle);
+}
+
+.topbar-system-name {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-left: auto;
+}
+
+.btn-topbar-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--primary);
+  color: var(--text-inverse);
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+.btn-topbar-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-topbar-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--surface-card);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.btn-topbar-secondary:hover {
+  background: var(--surface-subtle);
+}
+
+/* ============================================================
+   RESPONSIVE APP SHELL BEHAVIOR
+   ============================================================ */
+
+/* Desktop Screens (>= 769px) */
+@media (min-width: 769px) {
+  body.has-sidebar .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 250px;
+    background: var(--surface-card);
+    border-right: 1px solid var(--border);
+    transform: none !important;
+    visibility: visible !important;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    box-shadow: none;
+  }
+
+  body.has-sidebar .app-main-wrapper {
+    margin-left: 250px;
+  }
+
+  /* Hide backdrop & mobile close button on desktop */
+  .side-drawer-backdrop {
+    display: none !important;
+  }
+
+  .side-drawer-close-btn {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: none !important;
+  }
+
+  .desktop-only {
+    display: inline-flex !important;
+  }
+
+  /* Optimize container padding to make best use of horizontal workspace */
+  body.has-sidebar .container {
+    max-width: 100%;
+    padding: 1.5rem 2rem;
+  }
+}
+
+/* Mobile Screens (<= 768px) */
+@media (max-width: 768px) {
+  .app-main-wrapper {
+    margin-left: 0 !important;
+  }
+
+  .app-topbar-inner {
+    padding: 0 0.75rem;
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: flex !important;
+  }
+
+  .side-drawer-close-btn {
+    display: inline-flex !important;
+  }
 }
 
 /* Mobile Student Card System */

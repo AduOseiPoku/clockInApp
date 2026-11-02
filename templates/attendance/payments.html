@@ -9,6 +9,11 @@
         <p>Transaction records of transport and canteen collections</p>
     </div>
     <div class="header-actions">
+        {% if user.profile and user.profile.is_accountant or user.profile and user.profile.is_school_admin or user.is_superuser %}
+        <button type="button" onclick="openHandoverModal()" class="btn-secondary" style="font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; color: #047857; border-color: #6ee7b7; background: #ecfdf5;">
+            <span>💵</span> Accept Cash Handover
+        </button>
+        {% endif %}
         {% if user.profile and user.profile.can_record_payments %}
         <a href="{% url 'payment_create' %}?is_one_off=1" class="btn-secondary" style="font-size: 0.85rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;">
             <span>🚌</span> One-Off Bus Trip
@@ -63,6 +68,54 @@
     </div>
 </div>
 
+<!-- Bursary Cash Drawer & Real-Time Balancing (Bus & Canteen Collections) -->
+<div class="drawer-reconciliation-panel" style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.15rem 1.25rem; margin-bottom: 1.5rem; box-shadow: var(--shadow-sm);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.2rem;">🏦</span>
+            <div>
+                <h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--text-main);">Bursary Cash Drawer & Daily Balancing</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0.1rem 0 0 0;">Audit reconciliation: Physical Cash on-site vs Electronic intake vs Teacher cash in field</p>
+            </div>
+        </div>
+        <div>
+            <span class="badge" style="background: var(--surface-subtle); color: var(--text-main); font-weight: 600; font-size: 0.75rem;">
+                {{ target_audit_date_str }}
+            </span>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <!-- 1. Physical Cash in Drawer -->
+        <div style="background: hsla(150, 80%, 45%, 0.06); border: 1px solid hsla(150, 80%, 40%, 0.25); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+            <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: #047857; letter-spacing: 0.04em;">💵 Physical Cash in Drawer</div>
+            <div id="bursary-drawer-cash" style="font-size: 1.45rem; font-weight: 800; color: #065f46; margin: 0.25rem 0;">{{ CURRENCY_SYMBOL }}{{ drawer_cash_today|floatformat:2 }}</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Counter cash + {{ CURRENCY_SYMBOL }}{{ total_remitted_today|floatformat:2 }} remitted</div>
+        </div>
+
+        <!-- 2. Teacher Cash in Field -->
+        <div style="background: {% if teacher_cash_in_field > 0 %}hsla(38, 92%, 50%, 0.08){% else %}var(--surface-subtle){% endif %}; border: 1px solid {% if teacher_cash_in_field > 0 %}#fcd34d{% else %}var(--border){% endif %}; border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+            <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: {% if teacher_cash_in_field > 0 %}#b45309{% else %}var(--text-muted){% endif %}; letter-spacing: 0.04em;">⚠️ Teacher Cash in Field</div>
+            <div id="bursary-field-cash" style="font-size: 1.45rem; font-weight: 800; color: {% if teacher_cash_in_field > 0 %}#b45309{% else %}var(--text-muted){% endif %}; margin: 0.25rem 0;">{{ CURRENCY_SYMBOL }}{{ teacher_cash_in_field|floatformat:2 }}</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Unremitted cash held on campus</div>
+        </div>
+
+        <!-- 3. Mobile Money -->
+        <div style="background: hsla(210, 100%, 50%, 0.06); border: 1px solid hsla(210, 100%, 50%, 0.2); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+            <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: #0284c7; letter-spacing: 0.04em;">📱 Mobile Money (MoMo)</div>
+            <div id="bursary-momo-cash" style="font-size: 1.45rem; font-weight: 800; color: #0369a1; margin: 0.25rem 0;">{{ CURRENCY_SYMBOL }}{{ today_momo_total|floatformat:2 }}</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Direct electronic payments</div>
+        </div>
+
+        <!-- 4. Bank Transfer / Card -->
+        <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+            <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.04em;">🏦 Bank / Card / Cheque</div>
+            <div id="bursary-bank-cash" style="font-size: 1.45rem; font-weight: 800; color: var(--text-main); margin: 0.25rem 0;">{{ CURRENCY_SYMBOL }}{{ today_bank_total|floatformat:2 }}</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Direct bank deposits</div>
+        </div>
+    </div>
+</div>
+
 <!-- Authorized Fee Collection Teachers — Direct Audit Navigation -->
 {% if authorized_collectors_summary %}
 <div class="stat-card" style="margin-bottom: 1.5rem; border-left: 4px solid var(--primary); padding: 1.25rem;">
@@ -90,23 +143,65 @@
         </div>
     </div>
 
-    <!-- Clean List of Teachers Names -->
-    <div class="teacher-selector-ribbon" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <!-- Clean List of Teachers Names with Settle Handover Actions -->
+    <div class="teacher-selector-ribbon" style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
         {% for item in authorized_collectors_summary %}
-        <a href="{% url 'collector_audit' item.user.id %}" 
-           class="teacher-tab-btn" 
-           title="Open financial audit dossier for {{ item.user.get_full_name|default:item.user.username }}">
-            <div class="student-avatar" style="width: 24px; height: 24px; font-size: 0.65rem; font-weight: 700;">
-                {{ item.user.first_name|default:item.user.username|slice:":1" }}{{ item.user.last_name|slice:":1" }}
-            </div>
-            <span class="teacher-btn-name">{{ item.user.get_full_name|default:item.user.username }}</span>
-            {% if item.today_total > 0 %}
-                <span class="intake-indicator-dot" title="Has collections today"></span>
+        <div style="display: inline-flex; align-items: center; gap: 0.35rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.3rem 0.55rem; box-shadow: var(--shadow-sm);">
+            <a href="{% url 'collector_audit' item.user.id %}" 
+               style="display: flex; align-items: center; gap: 0.4rem; text-decoration: none; color: inherit;"
+               title="Open financial audit dossier for {{ item.user.get_full_name|default:item.user.username }}">
+                <div class="student-avatar" style="width: 24px; height: 24px; font-size: 0.65rem; font-weight: 700;">
+                    {{ item.user.first_name|default:item.user.username|slice:":1" }}{{ item.user.last_name|slice:":1" }}
+                </div>
+                <span class="teacher-btn-name">{{ item.user.get_full_name|default:item.user.username }}</span>
+            </a>
+
+            {% if item.cash_in_hand > 0 %}
+                <span class="badge" style="background: #fef3c7; color: #b45309; font-weight: 700; font-size: 0.68rem; padding: 0.15rem 0.35rem;" title="Unremitted physical cash">
+                    Holding: {{ CURRENCY_SYMBOL }}{{ item.cash_in_hand|floatformat:2 }}
+                </span>
+                {% if user.profile and user.profile.is_accountant or user.profile and user.profile.is_school_admin or user.is_superuser %}
+                <button type="button" 
+                        onclick="openHandoverModal('{{ item.user.id }}', '{{ item.user.get_full_name|default:item.user.username|escapejs }}', '{{ item.cash_in_hand }}')"
+                        class="btn-primary" 
+                        style="font-size: 0.7rem; padding: 0.15rem 0.45rem; background: #059669; border-color: #059669; cursor: pointer;" 
+                        title="Accept and verify cash handover from {{ item.user.get_full_name|default:item.user.username }}">
+                    💵 Settle
+                </button>
+                {% endif %}
+            {% elif item.cash_remitted > 0 %}
+                <span class="badge" style="background: #ecfdf5; color: #047857; font-weight: 600; font-size: 0.68rem; padding: 0.15rem 0.35rem;" title="Cash remitted and settled">
+                    ✓ Remitted
+                </span>
             {% endif %}
-            <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: 0.15rem;">→</span>
-        </a>
+        </div>
         {% endfor %}
     </div>
+
+    {% if remittances_today %}
+    <div style="margin-top: 1.15rem; padding-top: 0.95rem; border-top: 1px dashed var(--border);">
+        <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <span>📋 Today's Verified Handover Settlements ({{ remittances_today|length }})</span>
+            <span style="color: var(--primary); font-weight: 700;">Total Remitted: {{ CURRENCY_SYMBOL }}{{ total_remitted_today|floatformat:2 }}</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.45rem;">
+            {% for rem in remittances_today %}
+            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.45rem 0.85rem; font-size: 0.78rem; flex-wrap: wrap; gap: 0.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                    <span style="font-family: monospace; font-weight: 700; color: var(--primary);">{{ rem.reference_code }}</span>
+                    <span><strong>{{ rem.teacher.get_full_name|default:rem.teacher.username }}</strong> handed over <strong>+{{ CURRENCY_SYMBOL }}{{ rem.amount|floatformat:2 }}</strong></span>
+                    <span style="color: var(--text-muted);">received by {{ rem.received_by.get_full_name|default:rem.received_by.username }} at {{ rem.created_at|date:"h:i A" }}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <a href="{% url 'teacher_remittance_receipt' rem.id %}" class="btn-secondary" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; text-decoration: none;">
+                        🖨️ View Slip
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -138,6 +233,12 @@
         <a href="{% url 'payment_list' %}?preset=week{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}" 
            class="btn-secondary filter-preset-btn {% if date_preset == 'week' %}active{% endif %}">
            Last 7 Days
+        </a>
+        <a href="{% url 'payment_export_csv' %}?{% if request.GET %}{{ request.GET.urlencode }}{% else %}preset={{ date_preset|default:'today' }}{% endif %}" 
+           class="btn-secondary filter-preset-btn" 
+           style="color: var(--primary); font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem;"
+           title="Export matching payments to CSV spreadsheet">
+           <span>📥</span> CSV Export
         </a>
     </div>
 
@@ -182,20 +283,31 @@
 </form>
 
 <!-- Payments Table (Desktop View) -->
+<style>
+    .payments-table {
+        table-layout: fixed;
+        width: 100%;
+    }
+    .payments-table th {
+        padding: 0.85rem 1.15rem;
+    }
+    .payments-table td {
+        padding: 1rem 1.15rem;
+        vertical-align: middle;
+    }
+</style>
 <div class="table-card desktop-only">
     <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table payments-table">
             <thead>
                 <tr>
-                    <th>Date</th>
-                    <th>Receipt #</th>
-                    <th>Student Name</th>
-                    <th>Class</th>
-                    <th>Fee Type</th>
-                    <th>Method</th>
-                    <th>Period</th>
-                    <th style="text-align: right;">Amount</th>
-                    <th>Received By</th>
+                    <th style="width: 12%;">Date</th>
+                    <th style="width: 23%;">Student Name</th>
+                    <th style="width: 10%;">Class</th>
+                    <th style="width: 20%;">Fee Type</th>
+                    <th style="width: 11%;">Method</th>
+                    <th style="width: 11%; text-align: right;">Amount</th>
+                    <th style="width: 13%;">Received By</th>
                     <th style="text-align: right;">Actions</th>
                 </tr>
             </thead>
@@ -204,13 +316,13 @@
                     <tr>
                         <td>
                             <span>{{ p.payment_date|date:"M d, Y" }}</span>
-                        </td>
-                        <td>
-                            <code style="font-size: 0.78rem; color: var(--text-muted);">{{ p.receipt_number|default:"—" }}</code>
+                            {% if p.receipt_number %}
+                            <div style="font-size: 0.72rem; color: var(--text-muted); font-family: monospace;">#{{ p.receipt_number }}</div>
+                            {% endif %}
                         </td>
                         <td>
                             <div class="student-cell">
-                                <div class="student-avatar" style="width: 24px; height: 24px; font-size: 0.7rem;">{{ p.student.initials }}</div>
+                                <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.75rem;">{{ p.student.initials }}</div>
                                 <span style="font-weight: 600;">{{ p.student.full_name }}</span>
                             </div>
                         </td>
@@ -239,9 +351,6 @@
                                 {{ p.get_payment_method_display }}
                             </span>
                         </td>
-                        <td>
-                            <span style="font-size: 0.8rem; color: var(--text-muted);">{{ p.period }}</span>
-                        </td>
                         <td style="text-align: right;">
                             <span style="font-weight: 600; color: var(--success-text);">
                                 +{{ CURRENCY_SYMBOL }}{{ p.amount|floatformat:2 }}
@@ -249,14 +358,9 @@
                         </td>
                         <td>
                             {% if p.recorded_by %}
-                                <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-main);">
+                                <div style="font-size: 0.82rem; font-weight: 500; color: var(--text-main);">
                                     {{ p.recorded_by.get_full_name|default:p.recorded_by.username }}
                                 </div>
-                                {% if p.recorded_by.profile and p.recorded_by.profile.role == 'TEACHER' %}
-                                    <span class="badge" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; background: hsla(var(--primary-hsl), 0.1); color: var(--primary);">Teacher</span>
-                                {% elif p.recorded_by.profile and p.recorded_by.profile.is_school_admin %}
-                                    <span class="badge" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; background: hsla(var(--success-hsl), 0.1); color: var(--success);">Admin</span>
-                                {% endif %}
                             {% else %}
                                 <span style="font-size: 0.78rem; color: var(--text-muted);">—</span>
                             {% endif %}
@@ -274,7 +378,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="10" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                        <td colspan="8" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
                             <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">No payment records found</div>
                             <p style="margin-top: 0.25rem; font-size: 0.8rem;">No fee collection records found for this period.</p>
                         </td>
@@ -298,7 +402,7 @@
                             <div class="student-name" style="font-size: 0.92rem;">{{ p.student.full_name }}</div>
                             <div class="student-sub">
                                 <span class="class-badge" style="font-size: 0.68rem; padding: 0.08rem 0.35rem;">{{ p.student.student_class }}</span>
-                                <span style="color: var(--text-muted); font-size: 0.72rem; margin-left: 0.25rem;">{{ p.payment_date|date:"M d, Y" }}</span>
+                                <span style="color: var(--text-muted); font-size: 0.72rem; margin-left: 0.25rem;">{{ p.payment_date|date:"M d, Y" }}{% if p.receipt_number %} &bull; #{{ p.receipt_number }}{% endif %}</span>
                             </div>
                         </div>
                     </div>
@@ -327,7 +431,7 @@
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                     <span>{{ p.get_payment_method_display }}</span>
                     <span>&bull;</span>
-                    <span>By: <strong style="color: var(--text-main);">{{ p.recorded_by.get_full_name|default:p.recorded_by.username|default:"Staff" }}</strong></span>
+                    <span>By: <strong style="color: var(--text-main);">{% if p.recorded_by %}{{ p.recorded_by.get_full_name|default:p.recorded_by.username }}{% else %}Staff{% endif %}</strong></span>
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -469,4 +573,145 @@
     }
 }
 </style>
+
+<!-- One-Sided Cash Handover Modal -->
+<div id="handoverModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+    <div style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); max-width: 480px; width: 100%; box-shadow: var(--shadow-lg); overflow: hidden;">
+        <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.25rem;">💵</span>
+                <h3 style="font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-main);">Accept Teacher Cash Handover</h3>
+            </div>
+            <button type="button" onclick="closeHandoverModal()" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+        </div>
+
+        <form method="POST" action="{% url 'teacher_remittance_create' %}" style="padding: 1.25rem 1.5rem;">
+            {% csrf_token %}
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">Select Teacher</label>
+                <select id="handoverTeacherSelect" name="teacher_id" onchange="onHandoverTeacherChange(this)" required class="filter-select" style="width: 100%; padding: 0.55rem; font-size: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                    <option value="">-- Choose Staff Member --</option>
+                    {% for item in authorized_collectors_summary %}
+                    <option value="{{ item.user.id }}" data-cash="{{ item.cash_in_hand }}">
+                        {{ item.user.get_full_name|default:item.user.username }} (Unremitted Cash: {{ CURRENCY_SYMBOL }}{{ item.cash_in_hand|floatformat:2 }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
+                    <span style="color: var(--text-muted);">Teacher:</span>
+                    <strong id="handoverTeacherDisplay" style="color: var(--text-main);">-</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; margin-top: 0.35rem;">
+                    <span style="color: var(--text-muted);">Recorded Unremitted Cash:</span>
+                    <strong style="color: #b45309;">{{ CURRENCY_SYMBOL }}<span id="handoverUnremittedDisplay">0.00</span></strong>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">
+                    Physical Cash Counted & Handed Over ({{ CURRENCY_SYMBOL }})
+                </label>
+                <input type="number" step="0.01" min="0.01" id="handoverAmountInput" name="amount" required placeholder="0.00" 
+                       style="width: 100%; padding: 0.65rem; font-size: 1.15rem; font-weight: 700; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-card); color: var(--text-main);">
+            </div>
+
+            <div style="margin-bottom: 1.25rem;">
+                <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">Remarks / Notes (Optional)</label>
+                <input type="text" name="notes" placeholder="e.g. Bus 1 morning intake, Class 1A lunch cash" 
+                       style="width: 100%; padding: 0.5rem; font-size: 0.82rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-card); color: var(--text-main);">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <button type="button" onclick="closeHandoverModal()" class="btn-secondary" style="font-size: 0.85rem; padding: 0.45rem 0.95rem;">
+                    Cancel
+                </button>
+                <button type="submit" class="btn-primary" style="font-size: 0.85rem; padding: 0.45rem 1.15rem; background: #059669; border-color: #059669;">
+                    ✓ Confirm Receipt & Issue Slip
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function refreshBursaryDrawerLive(auditDate) {
+    const targetDate = auditDate || '{{ target_audit_date|date:"Y-m-d" }}';
+    fetch(`/api/payments/audit-summary/?date=${encodeURIComponent(targetDate)}`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (!data.success) return;
+        const cur = '{{ CURRENCY_SYMBOL }}';
+        const dCash = document.getElementById('bursary-drawer-cash');
+        if (dCash) dCash.textContent = cur + data.drawer_cash_today.toFixed(2);
+        const fCash = document.getElementById('bursary-field-cash');
+        if (fCash) fCash.textContent = cur + data.teacher_cash_in_field.toFixed(2);
+        const mCash = document.getElementById('bursary-momo-cash');
+        if (mCash) mCash.textContent = cur + data.today_momo_total.toFixed(2);
+        const bCash = document.getElementById('bursary-bank-cash');
+        if (bCash) bCash.textContent = cur + data.today_bank_total.toFixed(2);
+
+        // Update modal options data-cash with freshest balances
+        if (data.collectors && data.collectors.length) {
+            const select = document.getElementById('handoverTeacherSelect');
+            if (select) {
+                data.collectors.forEach(c => {
+                    const opt = select.querySelector(`option[value="${c.id}"]`);
+                    if (opt) {
+                        opt.setAttribute('data-cash', c.cash_in_hand.toFixed(2));
+                        opt.textContent = `${c.name} (Unremitted Cash: ${cur}${c.cash_in_hand.toFixed(2)})`;
+                    }
+                });
+            }
+        }
+    })
+    .catch(err => console.debug('Live drawer balance update error:', err));
+}
+
+function openHandoverModal(teacherId, teacherName, cashInHand) {
+    const modal = document.getElementById('handoverModal');
+    const teacherSelect = document.getElementById('handoverTeacherSelect');
+    const teacherDisplay = document.getElementById('handoverTeacherDisplay');
+    const amountInput = document.getElementById('handoverAmountInput');
+    const unremittedDisplay = document.getElementById('handoverUnremittedDisplay');
+
+    if (teacherId) {
+        teacherSelect.value = teacherId;
+        teacherDisplay.textContent = teacherName;
+        unremittedDisplay.textContent = parseFloat(cashInHand || 0).toFixed(2);
+        amountInput.value = parseFloat(cashInHand || 0).toFixed(2);
+    } else {
+        teacherSelect.selectedIndex = 0;
+        teacherDisplay.textContent = 'Choose from dropdown';
+        unremittedDisplay.textContent = '0.00';
+        amountInput.value = '';
+    }
+    modal.style.display = 'flex';
+    // Refresh balances live asynchronously
+    refreshBursaryDrawerLive();
+}
+
+function closeHandoverModal() {
+    document.getElementById('handoverModal').style.display = 'none';
+}
+
+function onHandoverTeacherChange(selectElem) {
+    const selectedOption = selectElem.options[selectElem.selectedIndex];
+    if (selectedOption && selectedOption.value) {
+        const cash = selectedOption.getAttribute('data-cash') || '0.00';
+        const name = selectedOption.text.split('(')[0].trim();
+        document.getElementById('handoverTeacherDisplay').textContent = name;
+        document.getElementById('handoverUnremittedDisplay').textContent = parseFloat(cash).toFixed(2);
+        document.getElementById('handoverAmountInput').value = parseFloat(cash).toFixed(2);
+    } else {
+        document.getElementById('handoverTeacherDisplay').textContent = 'Choose from dropdown';
+        document.getElementById('handoverUnremittedDisplay').textContent = '0.00';
+        document.getElementById('handoverAmountInput').value = '';
+    }
+}
+</script>
 {% endblock %}

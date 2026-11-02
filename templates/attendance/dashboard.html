@@ -15,18 +15,15 @@
         {% endif %}
     </div>
     <div class="header-actions">
-        {% if user.profile and user.profile.can_register_students %}
-        <a href="{% url 'student_create' %}" class="btn-primary" style="display:inline-flex;align-items:center;gap:0.4rem;padding:0.45rem 0.85rem;font-size:0.82rem;font-weight:600;text-decoration:none;border-radius:var(--radius-md);">
-            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            Enroll Student
-        </a>
-        {% endif %}
         <form id="filter-form" method="GET" action="{% url 'dashboard' %}" class="date-selector-pill">
             <label for="date-picker" style="font-size:0.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Date</label>
             <input type="date" id="date-picker" name="date" value="{{ date_str }}">
         </form>
+        {% if user.profile and user.profile.can_view_my_collections %}
+        <a href="{% url 'my_collections' %}" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; font-weight: 600; padding: 0.45rem 0.75rem; text-decoration: none;">
+            <span>📅</span> My History & Collections
+        </a>
+        {% endif %}
     </div>
 </div>
 
@@ -182,31 +179,48 @@
     <div id="mobile-filter-group" class="filter-group {% if class_filter or bus_filter or fee_filter or clockin_filter %}show-mobile{% endif %}">
         {% if not is_attendance_only_teacher %}
         <!-- Class Filter -->
+        {% if is_class_teacher_scoped %}
+        <input type="hidden" name="class" value="{{ class_filter }}">
+        <div class="filter-select" style="display: inline-flex; align-items: center; gap: 0.35rem; background: var(--surface-subtle); color: var(--primary); font-weight: 600; cursor: default;">
+            🏫 {{ class_filter }}
+        </div>
+        {% else %}
         <select name="class" class="filter-select" onchange="this.form.submit()">
             <option value="">All Classes</option>
             {% for c in available_classes %}
                 <option value="{{ c }}" {% if class_filter == c %}selected{% endif %}>{{ c }}</option>
             {% endfor %}
         </select>
+        {% endif %}
 
         <!-- Dynamic Bus Filter -->
         <select name="bus" class="filter-select" onchange="this.form.submit()">
-            <option value="">All Buses</option>
+            {% if is_bus_teacher_scoped %}
+                <option value="">🚌 My Assigned Routes</option>
+            {% else %}
+                <option value="">All Buses</option>
+            {% endif %}
+            {% if teacher_assigned_buses and teacher_assigned_buses|length > 1 %}
+                <option value="my_buses" {% if bus_filter == 'my_buses' %}selected{% endif %}>
+                    🚌 All My Buses ({{ teacher_assigned_buses|length }})
+                </option>
+            {% endif %}
             {% for b in buses %}
                 <option value="{{ b.id }}" {% if bus_filter == b.id|stringformat:"s" %}selected{% endif %}>
                     {{ b.name }} ({{ currency }}{{ b.fee }})
                 </option>
             {% endfor %}
+            {% if not is_bus_teacher_scoped %}
             <option value="none" {% if bus_filter == 'none' %}selected{% endif %}>Walkers / No Bus</option>
+            {% endif %}
         </select>
 
         <!-- Fee Status Filter -->
         <select name="fee_status" class="filter-select" onchange="this.form.submit()">
             <option value="">All Fees</option>
-            <option value="unpaid_bus" {% if fee_filter == 'unpaid_bus' %}selected{% endif %}>Unpaid Bus Fee</option>
-            <option value="unpaid_canteen" {% if fee_filter == 'unpaid_canteen' %}selected{% endif %}>Unpaid Canteen Fee</option>
-            <option value="any_unpaid" {% if fee_filter == 'any_unpaid' %}selected{% endif %}>Any Unpaid Fee</option>
-            <option value="fully_paid" {% if fee_filter == 'fully_paid' %}selected{% endif %}>Fully Paid</option>
+            <option value="unpaid_bus" {% if fee_filter == 'unpaid_bus' %}selected{% endif %}>Owing Bus Fare</option>
+            <option value="unpaid_canteen" {% if fee_filter == 'unpaid_canteen' %}selected{% endif %}>Owing Lunch Fee</option>
+            <option value="fully_paid" {% if fee_filter == 'fully_paid' %}selected{% endif %}>Fully Settled</option>
         </select>
         {% endif %}
 

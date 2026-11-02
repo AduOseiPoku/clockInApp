@@ -5,6 +5,7 @@ urlpatterns = [
     # Authentication
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),
+    path('password/change/', views.change_password_view, name='change_password'),
 
     # Dashboard & Teacher Clock-In
     path('', views.dashboard_view, name='dashboard'),
@@ -41,9 +42,14 @@ urlpatterns = [
     # Payments Ledger & Printable Receipts
     path('payments/', views.payment_list_view, name='payment_list'),
     path('payments/collector/<int:pk>/', views.collector_audit_view, name='collector_audit'),
+    path('my-collections/', views.my_collections_view, name='my_collections'),
     path('payments/record/', views.payment_create_view, name='payment_create'),
     path('payments/<int:pk>/receipt/', views.payment_receipt_view, name='payment_receipt'),
     path('payments/<int:pk>/delete/', views.payment_delete_view, name='payment_delete'),
+    path('payments/remittance/create/', views.teacher_remittance_create_view, name='teacher_remittance_create'),
+    path('payments/remittance/<int:pk>/receipt/', views.teacher_remittance_receipt_view, name='teacher_remittance_receipt'),
+    path('payments/export/csv/', views.payment_export_csv, name='payment_export_csv'),
+    path('api/payments/audit-summary/', views.payment_audit_summary_api, name='api_payment_audit_summary'),
 
     # Reports & Reconciliation & CSV Exports
     path('reports/', views.reports_view, name='reports'),

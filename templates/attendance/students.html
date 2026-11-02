@@ -16,8 +16,6 @@
         <a href="{% url 'student_import' %}" class="btn-secondary">
             Bulk CSV Import
         </a>
-        {% endif %}
-        {% if can_register %}
         <a href="{% url 'student_create' %}" class="btn-primary">
             + Enroll Student
         </a>
@@ -26,11 +24,7 @@
 </div>
 <!-- Onboarding Mode Banner & Quick Toggle -->
 {% if user.profile.is_principal %}
-    {% if onboarding_mode_active %}
-    <div class="stat-card" style="margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--surface-card); border-left: 4px solid var(--success); padding: 0.85rem 1.25rem;">
-    {% else %}
-    <div class="stat-card" style="margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--surface-card); border-left: 4px solid var(--border); padding: 0.85rem 1.25rem;">
-    {% endif %}
+    <div class="stat-card" style="margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--surface-card); border-left: 4px solid {% if onboarding_mode_active %}var(--success){% else %}var(--border){% endif %}; padding: 0.85rem 1.25rem;">
     <div style="display: flex; align-items: center; gap: 0.75rem;">
         <span style="font-size: 1.35rem;">{% if onboarding_mode_active %}🚀{% else %}🔒{% endif %}</span>
         <div>
@@ -45,6 +39,11 @@
             <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">
                 {% if onboarding_mode_active %}
                 All teachers currently have access to the enrollment form to onboard students into classes.
+                {% if today_onboarded_count > 0 %}
+                <span style="display: block; margin-top: 0.2rem; color: var(--success); font-weight: 600;">
+                    ✓ {{ today_onboarded_count }} student{{ today_onboarded_count|pluralize }} enrolled today.
+                </span>
+                {% endif %}
                 {% else %}
                 Turn on to grant all teachers access to the student enrollment form during intake.
                 {% endif %}
@@ -70,6 +69,11 @@
         </div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;">
             You are authorized to register and enroll new students onto the system. Click <strong>"+ Enroll Student"</strong> to begin.
+            {% if my_onboarded_today_count > 0 %}
+            <span style="display: block; margin-top: 0.25rem; color: var(--primary); font-weight: 600;">
+                ✓ You have enrolled {{ my_onboarded_today_count }} student{{ my_onboarded_today_count|pluralize }} today.
+            </span>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -93,24 +97,54 @@
     </button>
 
     <div id="mobile-student-filters" class="filter-group {% if class_filter or bus_filter %}show-mobile{% endif %}">
-        <select name="class" class="filter-select" onchange="this.form.submit()">
-            <option value="">All Classes</option>
-            {% for c in classes %}
-                <option value="{{ c }}" {% if class_filter == c %}selected{% endif %}>{{ c }}</option>
-            {% endfor %}
-        </select>
+        {% if is_class_teacher_scoped %}
+            <div class="filter-pill-locked" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.48rem 0.85rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); font-weight: 600; font-size: 0.84rem; color: var(--primary);">
+                <span>🏫</span>
+                <span>Class: {{ user.profile.assigned_class }}</span>
+            </div>
+            <input type="hidden" name="class" value="{{ user.profile.assigned_class }}">
+        {% else %}
+            <select name="class" class="filter-select" onchange="this.form.submit()">
+                <option value="">All Classes</option>
+                {% for c in classes %}
+                    <option value="{{ c }}" {% if class_filter == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
+        {% endif %}
 
-        <select name="bus" class="filter-select" onchange="this.form.submit()">
-            <option value="">All Buses</option>
-            {% for b in buses %}
-                <option value="{{ b.id }}" {% if bus_filter == b.id|stringformat:"s" %}selected{% endif %}>
-                    {{ b.name }} ({{ CURRENCY_SYMBOL }}{{ b.fee }})
-                </option>
-            {% endfor %}
-            <option value="none" {% if bus_filter == 'none' %}selected{% endif %}>Walkers / No Bus</option>
-        </select>
+        {% if is_class_teacher_scoped %}
+            {# Class teachers do not need or see any bus filters #}
+        {% elif is_bus_teacher_scoped and teacher_assigned_buses|length == 1 %}
+            <div class="filter-pill-locked" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.48rem 0.85rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); font-weight: 600; font-size: 0.84rem; color: var(--primary);">
+                <span>🚌</span>
+                <span>{{ teacher_assigned_buses.0.name }}</span>
+            </div>
+            <input type="hidden" name="bus" value="{{ teacher_assigned_buses.0.id }}">
+        {% elif is_bus_teacher_scoped %}
+            <select name="bus" class="filter-select" onchange="this.form.submit()">
+                <option value="my_buses">🚌 All My Buses ({{ teacher_assigned_buses|length }})</option>
+                {% for b in teacher_assigned_buses %}
+                    <option value="{{ b.id }}" {% if bus_filter == b.id|stringformat:"s" %}selected{% endif %}>
+                        {{ b.name }} ({{ CURRENCY_SYMBOL }}{{ b.fee }})
+                    </option>
+                {% endfor %}
+            </select>
+        {% else %}
+            {# Admins, Principals, Accountants #}
+            <select name="bus" class="filter-select" onchange="this.form.submit()">
+                <option value="">All Buses</option>
+                {% for b in buses %}
+                    <option value="{{ b.id }}" {% if bus_filter == b.id|stringformat:"s" %}selected{% endif %}>
+                        {{ b.name }} ({{ CURRENCY_SYMBOL }}{{ b.fee }})
+                    </option>
+                {% endfor %}
+                <option value="none" {% if bus_filter == 'none' %}selected{% endif %}>Walkers / No Bus</option>
+            </select>
+        {% endif %}
 
-        {% if search or class_filter or bus_filter %}
+        {% if search or bus_filter %}
+            <a href="{% url 'student_list' %}" class="btn-reset">Clear</a>
+        {% elif not is_class_teacher_scoped and class_filter %}
             <a href="{% url 'student_list' %}" class="btn-reset">Clear</a>
         {% endif %}
     </div>
@@ -127,7 +161,6 @@
                     {% if not is_attendance_only_teacher %}
                     <th>Bus Route</th>
                     <th>Route Fee</th>
-                    <th>Canteen</th>
                     <th style="text-align: right;">Actions</th>
                     {% else %}
                     <th>Arrival Status</th>
@@ -143,6 +176,9 @@
                                 <div class="student-avatar">{{ student.initials }}</div>
                                 <div>
                                     <div class="student-name">{{ student.full_name }}</div>
+                                    {% if student.registered_by %}
+                                        <div style="font-size: 0.68rem; color: var(--text-muted);">Enrolled by {{ student.registered_by.get_full_name|default:student.registered_by.username }}</div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </td>
@@ -165,24 +201,7 @@
                                 <span class="text-muted">—</span>
                             {% endif %}
                         </td>
-                        <td>
-                            {% if user.profile.is_principal %}
-                                <button type="button" 
-                                        class="lunch-toggle-pill {% if student.canteen_enrolled %}lunch-included{% else %}lunch-opted-out{% endif %}"
-                                        data-student-id="{{ student.id }}"
-                                        onclick="toggleStudentLunch(this)"
-                                        title="{% if student.canteen_enrolled %}Click to remove from lunch program{% else %}Click to include in lunch program{% endif %}">
-                                    <span class="status-indicator"></span>
-                                    <span class="lunch-text">{% if student.canteen_enrolled %}🍽️ Lunch Included{% else %}❌ No Lunch (Opted Out){% endif %}</span>
-                                </button>
-                            {% else %}
-                                {% if student.canteen_enrolled %}
-                                    <span class="fee-badge fee-badge-paid">🍽️ Lunch Included</span>
-                                {% else %}
-                                    <span class="fee-badge fee-badge-none">❌ No Lunch</span>
-                                {% endif %}
-                            {% endif %}
-                        </td>
+
                         <td style="text-align: right; white-space: nowrap;">
                             {% if user.profile and user.profile.can_record_payments %}
                             <a href="{% url 'payment_create' %}?student_id={{ student.id }}" class="btn-table-action">
@@ -256,6 +275,9 @@
                     <div>
                         <div class="student-name">{{ student.full_name }}</div>
                         <span class="class-badge" style="font-size:0.7rem; padding:0.1rem 0.35rem;">{{ student.student_class }}</span>
+                        {% if student.registered_by %}
+                            <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem;">Enrolled by {{ student.registered_by.get_full_name|default:student.registered_by.username }}</div>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -285,26 +307,6 @@
                         <strong>{{ student.bus.name }} ({{ CURRENCY_SYMBOL }}{{ student.bus.fee|floatformat:2 }})</strong>
                     {% else %}
                         <span class="text-muted">Walker</span>
-                    {% endif %}
-                </div>
-                <div>
-                    <span style="font-weight:600; color:var(--text-muted);">Lunch:</span>
-                    {% if user.profile.is_principal %}
-                        <button type="button" 
-                                class="lunch-toggle-pill {% if student.canteen_enrolled %}lunch-included{% else %}lunch-opted-out{% endif %}"
-                                data-student-id="{{ student.id }}"
-                                onclick="toggleStudentLunch(this)"
-                                style="margin-left: 0.35rem; font-size: 0.72rem; padding: 0.2rem 0.55rem;"
-                                title="{% if student.canteen_enrolled %}Click to remove from lunch program{% else %}Click to include in lunch program{% endif %}">
-                            <span class="status-indicator"></span>
-                            <span class="lunch-text">{% if student.canteen_enrolled %}🍽️ Lunch Included{% else %}❌ No Lunch{% endif %}</span>
-                        </button>
-                    {% else %}
-                        {% if student.canteen_enrolled %}
-                            <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">🍽️ Lunch Included</span>
-                        {% else %}
-                            <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">❌ No Lunch</span>
-                        {% endif %}
                     {% endif %}
                 </div>
             </div>
@@ -368,133 +370,4 @@
 </div>
 {% endif %}
 
-<!-- Hidden CSRF token for AJAX -->
-<form style="display:none;">{% csrf_token %}</form>
-
-<!-- Toast Notice Container -->
-<div id="toast-lunch-notice" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; background: var(--text-main); color: #fff; padding: 0.75rem 1.25rem; border-radius: var(--radius-md); box-shadow: 0 4px 16px rgba(0,0,0,0.25); display: none; font-size: 0.85rem; font-weight: 600; align-items: center; gap: 0.5rem; animation: slideUp 0.25s ease;">
-</div>
-
-<style>
-.lunch-toggle-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.25rem 0.65rem;
-    font-size: 0.78rem;
-    font-weight: 600;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    user-select: none;
-    line-height: 1.3;
-}
-.lunch-toggle-pill.lunch-included {
-    background: hsla(var(--success-hsl), 0.12);
-    color: var(--success-text);
-    border-color: hsla(var(--success-hsl), 0.3);
-}
-.lunch-toggle-pill.lunch-included:hover {
-    background: hsla(var(--danger-hsl), 0.12);
-    color: var(--danger-text);
-    border-color: hsla(var(--danger-hsl), 0.35);
-}
-.lunch-toggle-pill.lunch-opted-out {
-    background: var(--surface-subtle);
-    color: var(--text-muted);
-    border-color: var(--border);
-}
-.lunch-toggle-pill.lunch-opted-out:hover {
-    background: hsla(var(--success-hsl), 0.12);
-    color: var(--success-text);
-    border-color: hsla(var(--success-hsl), 0.35);
-}
-.lunch-toggle-pill .status-indicator {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-}
-.lunch-toggle-pill.lunch-included .status-indicator {
-    background: var(--success);
-}
-.lunch-toggle-pill.lunch-opted-out .status-indicator {
-    background: var(--text-muted);
-}
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-</style>
-
-<script>
-function toggleStudentLunch(target, btnElement) {
-    let studentId = target;
-    if (target instanceof HTMLElement) {
-        btnElement = target;
-        studentId = btnElement.dataset.studentId;
-    }
-    if (!studentId || !btnElement) return;
-
-    btnElement.disabled = true;
-    btnElement.style.opacity = '0.6';
-
-    const csrfInput = document.querySelector('[name=csrfmiddlewaretoken]');
-    const csrfToken = csrfInput ? csrfInput.value : '';
-
-    fetch(`/students/${studentId}/toggle-lunch/`, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': csrfToken,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-        btnElement.disabled = false;
-        btnElement.style.opacity = '1';
-
-        if (data.success) {
-            const allButtons = document.querySelectorAll('button[data-student-id="' + studentId + '"]');
-            allButtons.forEach(function(btn) {
-                const textSpan = btn.querySelector('.lunch-text');
-                if (data.canteen_enrolled) {
-                    btn.className = 'lunch-toggle-pill lunch-included';
-                    if (textSpan) textSpan.textContent = '🍽️ Lunch Included';
-                    btn.title = 'Click to remove from lunch program';
-                } else {
-                    btn.className = 'lunch-toggle-pill lunch-opted-out';
-                    if (textSpan) textSpan.textContent = '❌ No Lunch (Opted Out)';
-                    btn.title = 'Click to include in lunch program';
-                }
-            });
-
-            // Show toast message
-            showLunchToast(data.message);
-        } else {
-            alert(data.error || 'Failed to update lunch status.');
-        }
-    })
-    .catch(function(err) {
-        btnElement.disabled = false;
-        btnElement.style.opacity = '1';
-        console.error('Error toggling lunch:', err);
-        alert('An error occurred while updating lunch status.');
-    });
-}
-
-function showLunchToast(msg) {
-    const toast = document.getElementById('toast-lunch-notice');
-    if (!toast) return;
-    toast.textContent = msg;
-    toast.style.display = 'flex';
-    clearTimeout(window.lunchToastTimer);
-    window.lunchToastTimer = setTimeout(function() {
-        toast.style.display = 'none';
-    }, 3200);
-}
-</script>
 {% endblock %}
-

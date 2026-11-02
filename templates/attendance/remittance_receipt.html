@@ -1,0 +1,243 @@
+{% extends 'base.html' %}
+
+{% block title %}Handover Slip #{{ remittance.reference_code }} | {{ school_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+@media print {
+    .navbar, .app-sidebar, .app-topbar, .site-footer, .header-actions, .no-print {
+        display: none !important;
+    }
+    body {
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .slip-container {
+        border: 1px solid #cbd5e1 !important;
+        margin: 0 auto !important;
+        max-width: 100% !important;
+        box-shadow: none !important;
+    }
+}
+
+.slip-container {
+    max-width: 620px;
+    margin: 2rem auto;
+    background: var(--surface-card);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.slip-header {
+    background: var(--surface-card);
+    border-bottom: 2px dashed var(--border);
+    padding: 1.5rem 2rem;
+    text-align: center;
+    position: relative;
+}
+
+.slip-brand {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--text-main);
+    letter-spacing: -0.01em;
+}
+
+.slip-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+}
+
+.slip-ref-badge {
+    display: inline-block;
+    margin-top: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.slip-body {
+    padding: 1.75rem 2rem;
+}
+
+.slip-details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.slip-field-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2rem;
+}
+
+.slip-field-value {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.slip-amount-card {
+    background: hsla(var(--primary-hsl), 0.05);
+    border: 1px solid hsla(var(--primary-hsl), 0.2);
+    border-radius: var(--radius-sm);
+    padding: 1.25rem;
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.slip-amount-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.slip-amount-val {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--primary);
+    margin: 0.35rem 0;
+}
+
+.slip-variance-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.slip-signatures {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-top: 2.5rem;
+    padding-top: 1rem;
+}
+
+.slip-sig-line {
+    border-top: 1px dashed var(--border);
+    margin-top: 2.5rem;
+    padding-top: 0.4rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="no-print" style="max-width: 620px; margin: 1rem auto 0; display: flex; justify-content: space-between; align-items: center;">
+    <a href="{% url 'payment_list' %}" class="btn-secondary" style="font-size: 0.82rem;">
+        ← Back to Payments
+    </a>
+    <div style="display: flex; gap: 0.5rem;">
+        <button type="button" onclick="window.print()" class="btn-primary" style="font-size: 0.82rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            <span>🖨️</span> Print Settlement Slip
+        </button>
+    </div>
+</div>
+
+<div class="slip-container">
+    <div class="slip-header">
+        <div class="slip-brand">{{ school_name }}</div>
+        <div class="slip-subtitle">Daily Cash Handover Settlement Slip</div>
+        <div class="slip-ref-badge">{{ remittance.reference_code }}</div>
+    </div>
+
+    <div class="slip-body">
+        <div class="slip-details-grid">
+            <div>
+                <div class="slip-field-label">Remitting Staff Member</div>
+                <div class="slip-field-value">{{ remittance.teacher.get_full_name|default:remittance.teacher.username }}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem;">
+                    {% if remittance.teacher.profile.assigned_class %}Class: {{ remittance.teacher.profile.assigned_class }}{% endif %}
+                    {% if remittance.teacher.profile.primary_bus %}• Bus: {{ remittance.teacher.profile.primary_bus.name }}{% endif %}
+                </div>
+            </div>
+
+            <div>
+                <div class="slip-field-label">Receiving Officer</div>
+                <div class="slip-field-value">{{ remittance.received_by.get_full_name|default:remittance.received_by.username }}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem;">
+                    {{ remittance.received_by.profile.get_role_display|default:"Bursar / Accounts" }}
+                </div>
+            </div>
+
+            <div>
+                <div class="slip-field-label">Settlement Date</div>
+                <div class="slip-field-value">{{ remittance.date|date:"F d, Y" }}</div>
+            </div>
+
+            <div>
+                <div class="slip-field-label">Timestamp Recorded</div>
+                <div class="slip-field-value">{{ remittance.created_at|date:"h:i A" }}</div>
+            </div>
+        </div>
+
+        <div class="slip-amount-card">
+            <div class="slip-amount-label">Physical Cash Handed Over & Verified</div>
+            <div class="slip-amount-val">+{{ currency }}{{ remittance.amount|floatformat:2 }}</div>
+            
+            <div style="display: flex; justify-content: center; gap: 1rem; align-items: center; margin-top: 0.5rem; font-size: 0.8rem;">
+                <span style="color: var(--text-muted);">Recorded Unremitted Cash: <strong>{{ currency }}{{ remittance.expected_amount|floatformat:2 }}</strong></span>
+                
+                {% if remittance.variance == 0 %}
+                    <span class="slip-variance-badge" style="background: hsla(var(--success-hsl), 0.12); color: var(--success-text);">
+                        ✓ Exact Match
+                    </span>
+                {% elif remittance.variance > 0 %}
+                    <span class="slip-variance-badge" style="background: hsla(var(--primary-hsl), 0.12); color: var(--primary);">
+                        +{{ currency }}{{ remittance.variance|floatformat:2 }} Overage
+                    </span>
+                {% else %}
+                    <span class="slip-variance-badge" style="background: hsla(var(--danger-hsl), 0.12); color: var(--danger-text);">
+                        {{ currency }}{{ remittance.variance|floatformat:2 }} Shortage
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if remittance.notes %}
+        <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 1rem; margin-bottom: 1.5rem;">
+            <div class="slip-field-label">Remarks / Notes</div>
+            <div style="font-size: 0.82rem; color: var(--text-main); margin-top: 0.15rem;">{{ remittance.notes }}</div>
+        </div>
+        {% endif %}
+
+        <div class="slip-signatures">
+            <div>
+                <div class="slip-sig-line">
+                    Remitted By (Teacher Signature)
+                </div>
+            </div>
+            <div>
+                <div class="slip-sig-line">
+                    Received & Verified By (Bursar)
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

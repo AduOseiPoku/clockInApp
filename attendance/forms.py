@@ -3,7 +3,11 @@ from django import forms
 from django.utils import timezone
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from .models import Bus, Student, FeePayment, ClockInRecord, SchoolClass, UserProfile
+from django.contrib.auth.forms import PasswordChangeForm
+from .models import (
+    Bus, Student, FeePayment, ClockInRecord, SchoolClass, UserProfile,
+    get_active_academic_period, get_active_currency_symbol
+)
 
 class BusForm(forms.ModelForm):
     class Meta:
@@ -34,14 +38,13 @@ class SchoolClassForm(forms.ModelForm):
 class StudentForm(forms.ModelForm):
     class Meta:
         model = Student
-        fields = ['first_name', 'last_name', 'student_class', 'bus', 'canteen_enrolled', 'custom_canteen_fee', 'is_active']
+        fields = ['first_name', 'last_name', 'student_class', 'bus', 'canteen_enrolled', 'is_active']
         widgets = {
-            'first_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name'}),
+            'first_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name', 'autofocus': 'autofocus'}),
             'last_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Last Name'}),
             'student_class': forms.Select(attrs={'class': 'form-select'}),
             'bus': forms.Select(attrs={'class': 'form-select'}),
             'canteen_enrolled': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
-            'custom_canteen_fee': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.50', 'placeholder': 'Leave blank for standard fee'}),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
         }
 
@@ -62,11 +65,52 @@ class StudentForm(forms.ModelForm):
 
         self.fields['student_class'].widget.choices = class_choices
 
+        # Restrict lunch enrollment toggle strictly to Principals / School Administrators
+        is_teacher = bool(user_obj and hasattr(user_obj, 'profile') and not user_obj.profile.is_school_admin)
+        if is_teacher and 'canteen_enrolled' in self.fields:
+            del self.fields['canteen_enrolled']
+
         if 'instance' not in kwargs or not kwargs['instance'] or kwargs['instance'].pk is None:
-            self.fields['canteen_enrolled'].initial = True
-            if user_obj and hasattr(user_obj, 'profile') and user_obj.profile.assigned_class:
-                if not self.initial.get('student_class'):
-                    self.initial['student_class'] = user_obj.profile.assigned_class
+            if 'canteen_enrolled' in self.fields:
+                self.fields['canteen_enrolled'].initial = True
+            if user_obj and hasattr(user_obj, 'profile'):
+                profile = user_obj.profile
+                if profile.assigned_class and not self.initial.get('student_class'):
+                    self.initial['student_class'] = profile.assigned_class
+                if profile.assigned_bus and not self.initial.get('bus'):
+                    self.initial['bus'] = profile.assigned_bus.id
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        # For non-admin intake where field was stripped, default new students to lunch enrolled
+        if 'canteen_enrolled' not in self.fields and not instance.pk:
+            instance.canteen_enrolled = True
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+    def clean(self):
+        cleaned_data = super().clean()
+        first_name = (cleaned_data.get('first_name') or '').strip()
+        last_name = (cleaned_data.get('last_name') or '').strip()
+        student_class = cleaned_data.get('student_class') or ''
+
+        # Duplicate detection check
+        if first_name and last_name and student_class:
+            existing = Student.objects.filter(
+                first_name__iexact=first_name,
+                last_name__iexact=last_name,
+                student_class__iexact=student_class
+            )
+            if self.instance and self.instance.pk:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise forms.ValidationError(
+                    f"A student named '{first_name} {last_name}' is already enrolled in {student_class}. "
+                    "If this is a different child with the same name, please add a middle initial or suffix."
+                )
+        return cleaned_data
 
 
 class FeePaymentForm(forms.Form):
@@ -127,7 +171,7 @@ class FeePaymentForm(forms.Form):
         if not self.initial.get('payment_date'):
             self.initial['payment_date'] = timezone.localdate()
         if not self.initial.get('period'):
-            self.initial['period'] = getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026')
+            self.initial['period'] = get_active_academic_period()
         if not self.initial.get('payment_method'):
             self.initial['payment_method'] = 'CASH'
 
@@ -154,7 +198,7 @@ class FeePaymentForm(forms.Form):
         if not cleaned_data.get('payment_date'):
             cleaned_data['payment_date'] = timezone.localdate()
         if not cleaned_data.get('period'):
-            cleaned_data['period'] = getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026')
+            cleaned_data['period'] = get_active_academic_period()
         if not cleaned_data.get('payment_method'):
             cleaned_data['payment_method'] = 'CASH'
         if not cleaned_data.get('notes'):
@@ -210,6 +254,26 @@ class SchoolSettingsForm(forms.Form):
         }),
         help_text="Currency symbol displayed throughout the application."
     )
+    term_start_date = forms.DateField(
+        label="Term Start Date",
+        required=False,
+        widget=forms.DateInput(attrs={
+            'type': 'date',
+            'class': 'form-input',
+            'id': 'id_term_start_date'
+        }),
+        help_text="Calendar opening date of the active academic term."
+    )
+    term_end_date = forms.DateField(
+        label="Term End Date",
+        required=False,
+        widget=forms.DateInput(attrs={
+            'type': 'date',
+            'class': 'form-input',
+            'id': 'id_term_end_date'
+        }),
+        help_text="Calendar closing date of the active academic term."
+    )
     allow_teacher_student_registration = forms.BooleanField(
         label="Allow Teachers to Register Students (Onboarding Mode)",
         required=False,
@@ -219,6 +283,24 @@ class SchoolSettingsForm(forms.Form):
         }),
         help_text="When active, all teachers can access the student registration form to enroll students into their classes."
     )
+
+    def clean_currency_symbol(self):
+        symbol = self.cleaned_data.get('currency_symbol', '').strip()
+        # Normalize common mobile/text shorthands to standard Ghana Cedi symbol if entered
+        if symbol.upper() in ['GHS', 'GHC', 'CEDI', 'CEDIS']:
+            symbol = 'GH₵'
+        return symbol
+
+    def clean_current_period(self):
+        return self.cleaned_data.get('current_period', '').strip()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        start = cleaned_data.get('term_start_date')
+        end = cleaned_data.get('term_end_date')
+        if start and end and end < start:
+            self.add_error('term_end_date', "The term closing date cannot be earlier than the opening start date.")
+        return cleaned_data
 
 
 class TeacherCreationForm(forms.Form):
@@ -252,12 +334,12 @@ class TeacherCreationForm(forms.Form):
         widget=forms.Select(attrs={'class': 'form-select'}),
         help_text="Class this teacher is responsible for (clock-in roster will default to this class)"
     )
-    assigned_bus = forms.ModelChoiceField(
+    assigned_buses = forms.ModelMultipleChoiceField(
         queryset=Bus.objects.filter(is_active=True).order_by('name'),
         required=False,
-        empty_label="-- No Bus Assigned --",
-        widget=forms.Select(attrs={'class': 'form-select'}),
-        help_text="Designated bus route if this teacher is in charge of a bus (optional)"
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'bus-checkbox-input'}),
+        label="Assigned Bus Routes / Stops",
+        help_text="Select all bus routes/stops this teacher is responsible for (you can assign more than one bus to a teacher)."
     )
     password = forms.CharField(
         required=True,
@@ -328,7 +410,7 @@ class TeacherCreationForm(forms.Form):
         role = self.cleaned_data.get('role') or UserProfile.ROLE_TEACHER
         phone_number = self.cleaned_data.get('phone_number', '')
         assigned_class = self.cleaned_data.get('assigned_class', '')
-        assigned_bus = self.cleaned_data.get('assigned_bus')
+        assigned_buses = self.cleaned_data.get('assigned_buses')
         can_collect_fees = self.cleaned_data.get('can_collect_fees', False)
 
         is_admin_role = (role == UserProfile.ROLE_ADMIN)
@@ -346,8 +428,13 @@ class TeacherCreationForm(forms.Form):
         profile.role = role
         profile.phone_number = phone_number
         profile.assigned_class = assigned_class
-        profile.assigned_bus = assigned_bus
         profile.can_collect_fees = can_collect_fees
+        if assigned_buses:
+            profile.assigned_buses.set(assigned_buses)
+            profile.assigned_bus = assigned_buses.first()
+        else:
+            profile.assigned_buses.clear()
+            profile.assigned_bus = None
         profile.save()
         return user
 
@@ -388,12 +475,12 @@ class TeacherUpdateForm(forms.Form):
         widget=forms.Select(attrs={'class': 'form-select'}),
         help_text="Class this teacher is responsible for"
     )
-    assigned_bus = forms.ModelChoiceField(
+    assigned_buses = forms.ModelMultipleChoiceField(
         queryset=Bus.objects.filter(is_active=True).order_by('name'),
         required=False,
-        empty_label="-- No Bus Assigned --",
-        widget=forms.Select(attrs={'class': 'form-select'}),
-        help_text="Designated bus route if this teacher is in charge of a bus (optional)"
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'bus-checkbox-input'}),
+        label="Assigned Bus Routes / Stops",
+        help_text="Select all bus routes/stops this teacher is responsible for (you can assign more than one bus to a teacher)."
     )
     is_active = forms.BooleanField(
         required=False,
@@ -421,7 +508,7 @@ class TeacherUpdateForm(forms.Form):
         if user_obj and hasattr(user_obj, 'profile'):
             self.fields['role'].initial = user_obj.profile.role
             self.fields['can_collect_fees'].initial = user_obj.profile.can_collect_fees
-            self.fields['assigned_bus'].initial = user_obj.profile.assigned_bus
+            self.fields['assigned_buses'].initial = user_obj.profile.get_assigned_buses_list()
 
     def save(self):
         user = self.user_obj
@@ -442,8 +529,15 @@ class TeacherUpdateForm(forms.Form):
         profile.role = new_role
         profile.phone_number = self.cleaned_data.get('phone_number', '')
         profile.assigned_class = self.cleaned_data.get('assigned_class', '')
-        profile.assigned_bus = self.cleaned_data.get('assigned_bus')
         profile.can_collect_fees = self.cleaned_data.get('can_collect_fees', False)
+        
+        assigned_buses = self.cleaned_data.get('assigned_buses')
+        if assigned_buses:
+            profile.assigned_buses.set(assigned_buses)
+            profile.assigned_bus = assigned_buses.first()
+        else:
+            profile.assigned_buses.clear()
+            profile.assigned_bus = None
         profile.save()
         return user
 
@@ -476,4 +570,32 @@ class TeacherPasswordResetForm(forms.Form):
         user.set_password(self.cleaned_data['new_password'])
         user.save()
         return user
+
+
+class TeacherSelfPasswordChangeForm(PasswordChangeForm):
+    """
+    Form allowing an authenticated teacher or staff member to change their own password
+    by validating their existing password first.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.update({'class': 'form-input'})
+
+        self.fields['old_password'].widget.attrs.update({
+            'placeholder': 'Enter your current password',
+            'autocomplete': 'current-password',
+            'id': 'id_old_password'
+        })
+        self.fields['new_password1'].widget.attrs.update({
+            'placeholder': 'Enter new password',
+            'autocomplete': 'new-password',
+            'id': 'id_new_password1'
+        })
+        self.fields['new_password2'].widget.attrs.update({
+            'placeholder': 'Confirm new password',
+            'autocomplete': 'new-password',
+            'id': 'id_new_password2'
+        })
+
 

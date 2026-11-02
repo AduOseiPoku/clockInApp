@@ -3,6 +3,94 @@
 {% block title %}Teachers & Staff | {{ SCHOOL_NAME }}{% endblock %}
 
 {% block content %}
+<style>
+.teacher-clickable-row {
+    transition: background-color 0.15s ease;
+}
+.teacher-clickable-row:hover {
+    background-color: hsla(var(--primary-hsl), 0.04);
+}
+.teacher-name-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    cursor: pointer;
+    user-select: none;
+}
+.teacher-name-trigger:hover .teacher-name-title {
+    color: var(--primary);
+    text-decoration: underline;
+}
+.accordion-chevron-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--surface-card, #f1f5f9);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.teacher-clickable-row:hover .accordion-chevron-badge {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: hsla(var(--primary-hsl), 0.1);
+}
+.teacher-details-row td {
+    padding: 0 !important;
+    border-top: none !important;
+}
+.teacher-details-panel {
+    background: hsla(var(--primary-hsl), 0.025);
+    border-left: 3px solid var(--primary);
+    border-bottom: 2px solid var(--border);
+    padding: 1.25rem 1.5rem;
+    animation: teacherFadeIn 0.2s ease;
+}
+.details-section-box {
+    background: var(--surface-card, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.85rem 1rem;
+}
+.details-section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.bus-pill-tag {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    background: hsla(var(--primary-hsl), 0.06);
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid hsla(var(--primary-hsl), 0.18);
+    text-decoration: none;
+    color: var(--text-main);
+    transition: all 0.15s ease;
+}
+.bus-pill-tag:hover {
+    background: hsla(var(--primary-hsl), 0.12);
+    border-color: var(--primary);
+}
+@keyframes teacherFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+</style>
 <div class="page-header">
     <div class="page-title-group">
         {% if is_accountant_view %}
@@ -204,67 +292,56 @@
             <thead>
                 <tr>
                     <th>Teacher Name</th>
-                    <th>Username</th>
-                    <th>Role / Assignment</th>
+                    <th>Class</th>
                     {% if is_accountant_view %}
                     <th style="text-align: right;">Cash to Remit Today</th>
                     <th style="text-align: right;">Daily Target Breakdown</th>
                     <th style="text-align: right;">Pending Unpaid</th>
                     <th style="text-align: right;">Action</th>
                     {% else %}
-                    <th>Fee Access</th>
-                    <th>Contact</th>
                     <th>Status</th>
-                    <th>Last Active</th>
                     <th style="text-align: right;">Actions</th>
                     {% endif %}
                 </tr>
             </thead>
             <tbody>
                 {% for t in teachers %}
-                <tr>
+                <tr id="row-{{ t.id }}" class="teacher-clickable-row">
                     <td>
-                        <div style="display: flex; align-items: center; gap: 0.65rem;">
+                        <div class="teacher-name-trigger" onclick="toggleTeacherRow('{{ t.id }}')" title="Click to view full details and assigned buses">
+                            <span id="chevron-{{ t.id }}" class="accordion-chevron-badge">▶</span>
                             <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem; background: var(--primary-subtle); color: var(--primary); font-weight: 700;">
                                 {{ t.first_name|default:t.username|slice:":1" }}{{ t.last_name|slice:":1" }}
                             </div>
                             <div>
-                                <div style="font-weight: 600; color: var(--text-main);">
-                                    {{ t.get_full_name|default:t.username }}
+                                <div style="font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+                                    <span class="teacher-name-title">{{ t.get_full_name|default:t.username }}</span>
+                                    {% if t.profile and t.profile.role == 'ADMIN' %}
+                                        <span class="badge" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; background: hsla(280, 80%, 55%, 0.12); color: #7c3aed; border: 1px solid hsla(280, 80%, 55%, 0.25);">👑 Admin</span>
+                                    {% endif %}
+                                    {% if t.profile and t.profile.can_collect_fees %}
+                                        <span class="badge" style="font-size: 0.65rem; padding: 0.1rem 0.35rem; background: hsla(var(--primary-hsl), 0.1); color: var(--primary); border: 1px solid hsla(var(--primary-hsl), 0.2);">💰 Collector</span>
+                                    {% endif %}
                                 </div>
-                                {% if t.email %}
-                                <div style="font-size: 0.75rem; color: var(--text-muted);">
-                                    {{ t.email }}
+                                <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.35rem;">
+                                    <code>@{{ t.username }}</code>
+                                    {% if t.email %}&bull; <span>{{ t.email }}</span>{% endif %}
                                 </div>
-                                {% endif %}
                             </div>
                         </div>
                     </td>
                     <td>
-                        <code style="font-size: 0.8rem; color: var(--text-muted);">@{{ t.username }}</code>
-                    </td>
-                    <td>
-                        {% if t.profile and t.profile.role == 'ADMIN' %}
-                            <div>
-                                <span class="badge" style="font-weight: 700; background: hsla(280, 80%, 55%, 0.12); color: #7c3aed; border: 1px solid hsla(280, 80%, 55%, 0.25); margin-bottom: 0.35rem; display: inline-flex; align-items: center; gap: 0.25rem;">
-                                    👑 Administrator
-                                </span>
-                            </div>
-                        {% endif %}
-                        {% if t.profile and t.profile.is_bus_fee_teacher and t.profile.assigned_bus %}
-                            <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}" style="text-decoration: none;" title="Open Bus Roster for {{ t.profile.assigned_bus.name }}">
-                                <span class="badge" style="font-weight: 700; background: hsla(var(--primary-hsl), 0.15); color: var(--primary); cursor: pointer;">🚌 Fee Teacher ({{ t.profile.assigned_bus.name }}) &rarr;</span>
-                            </a>
-                            {% if t.profile.assigned_class %}
-                            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem;">Class: {{ t.profile.assigned_class }}</div>
-                            {% endif %}
-                        {% elif t.profile and t.profile.assigned_class %}
-                            <span class="class-badge" style="font-weight: 600;">Class: {{ t.profile.assigned_class }}</span>
+                        {% if t.profile and t.profile.assigned_class %}
+                            <span class="class-badge" style="font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 999px; background: hsla(var(--primary-hsl), 0.1); color: var(--primary); font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                🏫 {{ t.profile.assigned_class }}
+                            </span>
                         {% else %}
-                            <span style="color: var(--text-subtle); font-size: 0.8rem;">Floating</span>
+                            <span style="color: var(--text-subtle); font-size: 0.8rem; font-style: italic;">
+                                Floating / No Class
+                            </span>
                         {% endif %}
                         {% if is_accountant_view and t.student_count %}
-                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem;">{{ t.student_count }} student{{ t.student_count|pluralize }}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">{{ t.student_count }} student{{ t.student_count|pluralize }}</div>
                         {% endif %}
                     </td>
                     {% if is_accountant_view %}
@@ -317,34 +394,14 @@
                         {% endif %}
                     </td>
                     <td style="text-align: right; white-space: nowrap;">
-                        {% if t.profile and t.profile.is_bus_fee_teacher and t.profile.assigned_bus %}
-                        <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}" class="btn-table-action" style="color: var(--primary); margin-right: 0.65rem;" title="View Bus Roster for {{ t.profile.assigned_bus.name }}">
-                            🚌 Bus Roster
-                        </a>
-                        {% endif %}
+                        <button type="button" class="btn-table-action" onclick="toggleTeacherRow('{{ t.id }}')" id="btn-toggle-{{ t.id }}" style="cursor: pointer; font-weight: 600; color: var(--primary); margin-right: 0.35rem;" title="View teacher details & assigned buses">
+                            Details ▾
+                        </button>
                         <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-table-action" style="color: var(--primary);" title="Filter payments recorded by {{ t.get_full_name|default:t.username }}">
-                            View Receipts
+                            Receipts
                         </a>
                     </td>
                     {% else %}
-                    <td>
-                        {% if t.profile and t.profile.can_collect_fees %}
-                            <span class="badge" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); border: 1px solid hsla(var(--primary-hsl), 0.25); font-weight: 600;">
-                                💰 Fee Collector
-                            </span>
-                        {% else %}
-                            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">
-                                Attendance Only
-                            </span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if t.profile and t.profile.phone_number %}
-                            <span style="font-size: 0.82rem; color: var(--text-main);">{{ t.profile.phone_number }}</span>
-                        {% else %}
-                            <span style="color: var(--text-subtle); font-size: 0.8rem;">—</span>
-                        {% endif %}
-                    </td>
                     <td>
                         {% if t.is_active %}
                             <span class="badge badge-success" style="font-size: 0.72rem; padding: 0.2rem 0.55rem;">Active</span>
@@ -352,42 +409,198 @@
                             <span class="badge badge-danger" style="font-size: 0.72rem; padding: 0.2rem 0.55rem;">Inactive</span>
                         {% endif %}
                     </td>
-                    <td>
-                        <span style="font-size: 0.78rem; color: var(--text-muted);">
-                            {{ t.last_login|date:"M d, Y H:i"|default:"Never logged in" }}
-                        </span>
-                    </td>
                     <td style="text-align: right; white-space: nowrap;">
-                        {% if t.profile and t.profile.is_bus_fee_teacher and t.profile.assigned_bus %}
-                        <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}" class="btn-table-action" style="color: var(--primary); margin-right: 0.5rem;" title="View Bus Roster for {{ t.profile.assigned_bus.name }}">
-                            🚌 Bus Roster
-                        </a>
-                        {% endif %}
+                        <button type="button" class="btn-table-action" onclick="toggleTeacherRow('{{ t.id }}')" id="btn-toggle-{{ t.id }}" style="cursor: pointer; font-weight: 600; color: var(--primary); margin-right: 0.35rem;" title="View teacher details & assigned buses">
+                            Details ▾
+                        </button>
                         {% if user.profile.is_principal %}
                         <a href="{% url 'teacher_update' t.pk %}" class="btn-table-action" title="Edit details">
                             Edit
                         </a>
                         <a href="{% url 'teacher_password_reset' t.pk %}" class="btn-table-action" style="color: var(--primary);" title="Reset password">
-                            Reset Password
+                            Reset
                         </a>
-                        {% if t.is_active %}
-                        <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="color: var(--danger-text);" onclick="return confirm('Are you sure you want to deactivate {{ t.username }}?');">
-                            Deactivate
-                        </a>
-                        {% else %}
-                        <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="color: var(--success);" onclick="return confirm('Are you sure you want to activate {{ t.username }}?');">
-                            Activate
-                        </a>
-                        {% endif %}
-                        {% else %}
-                        <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Audit Only</span>
                         {% endif %}
                     </td>
                     {% endif %}
                 </tr>
+
+                <!-- Expandable Sub-Row (Accordion) -->
+                <tr id="details-row-{{ t.id }}" class="teacher-details-row" style="display: none;">
+                    <td colspan="{% if is_accountant_view %}6{% else %}4{% endif %}">
+                        <div class="teacher-details-panel">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">
+                                
+                                <!-- Box 1: Assigned Bus Routes -->
+                                <div class="details-section-box">
+                                    <div class="details-section-title">
+                                        <span>🚌</span> Assigned Bus Routes
+                                    </div>
+                                    {% if t.assigned_buses_list %}
+                                        <div style="display: flex; flex-direction: column; gap: 0.45rem;">
+                                            {% for b in t.assigned_buses_list %}
+                                            <div class="bus-pill-tag">
+                                                <div>
+                                                    <div style="font-weight: 600; font-size: 0.82rem; color: var(--primary);">
+                                                        🚌 {{ b.name }}
+                                                    </div>
+                                                    {% if b.route_description %}
+                                                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.1rem;">
+                                                        {{ b.route_description|truncatechars:40 }}
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div style="display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0;">
+                                                    <span class="badge" style="font-size: 0.7rem; background: var(--surface-card); color: var(--text-main); font-weight: 600;">
+                                                        {{ CURRENCY_SYMBOL }}{{ b.fee|floatformat:2 }}
+                                                    </span>
+                                                    <a href="{% url 'bus_analytics' b.id %}" class="btn-table-action" style="font-size: 0.72rem; padding: 0.15rem 0.45rem;" title="View Bus Roster for {{ b.name }}">
+                                                        Bus Roster &rarr;
+                                                    </a>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    {% elif t.profile and t.profile.assigned_bus %}
+                                        <div class="bus-pill-tag">
+                                            <div style="font-weight: 600; font-size: 0.82rem; color: var(--primary);">
+                                                🚌 {{ t.profile.assigned_bus.name }}
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 0.4rem;">
+                                                <span class="badge" style="font-size: 0.7rem; background: var(--surface-card); color: var(--text-main); font-weight: 600;">
+                                                    {{ CURRENCY_SYMBOL }}{{ t.profile.assigned_bus.fee|floatformat:2 }}
+                                                </span>
+                                                <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}" class="btn-table-action" style="font-size: 0.72rem; padding: 0.15rem 0.45rem;" title="View Bus Roster for {{ t.profile.assigned_bus.name }}">
+                                                    Bus Roster &rarr;
+                                                </a>
+                                            </div>
+                                        </div>
+                                    {% else %}
+                                        <div style="font-size: 0.8rem; color: var(--text-muted); padding: 0.4rem 0;">
+                                            No bus routes assigned. (Dedicated to classroom attendance & lunch).
+                                        </div>
+                                    {% endif %}
+                                </div>
+
+                                <!-- Box 2: Contact & Credentials -->
+                                <div class="details-section-box">
+                                    <div class="details-section-title">
+                                        <span>📞</span> Contact & Credentials
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.82rem;">
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: var(--text-muted);">Phone Number:</span>
+                                            <strong>{{ t.profile.phone_number|default:"No phone on file" }}</strong>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: var(--text-muted);">Email Address:</span>
+                                            <span style="color: var(--text-main);">{{ t.email|default:"No email on file" }}</span>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: var(--text-muted);">Username:</span>
+                                            <code>@{{ t.username }}</code>
+                                        </div>
+                                        <div style="display: flex; justify-content: space-between;">
+                                            <span style="color: var(--text-muted);">Last Active:</span>
+                                            <span style="color: var(--text-muted);">{{ t.last_login|date:"M d, Y H:i"|default:"Never logged in" }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Box 3: Fee Permissions & Role -->
+                                <div class="details-section-box">
+                                    <div class="details-section-title">
+                                        <span>🛡️</span> Role & Fee Authorization
+                                    </div>
+                                    <div style="display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.82rem;">
+                                        <div>
+                                            {% if t.profile and t.profile.can_collect_fees %}
+                                                <span class="badge" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); border: 1px solid hsla(var(--primary-hsl), 0.25); font-weight: 600;">
+                                                    💰 Authorized Fee Collector
+                                                </span>
+                                            {% else %}
+                                                <span class="badge" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; background: hsla(215, 20%, 65%, 0.12); color: var(--text-muted); font-weight: 600;">
+                                                    🔒 Attendance Only (No fee rights)
+                                                </span>
+                                            {% endif %}
+                                        </div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                                            {% if t.profile and t.profile.can_collect_fees %}
+                                                Allowed to clock-in students and record cash payments for bus and canteen.
+                                            {% else %}
+                                                Restricted to clocking in students. Cash collection is locked.
+                                            {% endif %}
+                                        </div>
+                                        {% if t.profile and t.profile.can_collect_fees %}
+                                        <div style="margin-top: 0.35rem; padding-top: 0.35rem; border-top: 1px dashed var(--border); font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.25rem;">
+                                            <div style="display: flex; justify-content: space-between;">
+                                                <span style="color: var(--text-muted);">Today's Remittance:</span>
+                                                <strong style="color: var(--success-text);">+{{ CURRENCY_SYMBOL }}{{ t.today_collected|floatformat:2 }}</strong>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.25rem;">
+                                                <span style="color: var(--text-muted);">Daily Target:</span>
+                                                <div>
+                                                    <strong>{{ CURRENCY_SYMBOL }}{{ t.adjusted_target|floatformat:2 }}</strong>
+                                                    {% if t.one_off_additions > 0 %}
+                                                    <span style="color: var(--primary); font-size: 0.72rem; margin-left: 0.25rem;">(+{{ CURRENCY_SYMBOL }}{{ t.one_off_additions|floatformat:2 }} one-off bus)</span>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endif %}
+                                        <div style="margin-top: 0.25rem;">
+                                            <a href="{% url 'payment_list' %}?collector={{ t.id }}" style="font-size: 0.78rem; color: var(--primary); font-weight: 600; text-decoration: none;">
+                                                📄 View Recorded Receipts ({{ t.today_count }} today) &rarr;
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            <!-- Sub-Row Footer Actions -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); font-size: 0.82rem;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted); font-size: 0.75rem;">
+                                    <span>Account Status:</span>
+                                    {% if t.is_active %}
+                                        <span class="badge badge-success" style="font-size: 0.7rem; padding: 0.12rem 0.45rem;">Active</span>
+                                    {% else %}
+                                        <span class="badge badge-danger" style="font-size: 0.7rem; padding: 0.12rem 0.45rem;">Inactive</span>
+                                    {% endif %}
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                                    <a href="{% url 'collector_audit' t.pk %}" class="btn-table-action" style="color: var(--primary);" title="Daily Remittance Audit">
+                                        📊 Remittance Audit
+                                    </a>
+                                    {% if user.profile.is_principal %}
+                                    <a href="{% url 'teacher_update' t.pk %}" class="btn-table-action" style="color: var(--primary); font-weight: 600;">
+                                        ✏️ Edit Teacher
+                                    </a>
+                                    <a href="{% url 'teacher_password_reset' t.pk %}" class="btn-table-action" style="color: var(--primary);">
+                                        🔑 Reset Password
+                                    </a>
+                                    {% if t.is_active %}
+                                    <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="color: var(--danger-text);" onclick="return confirm('Are you sure you want to deactivate {{ t.username }}?');">
+                                        ⛔ Deactivate
+                                    </a>
+                                    {% else %}
+                                    <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="color: var(--success);" onclick="return confirm('Are you sure you want to activate {{ t.username }}?');">
+                                        ✅ Activate
+                                    </a>
+                                    {% endif %}
+                                    {% endif %}
+                                    <button type="button" class="btn-table-action" onclick="toggleTeacherRow('{{ t.id }}')" style="cursor: pointer;">
+                                        ✕ Close
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                    </td>
+                </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="{% if is_accountant_view %}7{% else %}8{% endif %}" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                    <td colspan="{% if is_accountant_view %}6{% else %}4{% endif %}" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
                         <div style="font-size: 1rem; font-weight: 600; color: var(--text-main);">No teacher accounts found</div>
                         <p style="margin-top: 0.25rem; font-size: 0.85rem;">
                             {% if is_accountant_view %}
@@ -413,33 +626,18 @@
 <div class="mobile-only student-cards-list">
     {% for t in teachers %}
     <div class="student-card" style="margin-bottom: 0.85rem;">
-        <div class="student-card-header">
+        <div class="student-card-header" style="display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 0.65rem;">
                 <div class="student-avatar" style="width: 32px; height: 32px; font-size: 0.75rem; background: var(--primary-subtle); color: var(--primary); font-weight: 700;">
                     {{ t.first_name|default:t.username|slice:":1" }}{{ t.last_name|slice:":1" }}
                 </div>
-                <div>
-                    <div style="font-weight: 600; font-size: 0.95rem; color: var(--text-main);">
-                        {{ t.get_full_name|default:t.username }}
-                    </div>
-                    <code style="font-size: 0.75rem; color: var(--text-muted);">@{{ t.username }}</code>
+                <div style="font-weight: 600; font-size: 0.95rem; color: var(--text-main);">
+                    {{ t.get_full_name|default:t.username }}
                 </div>
             </div>
-            <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
-                {% if t.profile and t.profile.role == 'ADMIN' %}
-                    <span class="badge" style="font-size: 0.68rem; background: hsla(280, 80%, 55%, 0.12); color: #7c3aed; font-weight: 700; border: 1px solid hsla(280, 80%, 55%, 0.25);">👑 Admin</span>
-                {% endif %}
-                {% if t.profile and t.profile.can_collect_fees %}
-                    <span class="badge" style="font-size: 0.68rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); font-weight: 600;">💰 Fees</span>
-                {% endif %}
-                {% if not is_accountant_view %}
-                    {% if t.is_active %}
-                        <span class="badge badge-success" style="font-size: 0.7rem;">Active</span>
-                    {% else %}
-                        <span class="badge badge-danger" style="font-size: 0.7rem;">Inactive</span>
-                    {% endif %}
-                {% endif %}
-            </div>
+            {% if t.profile and t.profile.role == 'ADMIN' %}
+                <span class="badge" style="font-size: 0.68rem; background: hsla(280, 80%, 55%, 0.12); color: #7c3aed; font-weight: 700; border: 1px solid hsla(280, 80%, 55%, 0.25);">👑 Admin</span>
+            {% endif %}
         </div>
 
         {% if is_accountant_view %}
@@ -512,55 +710,129 @@
             </div>
         </div>
         {% else %}
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem;">
+        <div class="mobile-card-class-row" onclick="toggleMobileDetails('{{ t.id }}')" style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; font-size: 0.82rem; background: var(--surface-card); padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; user-select: none;">
             <div>
-                <span style="color: var(--text-muted);">Assignment:</span><br>
+                <span style="color: var(--text-muted); font-size: 0.72rem;">Assigned Class:</span><br>
                 <strong>
-                    {% if t.profile and t.profile.is_bus_fee_teacher %}
-                        🚌 Fee Teacher ({{ t.profile.assigned_bus.name }})
-                    {% elif t.profile and t.profile.assigned_class %}
-                        Class {{ t.profile.assigned_class }}
+                    {% if t.profile and t.profile.assigned_class %}
+                        🏫 {{ t.profile.assigned_class }}
                     {% else %}
-                        Floating
+                        <span style="color: var(--text-subtle); font-style: italic;">Floating / No Class</span>
                     {% endif %}
                 </strong>
             </div>
             <div>
-                <span style="color: var(--text-muted);">Phone:</span><br>
-                <strong>{{ t.profile.phone_number|default:"—" }}</strong>
+                <button type="button" class="btn-table-action" id="btn-mobile-toggle-{{ t.id }}" style="color: var(--primary); font-weight: 600; font-size: 0.78rem; pointer-events: none;">
+                    Details ▾
+                </button>
             </div>
         </div>
 
-        <!-- Unified Mobile Action Row for Teachers (Directory View) -->
-        <div class="student-card-actions" style="margin-top: 0.85rem;">
-            <a href="{% url 'payment_list' %}?collector={{ t.id }}" class="btn-card-pay" style="flex: 1; justify-content: center; color: var(--primary); font-weight: 600;">
-                📄 View Receipts
-            </a>
-
-            {% if user.profile.is_principal %}
-            <div class="card-menu-wrapper">
-                <button type="button" class="card-menu-btn" onclick="toggleCardMenu(this)" title="Teacher Options" style="height: 48px; width: 44px; border: 1.5px solid var(--border);">
-                    ⋮
-                </button>
-                <div class="card-menu-dropdown">
-                    <a href="{% url 'teacher_update' t.pk %}">
-                        <span>✏️</span> Edit Profile
-                    </a>
-                    <a href="{% url 'teacher_password_reset' t.pk %}">
-                        <span>🔑</span> Reset Password
-                    </a>
+        <!-- Mobile Expandable Accordion Panel -->
+        <div id="mobile-details-{{ t.id }}" style="display: none; margin-top: 0.65rem; background: hsla(var(--primary-hsl), 0.025); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius-sm); padding: 0.75rem; animation: teacherFadeIn 0.2s ease;">
+            
+            <!-- Mobile Header Bar: Username, Status & Fee Access -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; padding-bottom: 0.55rem; border-bottom: 1px solid var(--border);">
+                <div style="display: flex; align-items: center; gap: 0.45rem;">
+                    <code style="font-size: 0.78rem;">@{{ t.username }}</code>
                     {% if t.is_active %}
-                    <a href="{% url 'teacher_toggle_status' t.pk %}" class="menu-item-danger" onclick="return confirm('Deactivate account for {{ t.username }}?');">
-                        <span>⛔</span> Deactivate Account
-                    </a>
+                        <span class="badge badge-success" style="font-size: 0.68rem; padding: 0.12rem 0.45rem;">Active</span>
                     {% else %}
-                    <a href="{% url 'teacher_toggle_status' t.pk %}" onclick="return confirm('Activate account for {{ t.username }}?');">
-                        <span>✅</span> Activate Account
-                    </a>
+                        <span class="badge badge-danger" style="font-size: 0.68rem; padding: 0.12rem 0.45rem;">Inactive</span>
+                    {% endif %}
+                </div>
+                <div>
+                    {% if t.profile and t.profile.can_collect_fees %}
+                        <span class="badge" style="font-size: 0.68rem; background: hsla(var(--primary-hsl), 0.12); color: var(--primary); font-weight: 600;">💰 Fee Collector</span>
+                    {% else %}
+                        <span class="badge" style="font-size: 0.68rem; background: hsla(215, 20%, 65%, 0.12); color: var(--text-muted);">🔒 Attendance Only</span>
                     {% endif %}
                 </div>
             </div>
+
+            <!-- Mobile Section: Assigned Buses -->
+            <div style="margin-bottom: 0.65rem;">
+                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.25rem;">
+                    <span>🚌</span> Assigned Bus Routes
+                </div>
+                {% if t.assigned_buses_list %}
+                    <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                        {% for b in t.assigned_buses_list %}
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-card); padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.78rem;">
+                            <div>
+                                <strong style="color: var(--primary);">{{ b.name }}</strong>
+                                <span style="color: var(--text-muted); font-size: 0.7rem;">({{ CURRENCY_SYMBOL }}{{ b.fee }})</span>
+                            </div>
+                            <a href="{% url 'bus_analytics' b.id %}" class="btn-table-action" style="font-size: 0.7rem; padding: 0.1rem 0.35rem;" title="View Bus Roster">Bus Roster &rarr;</a>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% elif t.profile and t.profile.assigned_bus %}
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-card); padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.78rem;">
+                        <div>
+                            <strong style="color: var(--primary);">{{ t.profile.assigned_bus.name }}</strong>
+                            <span style="color: var(--text-muted); font-size: 0.7rem;">({{ CURRENCY_SYMBOL }}{{ t.profile.assigned_bus.fee }})</span>
+                        </div>
+                        <a href="{% url 'bus_analytics' t.profile.assigned_bus.id %}" class="btn-table-action" style="font-size: 0.7rem; padding: 0.1rem 0.35rem;" title="View Bus Roster">Bus Roster &rarr;</a>
+                    </div>
+                {% else %}
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">No bus routes assigned.</div>
+                {% endif %}
+            </div>
+
+            <!-- Mobile Section: Contact & Info -->
+            <div style="margin-bottom: 0.65rem; font-size: 0.78rem; display: flex; flex-direction: column; gap: 0.25rem; background: var(--surface-card); padding: 0.5rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Phone:</span>
+                    <strong>{{ t.profile.phone_number|default:"—" }}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Email:</span>
+                    <span style="color: var(--text-main);">{{ t.email|default:"—" }}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Last Active:</span>
+                    <span style="color: var(--text-muted);">{{ t.last_login|date:"M d, Y H:i"|default:"Never logged in" }}</span>
+                </div>
+            </div>
+
+            {% if t.profile and t.profile.can_collect_fees %}
+            <div style="margin-bottom: 0.65rem; text-align: right;">
+                <a href="{% url 'payment_list' %}?collector={{ t.id }}" style="font-size: 0.74rem; color: var(--primary); font-weight: 600; text-decoration: none;">
+                    📄 View Collected Receipts &rarr;
+                </a>
+            </div>
             {% endif %}
+
+            <!-- Mobile Section: Action Buttons Grid -->
+            <div style="padding-top: 0.65rem; border-top: 1px solid var(--border);">
+                <div style="font-size: 0.68rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.45rem; display: flex; align-items: center; gap: 0.25rem;">
+                    <span>⚡</span> Staff Actions
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem;">
+                    <a href="{% url 'collector_audit' t.pk %}" class="btn-table-action" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.5rem 0.4rem; text-decoration: none; color: var(--primary); font-weight: 600; font-size: 0.78rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center;">
+                        📊 Remittance
+                    </a>
+                    {% if user.profile.is_principal %}
+                    <a href="{% url 'teacher_update' t.pk %}" class="btn-table-action" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.5rem 0.4rem; text-decoration: none; color: var(--primary); font-weight: 600; font-size: 0.78rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center;">
+                        ✏️ Edit Teacher
+                    </a>
+                    <a href="{% url 'teacher_password_reset' t.pk %}" class="btn-table-action" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.5rem 0.4rem; text-decoration: none; color: var(--primary); font-weight: 600; font-size: 0.78rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center;">
+                        🔑 Password
+                    </a>
+                    {% if t.is_active %}
+                    <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.5rem 0.4rem; text-decoration: none; color: var(--danger-text); font-weight: 600; font-size: 0.78rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center;" onclick="return confirm('Deactivate account for {{ t.username }}?');">
+                        ⛔ Deactivate
+                    </a>
+                    {% else %}
+                    <a href="{% url 'teacher_toggle_status' t.pk %}" class="btn-table-action" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.5rem 0.4rem; text-decoration: none; color: var(--success); font-weight: 600; font-size: 0.78rem; background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-sm); text-align: center;" onclick="return confirm('Activate account for {{ t.username }}?');">
+                        ✅ Activate
+                    </a>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
         </div>
         {% endif %}
     </div>
@@ -579,6 +851,49 @@
 </div>
 
 <script>
+function toggleTeacherRow(teacherId) {
+    const detailsRow = document.getElementById('details-row-' + teacherId);
+    const chevron = document.getElementById('chevron-' + teacherId);
+    const toggleBtn = document.getElementById('btn-toggle-' + teacherId);
+    if (!detailsRow) return;
+
+    if (detailsRow.style.display === 'none' || !detailsRow.style.display) {
+        detailsRow.style.display = 'table-row';
+        if (chevron) {
+            chevron.textContent = '▼';
+            chevron.style.background = 'hsla(var(--primary-hsl), 0.15)';
+            chevron.style.color = 'var(--primary)';
+        }
+        if (toggleBtn) {
+            toggleBtn.innerHTML = 'Close ▴';
+        }
+    } else {
+        detailsRow.style.display = 'none';
+        if (chevron) {
+            chevron.textContent = '▶';
+            chevron.style.background = 'var(--surface-card, #f1f5f9)';
+            chevron.style.color = 'var(--text-muted)';
+        }
+        if (toggleBtn) {
+            toggleBtn.innerHTML = 'Details ▾';
+        }
+    }
+}
+
+function toggleMobileDetails(teacherId) {
+    const mDetails = document.getElementById('mobile-details-' + teacherId);
+    const mBtn = document.getElementById('btn-mobile-toggle-' + teacherId);
+    if (!mDetails) return;
+
+    if (mDetails.style.display === 'none' || !mDetails.style.display) {
+        mDetails.style.display = 'block';
+        if (mBtn) mBtn.innerHTML = 'Close ▴';
+    } else {
+        mDetails.style.display = 'none';
+        if (mBtn) mBtn.innerHTML = 'Details ▾';
+    }
+}
+
 function copyCredentials(u, p, btn) {
     const text = `School Portal Credentials:\nUsername: ${u}\nPassword: ${p}\nLogin URL: ${window.location.origin}/login/`;
     navigator.clipboard.writeText(text).then(() => {

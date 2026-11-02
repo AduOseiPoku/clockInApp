@@ -437,30 +437,92 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 4. Outside-click dismiss for contextual card menus and mobile nav drawer
+    // 4. Outside-click dismiss for contextual card menus
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.card-menu-wrapper')) {
             document.querySelectorAll('.card-menu-dropdown.show').forEach(dropdown => {
                 dropdown.classList.remove('show');
             });
         }
-        if (!e.target.closest('.navbar')) {
-            const drawer = document.getElementById('mobile-nav-drawer');
-            if (drawer && drawer.classList.contains('open')) {
-                drawer.classList.remove('open');
-            }
+    });
+
+    // 5. Escape key to dismiss drawer
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeSideDrawer();
         }
     });
+
+    // 6. Touch swipe-left to dismiss side drawer
+    let touchStartX = 0;
+    let touchStartY = 0;
+    const sideDrawer = document.getElementById('side-drawer');
+    if (sideDrawer) {
+        sideDrawer.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        sideDrawer.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            const diffX = touchEndX - touchStartX;
+            const diffY = touchEndY - touchStartY;
+            // Swipe left threshold: at least 45px left and horizontal movement > vertical movement
+            if (diffX < -45 && Math.abs(diffX) > Math.abs(diffY)) {
+                closeSideDrawer();
+            }
+        }, { passive: true });
+    }
 });
 
 /**
- * Toggle top mobile navigation drawer
+ * Open off-canvas side drawer
+ */
+function openSideDrawer() {
+    const drawer = document.getElementById('side-drawer');
+    const backdrop = document.getElementById('side-drawer-backdrop');
+    if (drawer) {
+        drawer.classList.add('open');
+        document.body.classList.add('drawer-open');
+    }
+    if (backdrop) {
+        backdrop.classList.add('open');
+    }
+}
+
+/**
+ * Close off-canvas side drawer
+ */
+function closeSideDrawer() {
+    const drawer = document.getElementById('side-drawer');
+    const backdrop = document.getElementById('side-drawer-backdrop');
+    if (drawer) {
+        drawer.classList.remove('open');
+        document.body.classList.remove('drawer-open');
+    }
+    if (backdrop) {
+        backdrop.classList.remove('open');
+    }
+}
+
+/**
+ * Toggle off-canvas side drawer
+ */
+function toggleSideDrawer() {
+    const drawer = document.getElementById('side-drawer');
+    if (drawer && drawer.classList.contains('open')) {
+        closeSideDrawer();
+    } else {
+        openSideDrawer();
+    }
+}
+
+/**
+ * Backward compatibility alias for legacy mobile menu calls
  */
 function toggleMobileMenu() {
-    const drawer = document.getElementById('mobile-nav-drawer');
-    if (drawer) {
-        drawer.classList.toggle('open');
-    }
+    toggleSideDrawer();
 }
 
 /**

@@ -81,7 +81,7 @@
                         </td>
                         <td>
                             <a href="{% url 'student_list' %}?class={{ sc.name }}" class="class-badge" style="text-decoration: none;" title="View students in {{ sc.name }}">
-                                👥 {{ sc.student_count }} Student{{ sc.student_count|pluralize }} &rarr;
+                                👥 {{ sc.active_student_count }} Student{{ sc.active_student_count|pluralize }} &rarr;
                             </a>
                         </td>
                         <td>
@@ -153,7 +153,7 @@
         <!-- Unified Mobile Action Row -->
         <div class="student-card-actions" style="margin-top: 0.85rem;">
             <a href="{% url 'student_list' %}?class={{ sc.name }}" class="btn-card-pay" style="flex: 1; justify-content: center; color: var(--primary); font-weight: 600;">
-                👥 View Roster ({{ sc.student_count }})
+                👥 View Roster ({{ sc.active_student_count }})
             </a>
 
             {% if user.profile.is_principal %}

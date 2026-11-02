@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth import get_user_model
-from .models import Bus, Student, FeePayment, ClockInRecord, SchoolClass, UserProfile
+from .models import Bus, Student, FeePayment, ClockInRecord, SchoolClass, UserProfile, TeacherRemittance
 
 User = get_user_model()
 
@@ -88,3 +88,9 @@ class ClockInRecordAdmin(admin.ModelAdmin):
     list_filter = ('date', 'status')
     search_fields = ('student__first_name', 'student__last_name')
 
+
+@admin.register(TeacherRemittance)
+class TeacherRemittanceAdmin(admin.ModelAdmin):
+    list_display = ('reference_code', 'teacher', 'amount', 'expected_amount', 'variance', 'received_by', 'date', 'created_at')
+    list_filter = ('date', 'received_by')
+    search_fields = ('reference_code', 'teacher__username', 'teacher__first_name', 'teacher__last_name', 'notes')

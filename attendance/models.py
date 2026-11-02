@@ -1,4 +1,5 @@
 import datetime
+from functools import lru_cache
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
@@ -98,7 +99,26 @@ class SchoolSetting(models.Model):
     def __str__(self):
         return f"{self.key} = {self.value}"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.__class__.get_setting.cache_clear()
+        self.__class__.get_all_settings_dict.cache_clear()
+
+    def delete(self, *args, **kwargs):
+        super().delete(*args, **kwargs)
+        self.__class__.get_setting.cache_clear()
+        self.__class__.get_all_settings_dict.cache_clear()
+
     @classmethod
+    @lru_cache(maxsize=1)
+    def get_all_settings_dict(cls):
+        try:
+            return {s.key: s.value for s in cls.objects.all()}
+        except Exception:
+            return {}
+
+    @classmethod
+    @lru_cache(maxsize=64)
     def get_setting(cls, key, default=None):
         try:
             item = cls.objects.filter(key=key).first()
@@ -114,6 +134,7 @@ class SchoolSetting(models.Model):
             key=key,
             defaults={'value': str(value), 'description': description}
         )
+        cls.get_setting.cache_clear()
 
 
 def get_default_canteen_fee():
@@ -125,6 +146,102 @@ def get_default_canteen_fee():
         except Exception:
             pass
     return getattr(settings, 'DEFAULT_CANTEEN_FEE', Decimal('10.00'))
+
+
+def get_active_academic_period():
+    """
+    Returns the active academic term (e.g., 'Term 1 - 2026').
+    Checks SchoolSetting in the database first, then falls back to settings.py.
+    """
+    val = SchoolSetting.get_setting('CURRENT_ACADEMIC_PERIOD')
+    if val:
+        return str(val).strip()
+    return getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026')
+
+
+def get_active_currency_symbol():
+    """
+    Returns the active school currency symbol (e.g., 'GH₵', '$').
+    Checks SchoolSetting in the database first, then falls back to settings.py.
+    """
+    val = SchoolSetting.get_setting('CURRENCY_SYMBOL')
+    if val:
+        return str(val).strip()
+    return getattr(settings, 'CURRENCY_SYMBOL', 'GH₵')
+
+
+def get_term_date_range():
+    """
+    Returns (start_date, end_date) as datetime.date objects for the active academic term,
+    or (None, None) if not configured.
+    """
+    start_val = SchoolSetting.get_setting('TERM_START_DATE')
+    end_val = SchoolSetting.get_setting('TERM_END_DATE')
+    start_date = None
+    end_date = None
+    if start_val:
+        try:
+            start_date = datetime.date.fromisoformat(str(start_val).strip())
+        except (ValueError, TypeError):
+            pass
+    if end_val:
+        try:
+            end_date = datetime.date.fromisoformat(str(end_val).strip())
+        except (ValueError, TypeError):
+            pass
+    return start_date, end_date
+
+
+def calculate_school_weekdays(start_date, end_date):
+    """
+    Returns the total count of instructional weekdays (Monday through Friday)
+    between start_date and end_date inclusive.
+    """
+    if not start_date or not end_date or start_date > end_date:
+        return 0
+    cur = start_date
+    weekdays = 0
+    while cur <= end_date:
+        if cur.weekday() < 5:  # Monday=0 ... Friday=4
+            weekdays += 1
+        cur += datetime.timedelta(days=1)
+    return weekdays
+
+
+def get_current_term_metrics():
+    """
+    Computes summary metrics for the active academic period timeframe:
+    - start_date: datetime.date or None
+    - end_date: datetime.date or None
+    - total_days: integer count of instructional weekdays in the term
+    - elapsed_days: weekdays passed so far
+    - remaining_days: weekdays remaining until term end
+    """
+    start_date, end_date = get_term_date_range()
+    today = timezone.localdate()
+    total_days = calculate_school_weekdays(start_date, end_date) if (start_date and end_date) else 0
+
+    if start_date and end_date:
+        if today < start_date:
+            elapsed_days = 0
+            remaining_days = total_days
+        elif today > end_date:
+            elapsed_days = total_days
+            remaining_days = 0
+        else:
+            elapsed_days = calculate_school_weekdays(start_date, today)
+            remaining_days = calculate_school_weekdays(today, end_date)
+    else:
+        elapsed_days = 0
+        remaining_days = 0
+
+    return {
+        'start_date': start_date,
+        'end_date': end_date,
+        'total_days': total_days,
+        'elapsed_days': elapsed_days,
+        'remaining_days': remaining_days,
+    }
 
 
 class Student(models.Model):
@@ -141,6 +258,14 @@ class Student(models.Model):
     canteen_enrolled = models.BooleanField(default=True, help_text="Whether student takes school lunch/canteen")
     custom_canteen_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Override standard canteen fee")
     is_active = models.BooleanField(default=True)
+    registered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='registered_students',
+        help_text="Staff member or administrator who enrolled this student"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -158,6 +283,10 @@ class Student(models.Model):
         verbose_name = 'Student'
         verbose_name_plural = 'Students'
         ordering = ['student_class', 'first_name', 'last_name']
+        indexes = [
+            models.Index(fields=['student_class', 'is_active'], name='std_class_active_idx'),
+            models.Index(fields=['bus', 'is_active'], name='std_bus_active_idx'),
+        ]
 
     def __str__(self):
         return f"{self.full_name} ({self.student_class})"
@@ -464,6 +593,8 @@ class FeePayment(models.Model):
         indexes = [
             models.Index(fields=['fee_type', 'payment_date'], name='feepay_type_date_idx'),
             models.Index(fields=['recorded_by', 'payment_date'], name='feepay_rec_date_idx'),
+            models.Index(fields=['payment_method', 'payment_date'], name='feepay_method_date_idx'),
+            models.Index(fields=['payment_date', 'recorded_by'], name='feepay_date_rec_idx'),
             models.Index(fields=['student', 'fee_type', 'payment_date'], name='feepay_std_type_date_idx'),
         ]
 
@@ -523,7 +654,8 @@ class UserProfile(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_TEACHER)
     phone_number = models.CharField(max_length=30, blank=True)
     assigned_class = models.CharField(max_length=50, blank=True, help_text="Specific class for class teacher (optional)")
-    assigned_bus = models.ForeignKey('Bus', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_teachers', help_text="Specific bus route for bus teacher/conductor (optional)")
+    assigned_bus = models.ForeignKey('Bus', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_teachers', help_text="Primary bus route (legacy/default)")
+    assigned_buses = models.ManyToManyField('Bus', blank=True, related_name='assigned_multi_teachers', help_text="Specific bus routes/stops assigned to this teacher")
     can_collect_fees = models.BooleanField(
         default=False,
         help_text="Designates whether this teacher is authorized to record and collect fee payments."
@@ -531,6 +663,39 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} ({self.get_role_display()})"
+
+    def refresh_from_db(self, using=None, fields=None):
+        super().refresh_from_db(using=using, fields=fields)
+        self.__dict__.pop('_cached_assigned_bus_ids', None)
+        self.__dict__.pop('_cached_assigned_buses_list', None)
+        self.__dict__.pop('_cached_is_bus_fee_teacher', None)
+
+    @property
+    def primary_bus(self):
+        """Returns the primary assigned bus or first assigned bus from list."""
+        if self.assigned_bus:
+            return self.assigned_bus
+        buses = self.get_assigned_buses_list()
+        return buses[0] if buses else None
+
+    def get_assigned_buses_list(self):
+        """Returns list of all Bus objects assigned to this teacher."""
+        if not hasattr(self, '_cached_assigned_buses_list'):
+            buses = list(self.assigned_buses.all())
+            if not buses and self.assigned_bus:
+                buses = [self.assigned_bus]
+            self._cached_assigned_buses_list = buses
+        return self._cached_assigned_buses_list
+
+    def get_assigned_bus_ids(self):
+        """Returns set of IDs for all buses assigned to this teacher."""
+        if not hasattr(self, '_cached_assigned_bus_ids'):
+            buses = self.get_assigned_buses_list()
+            ids = {b.id for b in buses}
+            if self.assigned_bus_id:
+                ids.add(self.assigned_bus_id)
+            self._cached_assigned_bus_ids = ids
+        return self._cached_assigned_bus_ids
 
     @property
     def is_school_admin(self):
@@ -549,17 +714,29 @@ class UserProfile(models.Model):
         return self.role == self.ROLE_TEACHER or self.is_school_admin
 
     @property
+    def can_view_my_collections(self):
+        """Only teachers authorized to collect fees have an individual remittance page."""
+        return bool(self.role == self.ROLE_TEACHER and self.can_collect_fees)
+
+    @property
     def is_fee_teacher(self):
         return (self.role == self.ROLE_TEACHER and self.can_collect_fees) or self.is_school_admin
 
     @property
     def is_bus_fee_teacher(self):
-        return self.is_fee_teacher and bool(self.assigned_bus)
+        if not hasattr(self, '_cached_is_bus_fee_teacher'):
+            self._cached_is_bus_fee_teacher = bool(
+                self.assigned_bus_id or self.get_assigned_bus_ids()
+            )
+        return self._cached_is_bus_fee_teacher
 
     @property
     def fee_teacher_title(self):
-        if self.assigned_bus:
-            return f"Fee Teacher ({self.assigned_bus.name})"
+        buses = self.get_assigned_buses_list()
+        if len(buses) == 1:
+            return f"Fee Teacher ({buses[0].name})"
+        elif len(buses) > 1:
+            return f"Fee Teacher ({len(buses)} Buses)"
         elif self.assigned_class:
             return f"Class Teacher ({self.assigned_class})"
         elif self.can_collect_fees:
@@ -633,6 +810,71 @@ class NotificationLog(models.Model):
         return f"{self.get_notification_type_display()} for {self.student.full_name} ({self.sent_at.strftime('%Y-%m-%d %H:%M')})"
 
 
+class TeacherRemittance(models.Model):
+    """
+    Financial record of physical cash collected from students (Bus / Canteen fees)
+    handed over by a teacher and received by the Bursar / Accountant.
+    """
+    teacher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='remittances_handed_over',
+        help_text="Teacher who collected the physical cash"
+    )
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='remittances_received',
+        help_text="Bursar or Administrator who received and verified the cash"
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Actual physical cash received and verified"
+    )
+    expected_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Total recorded unremitted cash at the moment of handover"
+    )
+    variance = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="Difference between received amount and expected amount (amount - expected_amount)"
+    )
+    date = models.DateField(
+        default=timezone.localdate,
+        db_index=True,
+        help_text="Date of cash handover"
+    )
+    reference_code = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Unique handover voucher code, e.g. REM-20261101-ABCD"
+    )
+    notes = models.TextField(
+        blank=True,
+        default='',
+        help_text="Optional remarks regarding this settlement"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Teacher Cash Handover'
+        verbose_name_plural = 'Teacher Cash Handovers'
+
+    def __str__(self):
+        t_name = self.teacher.get_full_name() or self.teacher.username
+        return f"{self.reference_code}: {t_name} -> {self.amount} ({self.date})"
+
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
@@ -643,9 +885,10 @@ def create_or_save_user_profile(sender, instance, created, **kwargs):
         role = UserProfile.ROLE_ADMIN if instance.is_superuser else UserProfile.ROLE_TEACHER
         UserProfile.objects.get_or_create(user=instance, defaults={'role': role})
     else:
-        if hasattr(instance, 'profile'):
-            if instance.is_superuser and instance.profile.role != UserProfile.ROLE_ADMIN:
-                instance.profile.role = UserProfile.ROLE_ADMIN
-            instance.profile.save()
+        profile = getattr(instance, 'profile', None)
+        if profile:
+            if instance.is_superuser and profile.role != UserProfile.ROLE_ADMIN:
+                profile.role = UserProfile.ROLE_ADMIN
+            profile.save()
 
 

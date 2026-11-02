@@ -3,7 +3,317 @@
 {% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
 
 {% block content %}
-<div style="max-width: 680px; margin: 0 auto; width: 100%;">
+<style>
+/* Responsive Mobile & Desktop Styles for Settings */
+.settings-page-container {
+    max-width: 680px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.canteen-presets-row {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.65rem;
+}
+
+.btn-preset-canteen {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    min-height: 38px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    background: var(--surface-card);
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-preset-canteen:hover, .btn-preset-canteen:active {
+    background: var(--surface-subtle);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-preset-chip {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    min-height: 34px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    background: var(--surface-card);
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-preset-chip:hover, .btn-preset-chip:active {
+    background: var(--surface-subtle);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.chip-presets-row {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.45rem;
+}
+
+.period-currency-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 0.85rem;
+}
+
+.term-dates-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+    margin-top: 1rem;
+}
+
+.calendar-intel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.calendar-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    text-align: center;
+}
+
+.calendar-metric-box {
+    background: var(--surface);
+    padding: 0.65rem 0.4rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+.calendar-intel-footer {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed rgba(37, 99, 235, 0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Modern Accessible Toggle Switch */
+.onboarding-switch-card {
+    background: var(--surface-subtle);
+    padding: 1.15rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.onboarding-switch-card:hover {
+    border-color: var(--primary);
+}
+
+.switch-toggle-ui {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+.switch-toggle-ui input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.switch-toggle-ui .slider-track {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: var(--border, #cbd5e1);
+    transition: 0.25s ease;
+    border-radius: 999px;
+}
+
+.switch-toggle-ui .slider-track:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #ffffff;
+    transition: 0.25s ease;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.switch-toggle-ui input:checked + .slider-track {
+    background-color: var(--success, #16a34a);
+}
+
+.switch-toggle-ui input:checked + .slider-track:before {
+    transform: translateX(20px);
+}
+
+.settings-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.65rem;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 1.15rem;
+    margin-top: 1.25rem;
+}
+
+/* Mobile Viewport Optimizations (<= 640px) */
+@media (max-width: 640px) {
+    .settings-page-container {
+        padding: 0;
+    }
+
+    .form-card {
+        padding: 1.15rem 0.95rem !important;
+        border-radius: var(--radius-sm) !important;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 0.65rem !important;
+    }
+
+    .stats-grid .stat-card:first-child {
+        grid-column: 1 / -1 !important;
+    }
+
+    .stats-grid .stat-card {
+        padding: 0.85rem !important;
+    }
+
+    .canteen-presets-row {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fit, minmax(75px, 1fr)) !important;
+        gap: 0.4rem !important;
+        width: 100% !important;
+    }
+
+    .btn-preset-canteen {
+        width: 100% !important;
+        min-height: 40px !important;
+        padding: 0.45rem 0.35rem !important;
+        font-size: 0.82rem !important;
+    }
+
+    .btn-preset-chip {
+        min-height: 38px !important;
+        padding: 0.4rem 0.55rem !important;
+        font-size: 0.8rem !important;
+    }
+
+    .period-currency-grid {
+        grid-template-columns: 1fr !important;
+        gap: 0.85rem !important;
+    }
+
+    .term-dates-grid {
+        grid-template-columns: 1fr !important;
+        gap: 0.85rem !important;
+        margin-top: 0.85rem !important;
+    }
+
+    .calendar-intel-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.45rem !important;
+    }
+
+    .calendar-metrics-grid {
+        gap: 0.45rem !important;
+    }
+
+    .calendar-metric-box {
+        padding: 0.5rem 0.25rem !important;
+    }
+
+    .calendar-metric-box div:nth-child(2) {
+        font-size: 1.15rem !important;
+    }
+
+    .calendar-intel-footer {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.45rem !important;
+    }
+
+    .onboarding-switch-card {
+        padding: 1rem 0.85rem !important;
+    }
+
+    .settings-form-actions {
+        flex-direction: column-reverse !important;
+        align-items: stretch !important;
+        gap: 0.65rem !important;
+    }
+
+    .settings-form-actions .btn-primary,
+    .settings-form-actions .btn-secondary {
+        width: 100% !important;
+        text-align: center !important;
+        justify-content: center !important;
+        min-height: 44px !important;
+        padding: 0.7rem !important;
+        font-size: 0.92rem !important;
+    }
+
+    /* Modal Dialog Mobile Tweaks */
+    .modal-content {
+        width: calc(100% - 1.25rem) !important;
+        margin: 1rem auto !important;
+    }
+
+    .modal-footer {
+        flex-direction: column-reverse !important;
+        gap: 0.5rem !important;
+        padding: 0.85rem !important;
+    }
+
+    .modal-footer button {
+        width: 100% !important;
+        min-height: 42px !important;
+        justify-content: center !important;
+    }
+}
+</style>
+
+<div class="settings-page-container">
     <div class="page-header" style="margin-bottom: 1.25rem;">
         <div class="page-title-group">
             <h2>{{ title }}</h2>
@@ -52,7 +362,7 @@
 
     <!-- Settings Form -->
     <div class="form-card" style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.5rem; box-shadow: var(--shadow-sm);">
-        <form method="POST">
+        <form method="POST" id="school-settings-form" data-today="{{ TODAY|date:'Y-m-d' }}">
             {% csrf_token %}
 
             {% if form.non_field_errors %}
@@ -86,24 +396,26 @@
                         </div>
                     {% endif %}
 
-                    <!-- Quick Preset Buttons -->
-                    <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem;">
-                        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Quick presets:</span>
-                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="8.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
-                            {{ CURRENCY_SYMBOL }}8.00
-                        </button>
-                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="10.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
-                            {{ CURRENCY_SYMBOL }}10.00
-                        </button>
-                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="12.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
-                            {{ CURRENCY_SYMBOL }}12.00
-                        </button>
-                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="15.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
-                            {{ CURRENCY_SYMBOL }}15.00
-                        </button>
-                        <button type="button" class="btn-secondary btn-preset-canteen" data-amt="20.00" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;">
-                            {{ CURRENCY_SYMBOL }}20.00
-                        </button>
+                    <!-- Quick Preset Buttons (Optimized Touch Targets) -->
+                    <div style="margin-top: 0.75rem;">
+                        <span style="font-size: 0.76rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 0.35rem;">Quick presets:</span>
+                        <div class="canteen-presets-row">
+                            <button type="button" class="btn-preset-canteen" data-amt="8.00">
+                                {{ CURRENCY_SYMBOL }}8.00
+                            </button>
+                            <button type="button" class="btn-preset-canteen" data-amt="10.00">
+                                {{ CURRENCY_SYMBOL }}10.00
+                            </button>
+                            <button type="button" class="btn-preset-canteen" data-amt="12.00">
+                                {{ CURRENCY_SYMBOL }}12.00
+                            </button>
+                            <button type="button" class="btn-preset-canteen" data-amt="15.00">
+                                {{ CURRENCY_SYMBOL }}15.00
+                            </button>
+                            <button type="button" class="btn-preset-canteen" data-amt="20.00">
+                                {{ CURRENCY_SYMBOL }}20.00
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -130,13 +442,20 @@
                     {% endif %}
                 </div>
 
-                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0.85rem;">
+                <!-- Academic Period & Currency Symbol (Responsive Grid) -->
+                <div class="period-currency-grid">
                     <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="{{ form.current_period.id_for_label }}" style="font-weight: 600;">
                             Current Academic Period *
                         </label>
                         {{ form.current_period }}
                         <small class="form-hint">{{ form.current_period.help_text }}</small>
+                        <div class="chip-presets-row">
+                            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600; margin-right: 0.15rem;">Presets:</span>
+                            <button type="button" class="btn-preset-chip btn-preset-period" data-period="Term 1 - {{ TODAY.year }}">Term 1 - {{ TODAY.year }}</button>
+                            <button type="button" class="btn-preset-chip btn-preset-period" data-period="Term 2 - {{ TODAY.year }}">Term 2 - {{ TODAY.year }}</button>
+                            <button type="button" class="btn-preset-chip btn-preset-period" data-period="Term 3 - {{ TODAY.year }}">Term 3 - {{ TODAY.year }}</button>
+                        </div>
                         {% if form.current_period.errors %}
                             <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
                                 {{ form.current_period.errors }}
@@ -150,6 +469,14 @@
                         </label>
                         {{ form.currency_symbol }}
                         <small class="form-hint">{{ form.currency_symbol.help_text }}</small>
+                        <div class="chip-presets-row">
+                            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600; margin-right: 0.15rem;">Presets:</span>
+                            <button type="button" class="btn-preset-chip btn-preset-currency" data-currency="GH₵" title="Ghana Cedi">GH₵</button>
+                            <button type="button" class="btn-preset-chip btn-preset-currency" data-currency="$" title="US Dollar">$</button>
+                            <button type="button" class="btn-preset-chip btn-preset-currency" data-currency="₦" title="Nigerian Naira">₦</button>
+                            <button type="button" class="btn-preset-chip btn-preset-currency" data-currency="£" title="British Pound">£</button>
+                            <button type="button" class="btn-preset-chip btn-preset-currency" data-currency="€" title="Euro">€</button>
+                        </div>
                         {% if form.currency_symbol.errors %}
                             <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
                                 {{ form.currency_symbol.errors }}
@@ -157,6 +484,105 @@
                         {% endif %}
                     </div>
                 </div>
+
+                <!-- Academic Term Timeframe Dates (Responsive Grid) -->
+                <div class="term-dates-grid">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="{{ form.term_start_date.id_for_label }}" style="font-weight: 600;">
+                            Term Start Date
+                        </label>
+                        {{ form.term_start_date }}
+                        <small class="form-hint">{{ form.term_start_date.help_text }}</small>
+                        {% if form.term_start_date.errors %}
+                            <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                                {{ form.term_start_date.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label" for="{{ form.term_end_date.id_for_label }}" style="font-weight: 600;">
+                            Term End Date
+                        </label>
+                        {{ form.term_end_date }}
+                        <div id="past-date-live-hint" style="display: none; margin-top: 0.35rem; font-size: 0.76rem; color: #b45309; background: hsla(38, 92%, 50%, 0.1); border: 1px solid hsla(38, 92%, 50%, 0.25); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm);">
+                            ⚠️ Concluded date detected: This term will be recorded as completed.
+                        </div>
+                        <small class="form-hint">{{ form.term_end_date.help_text }}</small>
+                        {% if form.term_end_date.errors %}
+                            <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                                {{ form.term_end_date.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Academic Calendar Metrics Intelligence Card -->
+                {% if term_metrics.start_date and term_metrics.end_date %}
+                <div style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(59, 130, 246, 0.02) 100%); border: 1px solid rgba(37, 99, 235, 0.2); border-radius: var(--radius-md); padding: 1rem; margin-top: 1.15rem;">
+                    <div class="calendar-intel-header">
+                        <span style="font-weight: 700; font-size: 0.85rem; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 0.35rem;">
+                            📅 Term Calendar Intelligence
+                        </span>
+                        <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+                            {% if term_metrics.end_date < TODAY %}
+                            <span class="badge" style="font-size: 0.72rem; background: hsla(38, 92%, 50%, 0.15); color: #b45309; border: 1px solid hsla(38, 92%, 50%, 0.3);">
+                                ⚠️ Concluded Period
+                            </span>
+                            {% elif term_metrics.start_date > TODAY %}
+                            <span class="badge" style="font-size: 0.72rem; background: hsla(217, 91%, 60%, 0.12); color: #2563eb; border: 1px solid hsla(217, 91%, 60%, 0.25);">
+                                ⏳ Upcoming Period
+                            </span>
+                            {% else %}
+                            <span class="badge badge-success" style="font-size: 0.72rem;">
+                                ● Active Term
+                            </span>
+                            {% endif %}
+                            <span class="badge badge-info" style="font-size: 0.75rem;">
+                                {{ term_metrics.start_date|date:"M d, Y" }} – {{ term_metrics.end_date|date:"M d, Y" }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="calendar-metrics-grid">
+                        <div class="calendar-metric-box">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">School Days</div>
+                            <div style="font-size: 1.25rem; font-weight: 800; color: var(--text-main); margin-top: 0.15rem;">{{ term_metrics.total_days }}</div>
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">Instructional weekdays</div>
+                        </div>
+
+                        <div class="calendar-metric-box">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Days Elapsed</div>
+                            <div style="font-size: 1.25rem; font-weight: 800; color: var(--primary); margin-top: 0.15rem;">{{ term_metrics.elapsed_days }}</div>
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">Completed so far</div>
+                        </div>
+
+                        <div class="calendar-metric-box">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Days Remaining</div>
+                            <div style="font-size: 1.25rem; font-weight: 800; color: var(--success-text); margin-top: 0.15rem;">{{ term_metrics.remaining_days }}</div>
+                            <div style="font-size: 0.65rem; color: var(--text-muted);">To term completion</div>
+                        </div>
+                    </div>
+
+                    <!-- Projected Canteen Billing Breakdown -->
+                    <div class="calendar-intel-footer">
+                        <div>
+                            <span>Projected term meal fee / student:</span>
+                            <strong style="color: var(--text-main); margin-left: 0.25rem;">{{ CURRENCY_SYMBOL }}{{ term_projected_canteen_per_student|floatformat:2 }}</strong>
+                            <small>({{ term_metrics.total_days }} days × {{ CURRENCY_SYMBOL }}{{ current_canteen|floatformat:2 }})</small>
+                        </div>
+                        <div>
+                            <span>Total canteen revenue capacity:</span>
+                            <strong style="color: var(--success-text); margin-left: 0.25rem;">{{ CURRENCY_SYMBOL }}{{ term_projected_canteen_total|floatformat:2 }}</strong>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div style="background: var(--surface-subtle); border: 1px dashed var(--border); border-radius: var(--radius-md); padding: 0.85rem 1rem; margin-top: 1rem; font-size: 0.82rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem;">
+                    <span>ℹ️</span>
+                    <span>Set opening and closing dates above to automatically compute instructional weekdays, days remaining, and projected term meal plan revenue.</span>
+                </div>
+                {% endif %}
             </div>
 
             <!-- Section 3: Student Onboarding & Teacher Permissions -->
@@ -179,30 +605,30 @@
                     {% endif %}
                 </div>
 
-                <div class="form-group" style="background: var(--surface-subtle); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 0;">
-                    <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-bottom: 0;">
-                        <div style="padding-top: 0.15rem;">
-                            {{ form.allow_teacher_student_registration }}
-                        </div>
-                        <div>
-                            <span style="font-weight: 700; font-size: 0.92rem; color: var(--text-main); display: block;">
-                                Allow Teachers to Register Students (Onboarding Mode)
-                            </span>
-                            <small class="form-hint" style="margin-top: 0.25rem; display: block; line-height: 1.45;">
-                                Turn this toggle <strong>ON</strong> during student onboarding so all teachers can access the Student Registration form to enroll their students. Turn this toggle <strong>OFF</strong> once onboarding is complete to lock enrollment back to the Principal.
-                            </small>
-                            {% if form.allow_teacher_student_registration.errors %}
-                                <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
-                                    {{ form.allow_teacher_student_registration.errors }}
-                                </div>
-                            {% endif %}
-                        </div>
-                    </label>
-                </div>
+                <!-- Modern Tactile Switch Card -->
+                <label class="onboarding-switch-card" for="{{ form.allow_teacher_student_registration.id_for_label }}">
+                    <div style="flex: 1; padding-right: 0.5rem;">
+                        <span style="font-weight: 700; font-size: 0.92rem; color: var(--text-main); display: block;">
+                            Allow Teachers to Register Students (Onboarding Mode)
+                        </span>
+                        <small class="form-hint" style="margin-top: 0.25rem; display: block; line-height: 1.45;">
+                            Turn this toggle <strong>ON</strong> during student onboarding so all teachers can access the Student Registration form to enroll their students. Turn this toggle <strong>OFF</strong> once onboarding is complete to lock enrollment back to the Principal.
+                        </small>
+                        {% if form.allow_teacher_student_registration.errors %}
+                            <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                                {{ form.allow_teacher_student_registration.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="switch-toggle-ui">
+                        {{ form.allow_teacher_student_registration }}
+                        <span class="slider-track"></span>
+                    </div>
+                </label>
             </div>
 
-            <!-- Form Action Buttons -->
-            <div style="display: flex; justify-content: flex-end; gap: 0.65rem; border-top: 1px solid var(--border-subtle); padding-top: 1.15rem; margin-top: 1.25rem;">
+            <!-- Form Action Buttons (Responsive Layout) -->
+            <div class="settings-form-actions">
                 <a href="{% url 'dashboard' %}" class="btn-secondary">
                     Cancel
                 </a>
@@ -214,8 +640,52 @@
     </div>
 </div>
 
+<!-- Past Term Date Confirmation Dialog Modal -->
+<div id="past-date-modal" class="modal-overlay" aria-hidden="true" role="dialog" aria-labelledby="past-date-modal-title">
+    <div class="modal-content" style="max-width: 480px;">
+        <div class="modal-header" style="background: hsla(38, 92%, 50%, 0.08); border-bottom: 1px solid hsla(38, 92%, 50%, 0.25);">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.25rem;">⚠️</span>
+                <h3 id="past-date-modal-title" class="modal-title" style="color: #92400e; font-weight: 700;">
+                    Concluded / Past Term Date
+                </h3>
+            </div>
+            <button type="button" class="btn-close-modal" id="btn-close-past-modal" aria-label="Close dialog">&times;</button>
+        </div>
+
+        <div class="modal-body" style="padding: 1.25rem;">
+            <p style="font-size: 0.88rem; color: var(--text-main); margin-bottom: 0.85rem; line-height: 1.5;">
+                The selected <strong>Term End Date</strong> (<span id="modal-detected-end-date" style="font-weight: 700; color: #b45309;"></span>) has already passed relative to today (<span style="font-weight: 600;">{{ TODAY|date:"M d, Y" }}</span>).
+            </p>
+
+            <div style="background: var(--surface-subtle); border-left: 3px solid #f59e0b; padding: 0.75rem 0.95rem; border-radius: var(--radius-sm); font-size: 0.82rem; color: var(--text-muted); line-height: 1.45; margin-bottom: 1.15rem;">
+                <strong>What this means:</strong>
+                <ul style="margin: 0.35rem 0 0 1.15rem; padding: 0;">
+                    <li>The system will record this timeframe as a <strong>past / archived period</strong>.</li>
+                    <li>Calendar metrics will display <strong>0 remaining school days</strong>.</li>
+                    <li>Historical attendance and fee reconciliation records remain completely preserved.</li>
+                </ul>
+            </div>
+
+            <p style="font-size: 0.86rem; color: var(--text-main); font-weight: 600; margin-bottom: 0;">
+                Would you like to proceed and save this date?
+            </p>
+        </div>
+
+        <div class="modal-footer" style="padding: 0.85rem 1.25rem; background: var(--surface-subtle); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.65rem;">
+            <button type="button" class="btn-secondary" id="btn-cancel-past-date">
+                Cancel & Change Date
+            </button>
+            <button type="button" class="btn-primary" id="btn-proceed-past-date" style="background: #b45309; border-color: #b45309;">
+                Yes, Proceed & Save
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // Canteen presets
     const canteenInput = document.getElementById('id_default_canteen_fee');
     const presetButtons = document.querySelectorAll('.btn-preset-canteen');
 
@@ -228,6 +698,116 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    // Academic Period presets
+    const periodInput = document.getElementById('id_current_period');
+    document.querySelectorAll('.btn-preset-period').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (periodInput && btn.dataset.period) {
+                periodInput.value = btn.dataset.period;
+                periodInput.focus();
+            }
+        });
+    });
+
+    // Currency Symbol presets
+    const currencyInput = document.getElementById('id_currency_symbol');
+    document.querySelectorAll('.btn-preset-currency').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (currencyInput && btn.dataset.currency) {
+                currencyInput.value = btn.dataset.currency;
+                currencyInput.focus();
+            }
+        });
+    });
+
+    // Past Term Date Confirmation Dialog & Live Hint
+    const settingsForm = document.getElementById('school-settings-form');
+    const termEndDateInput = document.getElementById('id_term_end_date');
+    const pastDateModal = document.getElementById('past-date-modal');
+    const modalDetectedEndDate = document.getElementById('modal-detected-end-date');
+    const btnCancelPastDate = document.getElementById('btn-cancel-past-date');
+    const btnClosePastModal = document.getElementById('btn-close-past-modal');
+    const btnProceedPastDate = document.getElementById('btn-proceed-past-date');
+    const pastDateHint = document.getElementById('past-date-live-hint');
+    const todayStr = (settingsForm && settingsForm.dataset.today) ? settingsForm.dataset.today : '';
+
+    function checkPastDateHint() {
+        if (termEndDateInput && termEndDateInput.value) {
+            if (termEndDateInput.value < todayStr) {
+                if (pastDateHint) pastDateHint.style.display = 'block';
+            } else {
+                if (pastDateHint) pastDateHint.style.display = 'none';
+            }
+        } else {
+            if (pastDateHint) pastDateHint.style.display = 'none';
+        }
+    }
+
+    if (termEndDateInput) {
+        termEndDateInput.addEventListener('change', checkPastDateHint);
+        termEndDateInput.addEventListener('input', checkPastDateHint);
+        checkPastDateHint();
+    }
+
+    let isConfirmedPastDate = false;
+
+    if (settingsForm) {
+        settingsForm.addEventListener('submit', function(e) {
+            if (isConfirmedPastDate) {
+                return; // allow submission
+            }
+
+            if (termEndDateInput && termEndDateInput.value && termEndDateInput.value < todayStr) {
+                e.preventDefault();
+                // Format date for modal display
+                const parts = termEndDateInput.value.split('-');
+                if (parts.length === 3) {
+                    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+                    modalDetectedEndDate.textContent = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                } else {
+                    modalDetectedEndDate.textContent = termEndDateInput.value;
+                }
+                pastDateModal.classList.add('active');
+                pastDateModal.setAttribute('aria-hidden', 'false');
+            }
+        });
+    }
+
+    function closePastModal() {
+        if (pastDateModal) {
+            pastDateModal.classList.remove('active');
+            pastDateModal.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    if (btnCancelPastDate) {
+        btnCancelPastDate.addEventListener('click', () => {
+            closePastModal();
+            if (termEndDateInput) termEndDateInput.focus();
+        });
+    }
+
+    if (btnClosePastModal) {
+        btnClosePastModal.addEventListener('click', closePastModal);
+    }
+
+    if (btnProceedPastDate) {
+        btnProceedPastDate.addEventListener('click', () => {
+            isConfirmedPastDate = true;
+            closePastModal();
+            settingsForm.submit();
+        });
+    }
+
+    // Close on overlay backdrop click
+    if (pastDateModal) {
+        pastDateModal.addEventListener('click', (e) => {
+            if (e.target === pastDateModal) {
+                closePastModal();
+            }
+        });
+    }
 });
 </script>
 {% endblock %}

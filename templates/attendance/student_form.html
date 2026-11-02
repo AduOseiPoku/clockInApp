@@ -49,34 +49,29 @@
             {% endif %}
         </div>
 
+        {% if form.canteen_enrolled %}
         <div class="form-group" style="background: var(--surface-subtle); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
                 <span style="font-weight: 700; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
                     <span>🍽️</span> School Lunch Program
                 </span>
-                <span style="font-size: 0.72rem; background: hsla(var(--success-hsl), 0.15); color: var(--success-text); padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600;">
-                    Default: Included
+                <span style="font-size: 0.72rem; background: hsla(var(--primary-hsl), 0.15); color: var(--primary); padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600;">
+                    Principal Only
                 </span>
             </div>
-            <label style="display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0.85rem; cursor: pointer;">
+            <label style="display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0; cursor: pointer;">
                 {{ form.canteen_enrolled }}
                 <div>
                     <span style="font-weight: 600; font-size: 0.88rem; color: var(--text-main); display: block;">
                         Lunch Included
                     </span>
                     <small class="form-hint" style="margin-top: 0.15rem; display: block;">
-                        Toggle OFF only if student brings food from home or opts out of school meals.
+                        Toggle OFF only if student has special authorization from the Principal to bring food from home.
                     </small>
                 </div>
             </label>
-            <div style="border-top: 1px dashed var(--border); padding-top: 0.75rem; margin-top: 0.5rem;">
-                <label class="form-label" for="{{ form.custom_canteen_fee.id_for_label }}" style="font-size: 0.8rem;">
-                    Custom Daily Canteen Fee (Optional override)
-                </label>
-                {{ form.custom_canteen_fee }}
-                <small class="form-hint">Leave blank to use standard daily fee ({{ CURRENCY_SYMBOL }}{{ DEFAULT_CANTEEN_FEE }} / day).</small>
-            </div>
         </div>
+        {% endif %}
 
 
         <div class="form-group">
@@ -86,9 +81,12 @@
             </label>
         </div>
 
-        <div class="form-actions">
+        <div class="form-actions" style="display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end;">
             <a href="{% url 'student_list' %}" class="btn-secondary">Cancel</a>
-            <button type="submit" class="btn-primary">Save Student</button>
+            <button type="submit" name="save_and_add" value="1" class="btn-secondary" style="font-weight: 600; border-color: var(--primary); color: var(--primary);">
+                + Save & Add Another
+            </button>
+            <button type="submit" class="btn-primary" style="font-weight: 600;">Save Student</button>
         </div>
     </form>
 </div>

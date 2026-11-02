@@ -6,7 +6,10 @@ from django.test import TestCase, Client
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from .models import Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass
+from .models import (
+    Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass, TeacherRemittance,
+    SchoolSetting, get_term_date_range, calculate_school_weekdays, get_current_term_metrics
+)
 from .forms import StudentForm, TeacherCreationForm, TeacherUpdateForm
 from .views import get_collectors_financial_summary
 
@@ -472,6 +475,102 @@ class SchoolClockInSystemTests(TestCase):
         # Verify student with standard canteen enrollment now requires 15.00 daily
         self.assertEqual(self.student_tema.canteen_fee_required, Decimal('15.00'))
 
+    def test_principal_can_configure_academic_term_timeframe(self):
+        """Verify Principal can set Term Start and End dates, which are persisted and compute calendar metrics."""
+        url = reverse('school_settings')
+        post_data = {
+            'default_canteen_fee': '12.00',
+            'school_name': 'Geosaka Model School',
+            'current_period': 'Term 1 - 2026',
+            'currency_symbol': 'GH₵',
+            'term_start_date': '2026-01-12',
+            'term_end_date': '2026-04-10',
+        }
+        res = self.client.post(url, post_data, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Settings updated')
+
+        # Verify persisted values in SchoolSetting
+        self.assertEqual(SchoolSetting.get_setting('TERM_START_DATE'), '2026-01-12')
+        self.assertEqual(SchoolSetting.get_setting('TERM_END_DATE'), '2026-04-10')
+
+        # Check get_term_date_range()
+        start_date, end_date = get_term_date_range()
+        self.assertEqual(start_date, datetime.date(2026, 1, 12))
+        self.assertEqual(end_date, datetime.date(2026, 4, 10))
+
+        # Check metrics
+        metrics = get_current_term_metrics()
+        self.assertEqual(metrics['total_days'], 65)  # 13 weeks * 5 days = 65 school days
+
+        # Check rendered view displays intelligence card and metrics
+        res_get = self.client.get(url)
+        self.assertContains(res_get, 'Term Calendar Intelligence')
+        self.assertContains(res_get, '65')
+        self.assertContains(res_get, 'id="past-date-modal"')
+
+    def test_principal_can_configure_past_retrospective_term_dates(self):
+        """Setting a past term end date is permitted with soft notice, marking term as concluded."""
+        url = reverse('school_settings')
+        past_start = (timezone.localdate() - datetime.timedelta(days=60)).isoformat()
+        past_end = (timezone.localdate() - datetime.timedelta(days=10)).isoformat()
+
+        post_data = {
+            'default_canteen_fee': '12.00',
+            'school_name': 'Geosaka Model School',
+            'current_period': 'Term 1 - 2026',
+            'currency_symbol': 'GH₵',
+            'term_start_date': past_start,
+            'term_end_date': past_end,
+        }
+        res = self.client.post(url, post_data, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Settings updated')
+        self.assertContains(res, 'is in the past. This timeframe was saved as a concluded period.')
+
+        # Verify metrics show completed term (0 days remaining)
+        metrics = get_current_term_metrics()
+        self.assertEqual(metrics['remaining_days'], 0)
+        self.assertEqual(metrics['elapsed_days'], metrics['total_days'])
+
+        # GET request renders Concluded Period badge
+        res_get = self.client.get(url)
+        self.assertContains(res_get, 'Concluded Period')
+
+    def test_term_end_date_before_start_date_validation_error(self):
+        """Submitting an end date earlier than the start date must raise a form validation error."""
+        url = reverse('school_settings')
+        post_data = {
+            'default_canteen_fee': '12.00',
+            'school_name': 'Geosaka Model School',
+            'current_period': 'Term 1 - 2026',
+            'currency_symbol': 'GH₵',
+            'term_start_date': '2026-04-10',
+            'term_end_date': '2026-01-12',
+        }
+        res = self.client.post(url, post_data)
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.context['form'].has_error('term_end_date'))
+        self.assertIn(
+            "The term closing date cannot be earlier than the opening start date.",
+            res.context['form'].errors['term_end_date']
+        )
+
+    def test_calculate_school_weekdays_logic(self):
+        """Verify calculate_school_weekdays only counts Monday through Friday."""
+        # Mon Jan 12 to Fri Jan 16, 2026 = 5 days
+        mon = datetime.date(2026, 1, 12)
+        fri = datetime.date(2026, 1, 16)
+        self.assertEqual(calculate_school_weekdays(mon, fri), 5)
+
+        # Mon Jan 12 to following Mon Jan 19, 2026 = 6 days (excludes Sat & Sun)
+        next_mon = datetime.date(2026, 1, 19)
+        self.assertEqual(calculate_school_weekdays(mon, next_mon), 6)
+
+        # Invalid range returns 0
+        self.assertEqual(calculate_school_weekdays(fri, mon), 0)
+        self.assertEqual(calculate_school_weekdays(None, fri), 0)
+
 
 class RoleBasedAuthorizationTests(TestCase):
     def setUp(self):
@@ -689,7 +788,7 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertContains(res_form, 'Add New Teacher')
 
     def test_non_principal_cannot_manage_teachers_but_bursar_has_read_only(self):
-        """Teachers cannot access staff roster; Bursars can view staff roster in read-only mode."""
+        """Teachers and Bursars cannot access staff roster; only Principals/Admins can view and manage."""
         # 1. Teacher attempt is completely denied
         self.client.force_login(self.teacher_user)
         res_teacher = self.client.get(reverse('teacher_list'), follow=True)
@@ -698,17 +797,10 @@ class RoleBasedAuthorizationTests(TestCase):
         res_create = self.client.get(reverse('teacher_create'), follow=True)
         self.assertContains(res_create, 'Principal administrator privileges required')
 
-        # 2. Bursar has read-only access to teacher_list
+        # 2. Bursar attempt to view staff roster is denied (Principal required)
         self.client.force_login(self.bursar_user)
-        res_bursar = self.client.get(reverse('teacher_list'))
-        self.assertEqual(res_bursar.status_code, 200)
-        self.assertContains(res_bursar, 'Auditing Mode (Read-Only)')
-        self.assertContains(res_bursar, 'Fee Collectors')
-        # '+ Add Teacher' must NOT be visible to Bursar
-        self.assertNotContains(res_bursar, '+ Add Teacher')
-        # Edit and password reset links must NOT be visible to Bursar
-        self.assertNotContains(res_bursar, reverse('teacher_create'))
-        self.assertNotContains(res_bursar, reverse('teacher_update', args=[self.teacher_user.pk]))
+        res_bursar = self.client.get(reverse('teacher_list'), follow=True)
+        self.assertContains(res_bursar, 'Principal administrator privileges required')
 
         # 3. Bursar cannot modify teachers
         res_bursar_create = self.client.get(reverse('teacher_create'), follow=True)
@@ -744,18 +836,19 @@ class RoleBasedAuthorizationTests(TestCase):
             recorded_by=self.teacher_user
         )
 
-        self.client.force_login(self.bursar_user)
-
-        # 1. Staff roster automatically shows only authorized fee collectors (default visit)
+        # 1. Staff roster shows authorized fee collectors to Admin with remittance
+        self.client.force_login(self.admin_user)
         res_teachers = self.client.get(reverse('teacher_list'))
         self.assertEqual(res_teachers.status_code, 200)
         self.assertContains(res_teachers, self.teacher_user.username)
-        self.assertContains(res_teachers, 'Fee Collector')
         self.assertContains(res_teachers, '50.00')  # Cash to remit today
-        # Unauthorized teacher MUST NOT be visible to Bursar
-        self.assertNotContains(res_teachers, 'unauth_teacher_bob')
 
-        # 2. Payments ledger displays authorized collectors overview with remittance
+        # 2. Bursar cannot access staff roster directly
+        self.client.force_login(self.bursar_user)
+        res_bursar_teachers = self.client.get(reverse('teacher_list'), follow=True)
+        self.assertContains(res_bursar_teachers, 'Principal administrator privileges required')
+
+        # 3. Payments ledger displays authorized collectors overview with remittance
         res_payments = self.client.get(reverse('payment_list'))
         self.assertEqual(res_payments.status_code, 200)
         self.assertContains(res_payments, 'Authorized Fee Collection Teachers')
@@ -942,9 +1035,8 @@ class RoleBasedAuthorizationTests(TestCase):
             recorded_by=teacher_b
         )
 
-        self.client.force_login(self.bursar_user)
-
-        # Bursar views staff roster:
+        # Admin views staff roster:
+        self.client.force_login(self.admin_user)
         res = self.client.get(reverse('teacher_list'))
         self.assertEqual(res.status_code, 200)
 
@@ -954,6 +1046,7 @@ class RoleBasedAuthorizationTests(TestCase):
         self.assertContains(res, 'one-off bus')
 
         # Bursar views payments ledger:
+        self.client.force_login(self.bursar_user)
         res_pay = self.client.get(reverse('payment_list'))
         self.assertEqual(res_pay.status_code, 200)
         self.assertContains(res_pay, 'REC-ONEOFF-01')
@@ -1100,7 +1193,7 @@ class BusPaymentAnalyticsTests(TestCase):
         # Check DOM elements
         self.assertContains(res, 'id="classFilterSelect"')
         self.assertContains(res, 'value="__unpaid_all__"')
-        self.assertContains(res, 'id="pill-filter-unpaid"')
+        self.assertContains(res, 'id="pill-filter-bus_unpaid"')
         self.assertContains(res, 'id="unpaid-stat-card"')
         self.assertContains(res, 'id="unified-unpaid-section"')
         self.assertContains(res, 'data-status="unpaid"')
@@ -1215,12 +1308,12 @@ class StudentLunchProgramEnrollmentTests(TestCase):
         self.assertTrue(self.student.canteen_enrolled)
 
     def test_students_list_renders_toggle_button(self):
-        """Students directory displays interactive 1-click lunch toggle pill."""
+        """Students directory displays student records cleanly without redundant canteen toggle button."""
         self.client.force_login(self.admin_user)
         res = self.client.get(reverse('student_list'))
         self.assertEqual(res.status_code, 200)
-        self.assertContains(res, 'lunch-toggle-pill')
-        self.assertContains(res, '🍽️ Lunch Included')
+        self.assertContains(res, self.student.full_name)
+        self.assertNotContains(res, 'lunch-toggle-pill')
 
 
 class FeeTeacherArchitectureTests(TestCase):
@@ -2061,17 +2154,24 @@ class PrincipalAdminManagementTests(TestCase):
         self.assertEqual(res_toggle_on.status_code, 302)
         self.assertEqual(SchoolSetting.get_setting('ALLOW_TEACHER_STUDENT_REGISTRATION', 'False'), 'True')
 
-        # Now teacher can access student creation form
+        # Now teacher can access student creation form, but CANNOT see the lunch program toggle
         self.client.force_login(self.teacher)
         res_teacher_access = self.client.get(reverse('student_create'))
         self.assertEqual(res_teacher_access.status_code, 200)
+        self.assertNotContains(res_teacher_access, 'School Lunch Program')
 
-        # Teacher enrolls a student
+        # Principal CAN see the lunch program toggle
+        self.client.force_login(self.principal)
+        res_principal_access = self.client.get(reverse('student_create'))
+        self.assertEqual(res_principal_access.status_code, 200)
+        self.assertContains(res_principal_access, 'School Lunch Program')
+
+        # Teacher enrolls a student (automatically lunch-enrolled by default)
+        self.client.force_login(self.teacher)
         res_enroll = self.client.post(reverse('student_create'), {
             'first_name': 'Kweku',
             'last_name': 'Baah',
             'student_class': 'Basic 5',
-            'canteen_enrolled': True,
             'is_active': True,
         })
         self.assertEqual(res_enroll.status_code, 302)
@@ -2079,6 +2179,7 @@ class PrincipalAdminManagementTests(TestCase):
         self.assertIsNotNone(new_student)
         self.assertEqual(new_student.student_class, 'Basic 5')
         self.assertEqual(new_student.school_class, sc)
+        self.assertTrue(new_student.canteen_enrolled)
 
         # Principal toggles onboarding mode OFF
         self.client.force_login(self.principal)
@@ -2090,3 +2191,660 @@ class PrincipalAdminManagementTests(TestCase):
         self.client.force_login(self.teacher)
         res_teacher_blocked = self.client.get(reverse('student_create'))
         self.assertEqual(res_teacher_blocked.status_code, 302)
+
+    def test_teacher_assigned_to_multiple_buses_has_access_to_all_students(self):
+        """Verify that when a teacher is assigned to multiple buses, she has access to all students across all those buses."""
+        # Create 3 distinct buses along the same lane with different fares
+        bus_stop_1 = Bus.objects.create(name='Lane 1 - Comm 1', fee=Decimal('50.00'), is_active=True)
+        bus_stop_2 = Bus.objects.create(name='Lane 1 - Comm 18', fee=Decimal('70.00'), is_active=True)
+        bus_stop_3 = Bus.objects.create(name='Lane 1 - Comm 25', fee=Decimal('80.00'), is_active=True)
+        bus_unrelated = Bus.objects.create(name='Lane 2 - Madina', fee=Decimal('40.00'), is_active=True)
+
+        # Create students for each stop
+        s1 = Student.objects.create(first_name='Kwesi', last_name='Arthur', student_class='Class 1A', bus=bus_stop_1, is_active=True)
+        s2 = Student.objects.create(first_name='Kofi', last_name='Adu', student_class='Class 1B', bus=bus_stop_2, is_active=True)
+        s3 = Student.objects.create(first_name='Ama', last_name='Serwaa', student_class='Class 2A', bus=bus_stop_3, is_active=True)
+        s_other = Student.objects.create(first_name='Yaw', last_name='Osei', student_class='Class 3A', bus=bus_unrelated, is_active=True)
+
+        # Assign teacher to all 3 stops on Lane 1
+        self.teacher.profile.assigned_buses.set([bus_stop_1, bus_stop_2, bus_stop_3])
+        self.teacher.profile.assigned_class = ''
+        self.teacher.profile.can_collect_fees = True
+        self.teacher.profile.save()
+
+        # Check model methods
+        assigned_ids = self.teacher.profile.get_assigned_bus_ids()
+        self.assertEqual(len(assigned_ids), 3)
+        self.assertIn(bus_stop_1.id, assigned_ids)
+        self.assertIn(bus_stop_2.id, assigned_ids)
+        self.assertIn(bus_stop_3.id, assigned_ids)
+        self.assertNotIn(bus_unrelated.id, assigned_ids)
+
+        # Log in as teacher and open dashboard
+        self.client.force_login(self.teacher)
+        res = self.client.get(reverse('dashboard'))
+        self.assertEqual(res.status_code, 200)
+
+        # Verify all 3 students on her assigned buses are present in student_items
+        student_items = res.context['student_items']
+        displayed_student_ids = [item['student'].id for item in student_items]
+        self.assertIn(s1.id, displayed_student_ids)
+        self.assertIn(s2.id, displayed_student_ids)
+        self.assertIn(s3.id, displayed_student_ids)
+        self.assertNotIn(s_other.id, displayed_student_ids)
+
+        # Verify respective fares are preserved
+        item_s1 = next(item for item in student_items if item['student'].id == s1.id)
+        item_s2 = next(item for item in student_items if item['student'].id == s2.id)
+        item_s3 = next(item for item in student_items if item['student'].id == s3.id)
+        self.assertEqual(item_s1['bus_req'], Decimal('50.00'))
+        self.assertEqual(item_s2['bus_req'], Decimal('70.00'))
+        self.assertEqual(item_s3['bus_req'], Decimal('80.00'))
+
+        # Record payment via quick_payment_api for student at stop 2
+        res_pay = self.client.post(
+            reverse('api_quick_payment'),
+            data=json.dumps({
+                'student_id': s2.id,
+                'fee_type': 'BUS',
+                'amount': '70.00',
+                'payment_method': 'CASH',
+            }),
+            content_type='application/json'
+        )
+        self.assertEqual(res_pay.status_code, 200)
+        pay_data = res_pay.json()
+        self.assertTrue(pay_data['success'])
+        self.assertTrue(pay_data['bus_status']['is_paid'])
+        self.assertEqual(pay_data['bus_status']['balance'], 0.0)
+
+    def test_principal_can_assign_multiple_buses_via_teacher_form(self):
+        """Principal creates and updates a teacher selecting multiple buses, verifying all are assigned."""
+        bus_a = Bus.objects.create(name='Bus Alpha', fee=Decimal('40.00'), is_active=True)
+        bus_b = Bus.objects.create(name='Bus Beta', fee=Decimal('60.00'), is_active=True)
+        bus_c = Bus.objects.create(name='Bus Gamma', fee=Decimal('80.00'), is_active=True)
+
+        self.client.force_login(self.principal)
+
+        # 1. Create teacher with Bus Alpha and Bus Beta
+        res_create = self.client.post(reverse('teacher_create'), {
+            'username': 'lane_teacher_1',
+            'first_name': 'Lane',
+            'last_name': 'Guide',
+            'email': 'lane@school.edu',
+            'phone_number': '0241234567',
+            'password': 'Password123!',
+            'confirm_password': 'Password123!',
+            'role': UserProfile.ROLE_TEACHER,
+            'can_collect_fees': True,
+            'assigned_class': '',
+            'assigned_buses': [bus_a.id, bus_b.id],
+            'is_active': True,
+        }, follow=True)
+        self.assertEqual(res_create.status_code, 200)
+
+        created_teacher = User.objects.filter(username='lane_teacher_1').first()
+        self.assertIsNotNone(created_teacher)
+        assigned_ids = created_teacher.profile.get_assigned_bus_ids()
+        self.assertEqual(len(assigned_ids), 2)
+        self.assertIn(bus_a.id, assigned_ids)
+        self.assertIn(bus_b.id, assigned_ids)
+        self.assertNotIn(bus_c.id, assigned_ids)
+
+        # 2. Update teacher to also include Bus Gamma
+        res_update = self.client.post(reverse('teacher_update', kwargs={'pk': created_teacher.id}), {
+            'first_name': 'Lane',
+            'last_name': 'Guide',
+            'email': 'lane@school.edu',
+            'phone_number': '0241234567',
+            'role': UserProfile.ROLE_TEACHER,
+            'can_collect_fees': True,
+            'assigned_class': '',
+            'assigned_buses': [bus_a.id, bus_b.id, bus_c.id],
+            'is_active': True,
+        }, follow=True)
+        self.assertEqual(res_update.status_code, 200)
+
+        created_teacher.profile.refresh_from_db()
+        updated_ids = created_teacher.profile.get_assigned_bus_ids()
+        self.assertEqual(len(updated_ids), 3)
+        self.assertIn(bus_c.id, updated_ids)
+
+
+class TeacherSelfPasswordChangeTests(TestCase):
+    def setUp(self):
+        self.User = get_user_model()
+        self.teacher_user = self.User.objects.create_user(
+            username='self_teacher',
+            password='OldPassword123!',
+            first_name='Ama',
+            last_name='Teacher'
+        )
+        UserProfile.objects.filter(user=self.teacher_user).update(role=UserProfile.ROLE_TEACHER)
+        self.change_url = reverse('change_password')
+
+    def test_anonymous_redirected_to_login(self):
+        """Unauthenticated user accessing change_password is redirected to login."""
+        res = self.client.get(self.change_url)
+        self.assertEqual(res.status_code, 302)
+        self.assertIn(reverse('login'), res.url)
+
+    def test_teacher_can_view_change_password_page(self):
+        """Logged-in teacher sees the password change form and required fields."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.get(self.change_url)
+        self.assertEqual(res.status_code, 200)
+        self.assertTemplateUsed(res, 'attendance/change_password.html')
+        self.assertContains(res, 'id_old_password')
+        self.assertContains(res, 'id_new_password1')
+        self.assertContains(res, 'id_new_password2')
+
+    def test_wrong_old_password_fails(self):
+        """Submitting an incorrect current password rejects the change."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.post(self.change_url, {
+            'old_password': 'IncorrectOldPassword!',
+            'new_password1': 'FreshSecurePass456!',
+            'new_password2': 'FreshSecurePass456!',
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.context['form'].has_error('old_password'))
+        # Password remains old
+        self.teacher_user.refresh_from_db()
+        self.assertTrue(self.teacher_user.check_password('OldPassword123!'))
+
+    def test_mismatched_new_passwords_fails(self):
+        """Mismatched new password and confirm password rejects the change."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.post(self.change_url, {
+            'old_password': 'OldPassword123!',
+            'new_password1': 'FreshSecurePass456!',
+            'new_password2': 'CompletelyDifferent999!',
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.context['form'].has_error('new_password2'))
+        self.teacher_user.refresh_from_db()
+        self.assertTrue(self.teacher_user.check_password('OldPassword123!'))
+
+    def test_successful_password_change(self):
+        """Teacher changes password successfully, stays logged in, and can log in with new password."""
+        self.client.force_login(self.teacher_user)
+        res = self.client.post(self.change_url, {
+            'old_password': 'OldPassword123!',
+            'new_password1': 'BrandNewPassword2026!',
+            'new_password2': 'BrandNewPassword2026!',
+        }, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "Your password has been successfully updated.")
+
+        # Check DB
+        self.teacher_user.refresh_from_db()
+        self.assertTrue(self.teacher_user.check_password('BrandNewPassword2026!'))
+        self.assertFalse(self.teacher_user.check_password('OldPassword123!'))
+
+        # Verify teacher can log in with the new password
+        self.client.logout()
+        login_success = self.client.login(username='self_teacher', password='BrandNewPassword2026!')
+        self.assertTrue(login_success)
+
+
+
+
+class TeacherBusRosterStrictIsolationTests(TestCase):
+    """
+    Tests for teacher bus roster isolation:
+    1. Teachers assigned to specific buses can ONLY see students belonging to their assigned bus routes
+       on the Dashboard and Student List rosters.
+    2. Walkers and students on other bus routes are never visible, even if ?bus=none or ?bus=<other>
+       is explicitly passed as a GET parameter.
+    3. Bus fleet view (/buses/) only displays the teacher's assigned routes and metrics.
+    4. Access to unassigned bus analytics (/buses/<pk>/analytics/) is strictly rejected.
+    5. On the Fee Payment screen (/payments/record/), teachers retain school-wide visibility to select
+       and record one-off/guest rider payments for any student without modifying their registered bus.
+    """
+    def setUp(self):
+        self.class_1a = SchoolClass.objects.create(name='Class 1A')
+        self.class_2b = SchoolClass.objects.create(name='Class 2B')
+
+        self.bus_tema = Bus.objects.create(name='Tema Bus', fee=Decimal('35.00'))
+        self.bus_madina = Bus.objects.create(name='Madina Bus', fee=Decimal('40.00'))
+        self.bus_spintex = Bus.objects.create(name='Spintex Bus', fee=Decimal('45.00'))
+
+        # Students on Tema Bus
+        self.s_tema_1 = Student.objects.create(
+            first_name='Kofi', last_name='Tema', student_class='Class 1A',
+            school_class=self.class_1a, bus=self.bus_tema
+        )
+        self.s_tema_2 = Student.objects.create(
+            first_name='Ama', last_name='Tema', student_class='Class 2B',
+            school_class=self.class_2b, bus=self.bus_tema
+        )
+
+        # Student on Madina Bus
+        self.s_madina = Student.objects.create(
+            first_name='Kwame', last_name='Madina', student_class='Class 1A',
+            school_class=self.class_1a, bus=self.bus_madina
+        )
+
+        # Student on Spintex Bus
+        self.s_spintex = Student.objects.create(
+            first_name='Esi', last_name='Spintex', student_class='Class 2B',
+            school_class=self.class_2b, bus=self.bus_spintex
+        )
+
+        # Walker student (no bus)
+        self.s_walker = Student.objects.create(
+            first_name='Yaw', last_name='Walker', student_class='Class 1A',
+            school_class=self.class_1a, bus=None
+        )
+
+        # Bus Teacher assigned ONLY to Tema Bus (and later optionally Spintex)
+        self.bus_teacher = User.objects.create_user(
+            username='tema_teacher', password='Password123!', first_name='Teacher', last_name='Tema'
+        )
+        self.bus_teacher_profile = self.bus_teacher.profile
+        self.bus_teacher_profile.role = UserProfile.ROLE_TEACHER
+        self.bus_teacher_profile.can_collect_fees = True
+        self.bus_teacher_profile.assigned_class = ''
+        self.bus_teacher_profile.save()
+        self.bus_teacher_profile.assigned_buses.add(self.bus_tema)
+
+    def test_dashboard_roster_shows_only_assigned_bus_students(self):
+        """Teacher assigned to Tema Bus only sees Tema Bus students on the dashboard."""
+        self.client.force_login(self.bus_teacher)
+        # Dedicated single-bus teacher lands on their assigned bus roster via auto-redirect
+        res = self.client.get(reverse('dashboard'), follow=True)
+        self.assertEqual(res.status_code, 200)
+
+        # Tema students should be present
+        self.assertContains(res, 'Kofi Tema')
+        self.assertContains(res, 'Ama Tema')
+
+        # Madina, Spintex, and Walker students must NOT be present
+        self.assertNotContains(res, 'Kwame Madina')
+        self.assertNotContains(res, 'Esi Spintex')
+        self.assertNotContains(res, 'Yaw Walker')
+
+        # With explicit query parameter on dashboard
+        res_dash = self.client.get(reverse('dashboard'), {'bus': 'my_buses'})
+        self.assertEqual(res_dash.status_code, 200)
+        self.assertContains(res_dash, 'Kofi Tema')
+        self.assertNotContains(res_dash, 'Kwame Madina')
+        self.assertNotContains(res_dash, 'Yaw Walker')
+
+    def test_dashboard_tampered_bus_param_cannot_reveal_other_students(self):
+        """Passing ?bus=<other_bus_id> or ?bus=none does NOT expose other students or walkers."""
+        self.client.force_login(self.bus_teacher)
+
+        # Try to view Madina Bus via GET parameter
+        res_other = self.client.get(reverse('dashboard'), {'bus': self.bus_madina.id})
+        self.assertEqual(res_other.status_code, 200)
+        self.assertNotContains(res_other, 'Kwame Madina')
+        self.assertContains(res_other, 'Kofi Tema')
+
+        # Try to view Walkers via ?bus=none
+        res_none = self.client.get(reverse('dashboard'), {'bus': 'none'})
+        self.assertEqual(res_none.status_code, 200)
+        self.assertNotContains(res_none, 'Yaw Walker')
+        self.assertContains(res_none, 'Kofi Tema')
+
+    def test_student_list_roster_shows_only_assigned_bus_students(self):
+        """Student list (/students/) only renders students belonging to the teacher's bus routes."""
+        self.client.force_login(self.bus_teacher)
+        res = self.client.get(reverse('student_list'))
+        self.assertEqual(res.status_code, 200)
+
+        self.assertContains(res, 'Kofi Tema')
+        self.assertContains(res, 'Ama Tema')
+        self.assertNotContains(res, 'Kwame Madina')
+        self.assertNotContains(res, 'Esi Spintex')
+        self.assertNotContains(res, 'Yaw Walker')
+
+        # Even with tampered parameter
+        res_tampered = self.client.get(reverse('student_list'), {'bus': self.bus_madina.id})
+        self.assertNotContains(res_tampered, 'Kwame Madina')
+
+    def test_multi_bus_assignment_shows_all_assigned_routes(self):
+        """Teacher assigned to Tema Bus AND Spintex Bus sees students from both, but not Madina or walkers."""
+        self.bus_teacher_profile.assigned_buses.add(self.bus_spintex)
+        self.client.force_login(self.bus_teacher)
+
+        res = self.client.get(reverse('dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Kofi Tema')
+        self.assertContains(res, 'Ama Tema')
+        self.assertContains(res, 'Esi Spintex')
+        self.assertNotContains(res, 'Kwame Madina')
+        self.assertNotContains(res, 'Yaw Walker')
+
+    def test_bus_fleet_view_restricted_by_finance_permission(self):
+        """Fleet overview (/buses/) requires financial authority; teachers are denied access."""
+        self.client.force_login(self.bus_teacher)
+        res = self.client.get(reverse('bus_list'), follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Access denied: You do not have permission to access financial records')
+
+    def test_unassigned_bus_analytics_forbidden(self):
+        """Teacher cannot access payment analytics/roster for an unassigned bus."""
+        self.client.force_login(self.bus_teacher)
+        # Attempt to access Madina Bus analytics
+        res = self.client.get(reverse('bus_analytics', args=[self.bus_madina.pk]), follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Access denied: You do not have permission to access financial records')
+
+        # Access to Tema Bus analytics succeeds
+        res_assigned = self.client.get(reverse('bus_analytics', args=[self.bus_tema.pk]))
+        self.assertEqual(res_assigned.status_code, 200)
+        self.assertContains(res_assigned, 'Tema Bus')
+
+    def test_fee_payment_screen_preserves_school_wide_student_access_for_guest_riders(self):
+        """On /payments/record/, the teacher can see and record payments for any student as a guest rider."""
+        self.client.force_login(self.bus_teacher)
+        res = self.client.get(reverse('payment_create'))
+        self.assertEqual(res.status_code, 200)
+
+        # Full student mapping is supplied for guest rider selection
+        all_students_json = res.context.get('all_students_by_class_json')
+        self.assertIsNotNone(all_students_json)
+        self.assertIn('Kwame Madina', all_students_json)
+        self.assertIn('Yaw Walker', all_students_json)
+
+        # Successfully record a guest ride payment for a student registered to Madina Bus
+        post_data = {
+            'student_class': str(self.class_1a.id),
+            'student': self.s_madina.id,
+            'bus': self.bus_tema.id,
+            'is_one_off_bus': True,
+            'bus_amount': '35.00',
+            'canteen_amount': '0.00',
+            'payment_method': 'CASH',
+            'period': 'Term 1 - 2026',
+        }
+        res_post = self.client.post(reverse('payment_create'), post_data, follow=True)
+        self.assertEqual(res_post.status_code, 200)
+
+        # Verify payment was recorded as guest rider (is_temporary_bus=True)
+        payment = FeePayment.objects.filter(student=self.s_madina, fee_type='BUS').first()
+        self.assertIsNotNone(payment)
+        self.assertTrue(payment.is_temporary_bus)
+        self.assertEqual(payment.bus, self.bus_tema)
+
+        # Verify student's permanent bus assignment was NOT altered
+        self.s_madina.refresh_from_db()
+        self.assertEqual(self.s_madina.bus, self.bus_madina)
+
+
+
+class TeacherCollectionDossierAndScopingTests(TestCase):
+    """
+    Validates:
+    1. Authorized teachers can view their own intake audit dossier and payment history across dates.
+    2. Teachers are prevented from snooping into other teachers' financial intake logs.
+    3. The /my-collections/ convenience route redirects staff to their own audit.
+    4. Bus roster analytics exposes the 4 simplified status counts (All, Owing Bus, Owing Lunch, Settled).
+    5. Classroom teachers are strictly locked to their assigned class on the dashboard.
+    """
+
+    def setUp(self):
+        self.class_1 = SchoolClass.objects.create(name='Class 1')
+        self.class_2 = SchoolClass.objects.create(name='Class 2')
+
+        self.bus_1 = Bus.objects.create(name='Alpha Bus', fee=Decimal('10.00'))
+        self.bus_2 = Bus.objects.create(name='Beta Bus', fee=Decimal('15.00'))
+
+        # Teacher 1 (assigned to Bus 1)
+        self.teacher_1 = User.objects.create_user(
+            username='teacher1', password='password123', first_name='Ama', last_name='Teacher'
+        )
+        self.teacher_1_profile = self.teacher_1.profile
+        self.teacher_1_profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_1_profile.can_collect_fees = True
+        self.teacher_1_profile.assigned_bus = self.bus_1
+        self.teacher_1_profile.save()
+        self.teacher_1_profile.assigned_buses.add(self.bus_1)
+
+        # Teacher 2 (Classroom teacher for Class 2)
+        self.teacher_2 = User.objects.create_user(
+            username='teacher2', password='password123', first_name='Kofi', last_name='ClassTeacher'
+        )
+        self.teacher_2_profile = self.teacher_2.profile
+        self.teacher_2_profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_2_profile.can_collect_fees = True
+        self.teacher_2_profile.assigned_class = 'Class 2'
+        self.teacher_2_profile.save()
+
+        # Students
+        self.student_bus1 = Student.objects.create(
+            first_name='Kwame', last_name='BusRider', student_class='Class 1',
+            bus=self.bus_1, canteen_enrolled=True, is_active=True
+        )
+        self.student_class2 = Student.objects.create(
+            first_name='Abena', last_name='ClassStudent', student_class='Class 2',
+            bus=self.bus_2, canteen_enrolled=False, is_active=True
+        )
+
+    def test_teacher_can_view_own_collection_audit(self):
+        """A fee teacher can access their own collection audit dossier (/payments/collector/<id>/)."""
+        self.client.force_login(self.teacher_1)
+        res = self.client.get(reverse('collector_audit', kwargs={'pk': self.teacher_1.pk}))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Teacher Financial Audit')
+        self.assertContains(res, 'Ama Teacher')
+
+    def test_teacher_cannot_view_other_teacher_audit(self):
+        """A fee teacher cannot snoop on another teacher's financial audit log."""
+        self.client.force_login(self.teacher_1)
+        res = self.client.get(reverse('collector_audit', kwargs={'pk': self.teacher_2.pk}), follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Access denied: You do not have permission to access financial records.')
+
+    def test_my_collections_redirects_to_own_audit(self):
+        """/my-collections/ redirects logged-in teacher directly to their personal audit dossier."""
+        self.client.force_login(self.teacher_1)
+        res = self.client.get(reverse('my_collections'))
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, reverse('collector_audit', kwargs={'pk': self.teacher_1.pk}))
+
+    def test_bus_analytics_exposes_4_clean_filter_counts(self):
+        """bus_analytics summary includes bus_unpaid_count, canteen_unpaid_count, fully_settled_count."""
+        self.client.force_login(self.teacher_1)
+        res = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus_1.pk}))
+        self.assertEqual(res.status_code, 200)
+        summary = res.context.get('summary')
+        self.assertIsNotNone(summary)
+        self.assertIn('bus_unpaid_count', summary)
+        self.assertIn('canteen_unpaid_count', summary)
+        self.assertIn('fully_settled_count', summary)
+        self.assertEqual(summary['bus_unpaid_count'], 1)
+        self.assertEqual(summary['canteen_unpaid_count'], 1)
+        self.assertEqual(summary['fully_settled_count'], 0)
+
+    def test_classroom_teacher_dashboard_scoping(self):
+        """Classroom teacher on dashboard is locked to their class and sees is_class_teacher_scoped."""
+        self.client.force_login(self.teacher_2)
+        res = self.client.get(reverse('dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.context.get('is_class_teacher_scoped'))
+        available_classes = list(res.context.get('available_classes'))
+        self.assertEqual(available_classes, ['Class 2'])
+        self.assertContains(res, 'Abena ClassStudent')
+        self.assertNotContains(res, 'Kwame BusRider')
+
+
+class TeacherRemittanceAndReconciliationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin_user = User.objects.create_superuser('admin_user', 'admin@school.com', 'adminpass123')
+        self.admin_profile = self.admin_user.profile
+        self.admin_profile.role = UserProfile.ROLE_ADMIN
+        self.admin_profile.save()
+
+        self.bursar_user = User.objects.create_user('bursar_mary', 'mary@school.com', 'bursarpass123')
+        self.bursar_profile = self.bursar_user.profile
+        self.bursar_profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar_profile.save()
+
+        self.teacher_user = User.objects.create_user('teacher_kweku', 'kweku@school.com', 'teachpass123')
+        self.teacher_profile = self.teacher_user.profile
+        self.teacher_profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_profile.can_collect_fees = True
+        self.teacher_profile.assigned_class = 'Class 1A'
+        self.teacher_profile.save()
+
+        self.student = Student.objects.create(
+            first_name='Kofi',
+            last_name='Annan',
+            student_class='Class 1A',
+            is_active=True
+        )
+
+    def test_one_sided_cash_handover_creation_and_receipt(self):
+        """Bursar accepts and records physical cash handover from a teacher without teacher request."""
+        today = timezone.localdate()
+
+        # 1. Teacher records GH₵100.00 cash payment from student
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('100.00'),
+            payment_method='CASH',
+            payment_date=today,
+            receipt_number='REC-CASH-001',
+            recorded_by=self.teacher_user
+        )
+
+        # 2. Bursar logs in and checks payments page; sees teacher is holding GH₵100.00
+        self.client.force_login(self.bursar_user)
+        res_page = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_page.status_code, 200)
+        self.assertContains(res_page, 'Holding:')
+        self.assertContains(res_page, '100.00')
+
+        # 3. Bursar accepts handover of GH₵100.00 cash from teacher
+        data = {
+            'teacher_id': self.teacher_user.id,
+            'amount': '100.00',
+            'notes': 'Morning bus collection handed over at bursary desk'
+        }
+        res_post = self.client.post(reverse('teacher_remittance_create'), data, follow=True)
+        self.assertEqual(res_post.status_code, 200)
+
+        # 4. Verify remittance in database
+        remittance = TeacherRemittance.objects.filter(teacher=self.teacher_user).first()
+        self.assertIsNotNone(remittance)
+        self.assertEqual(remittance.amount, Decimal('100.00'))
+        self.assertEqual(remittance.expected_amount, Decimal('100.00'))
+        self.assertEqual(remittance.variance, Decimal('0.00'))
+        self.assertEqual(remittance.received_by, self.bursar_user)
+        self.assertTrue(remittance.reference_code.startswith('REM-'))
+
+        # 5. Verify receipt voucher view
+        res_receipt = self.client.get(reverse('teacher_remittance_receipt', kwargs={'pk': remittance.pk}))
+        self.assertEqual(res_receipt.status_code, 200)
+        self.assertContains(res_receipt, remittance.reference_code)
+        self.assertContains(res_receipt, '100.00')
+        self.assertContains(res_receipt, 'Exact Match')
+
+        # 6. Verify payments page now reflects 0 unremitted cash and displays settled slip
+        res_page_after = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_page_after.status_code, 200)
+        self.assertContains(res_page_after, '✓ Remitted')
+        self.assertContains(res_page_after, remittance.reference_code)
+
+    def test_drawer_cash_and_field_cash_reconciliation(self):
+        """Bursary drawer cash matches counter cash + verified teacher remittances."""
+        today = timezone.localdate()
+
+        # Bursar collects GH₵50 cash at counter
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='CANTEEN',
+            amount=Decimal('50.00'),
+            payment_method='CASH',
+            payment_date=today,
+            receipt_number='REC-BURSAR-001',
+            recorded_by=self.bursar_user
+        )
+
+        # Teacher collects GH₵150 cash on bus
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('150.00'),
+            payment_method='CASH',
+            payment_date=today,
+            receipt_number='REC-TEACHER-001',
+            recorded_by=self.teacher_user
+        )
+
+        self.client.force_login(self.bursar_user)
+
+        # Before handover:
+        # Drawer cash = 50.00, Teacher cash in field = 150.00
+        res_before = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_before.context['drawer_cash_today'], Decimal('50.00'))
+        self.assertEqual(res_before.context['teacher_cash_in_field'], Decimal('150.00'))
+
+        # Settle handover of GH₵150.00
+        TeacherRemittance.objects.create(
+            teacher=self.teacher_user,
+            received_by=self.bursar_user,
+            amount=Decimal('150.00'),
+            expected_amount=Decimal('150.00'),
+            variance=Decimal('0.00'),
+            date=today,
+            reference_code='REM-TEST-001'
+        )
+
+        # After handover:
+        # Drawer cash = 200.00, Teacher cash in field = 0.00
+        res_after = self.client.get(reverse('payment_list'))
+        self.assertEqual(res_after.context['drawer_cash_today'], Decimal('200.00'))
+        self.assertEqual(res_after.context['teacher_cash_in_field'], Decimal('0.00'))
+
+    def test_payment_export_csv(self):
+        """Finance officer can download payments ledger CSV."""
+        today = timezone.localdate()
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('75.00'),
+            payment_method='MOBILE_MONEY',
+            payment_date=today,
+            receipt_number='REC-CSV-001',
+            recorded_by=self.bursar_user
+        )
+
+        self.client.force_login(self.bursar_user)
+        res = self.client.get(reverse('payment_export_csv'))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8')
+        self.assertIn('attachment; filename="payments_ledger_', res['Content-Disposition'])
+
+        csv_content = res.content.decode('utf-8')
+        self.assertIn('Payment Date,Receipt Number,Student Name', csv_content)
+        self.assertIn('REC-CSV-001', csv_content)
+        self.assertIn('75.00', csv_content)
+        self.assertIn('Kofi Annan', csv_content)
+
+    def test_payment_audit_summary_api(self):
+        """AJAX audit summary endpoint returns live drawer balances and teacher unremitted cash."""
+        today = timezone.localdate()
+        FeePayment.objects.create(
+            student=self.student,
+            fee_type='BUS',
+            amount=Decimal('80.00'),
+            payment_method='CASH',
+            payment_date=today,
+            receipt_number='REC-AJAX-001',
+            recorded_by=self.teacher_user
+        )
+
+        self.client.force_login(self.bursar_user)
+        res = self.client.get(reverse('api_payment_audit_summary'))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['teacher_cash_in_field'], 80.0)
+        self.assertEqual(data['drawer_cash_today'], 0.0)
+        self.assertTrue(any(c['id'] == self.teacher_user.id and c['cash_in_hand'] == 80.0 for c in data['collectors']))

@@ -90,15 +90,24 @@
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="{{ form.assigned_bus.id_for_label }}">
-                    Assigned Bus Route (Fee Teacher)
+                <label class="form-label">
+                    Assigned Bus Routes / Stops (Fee Teacher)
                 </label>
-                {{ form.assigned_bus }}
-                {% if form.assigned_bus.errors %}
-                    <div class="form-error">{{ form.assigned_bus.errors.0 }}</div>
+                <div class="bus-checkbox-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.6rem; padding: 0.75rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 220px; overflow-y: auto;">
+                    {% for choice in form.assigned_buses %}
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; margin: 0; padding: 0.25rem 0.4rem; border-radius: var(--radius-xs);">
+                        {{ choice.tag }}
+                        <span>{{ choice.choice_label }}</span>
+                    </label>
+                    {% empty %}
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">No active buses configured.</span>
+                    {% endfor %}
+                </div>
+                {% if form.assigned_buses.errors %}
+                    <div class="form-error">{{ form.assigned_buses.errors.0 }}</div>
                 {% endif %}
                 <span class="form-hint">
-                    Designate this route if this teacher is the Fee Teacher for this bus. Fee Teachers do NOT need an assigned classroom; they collect both bus fare and canteen (lunch) fees for all students on their bus during the morning commute.
+                    Check all bus routes/stops this teacher covers along their route. The teacher will be able to take attendance and collect fees for all students registered on any of these buses.
                 </span>
             </div>
 
@@ -128,7 +137,7 @@
                 </button>
             </h3>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.5rem;">
                 <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label" for="{{ form.password.id_for_label }}">Password <span style="color: var(--danger);">*</span></label>
                     {{ form.password }}
@@ -143,6 +152,9 @@
                         <div class="form-error">{{ form.confirm_password.errors.0 }}</div>
                     {% endif %}
                 </div>
+            </div>
+            <div id="gen-password-alert" style="display:none; margin-bottom: 1rem; padding: 0.4rem 0.75rem; background: hsla(var(--primary-hsl), 0.08); border: 1px solid hsla(var(--primary-hsl), 0.2); border-radius: var(--radius-sm); font-size: 0.8rem; color: var(--primary);">
+                ⚡ Generated Password: <strong id="gen-pass-val"></strong> &bull; <span style="color: var(--text-muted);">Entered in plain text above so you can note it down.</span>
             </div>
             {% endif %}
 
@@ -210,7 +222,12 @@ function generatePassword() {
         cpField.type = 'text';
         pField.value = pass;
         cpField.value = pass;
-        alert('Generated Password: ' + pass + '\n(Displayed in plain text so you can note it down)');
+        const alertBox = document.getElementById('gen-password-alert');
+        const passVal = document.getElementById('gen-pass-val');
+        if (alertBox && passVal) {
+            passVal.innerText = pass;
+            alertBox.style.display = 'block';
+        }
     }
 }
 </script>

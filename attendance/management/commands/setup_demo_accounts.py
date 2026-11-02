@@ -73,26 +73,30 @@ class Command(BaseCommand):
                     'last_name': acc['last_name'],
                 }
             )
-            # Guarantee password and status
-            user.set_password(acc['password'])
-            user.is_staff = acc['is_staff']
-            user.is_superuser = acc['is_superuser']
-            user.is_active = True
-            user.save()
+            if created or not user.has_usable_password():
+                user.set_password(acc['password'])
+                user.is_staff = acc['is_staff']
+                user.is_superuser = acc['is_superuser']
+                user.is_active = True
+                user.save()
 
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.role = acc['role']
-            profile.assigned_class = acc['assigned_class']
-            profile.can_collect_fees = acc['can_collect_fees']
-            profile.save()
+                profile, _ = UserProfile.objects.get_or_create(user=user)
+                profile.role = acc['role']
+                profile.assigned_class = acc['assigned_class']
+                profile.can_collect_fees = acc['can_collect_fees']
+                profile.save()
 
-            self.stdout.write(self.style.SUCCESS(
-                f"  [OK] '{acc['username']}' ready (Password: {acc['password']} | Role: {acc['role']})"
-            ))
+                self.stdout.write(self.style.SUCCESS(
+                    f"  [OK] Initialized '{acc['username']}' (Role: {acc['role']})"
+                ))
+            else:
+                self.stdout.write(self.style.NOTICE(
+                    f"  [SKIP] '{acc['username']}' already exists; preserving existing password and credentials."
+                ))
 
-        # Also ensure 'Principal' user (if present) has password 'admin123'
+        # Also ensure 'Principal' user (if newly created without usable password) has default password
         principal_user = User.objects.filter(username__iexact='principal').first()
-        if principal_user:
+        if principal_user and not principal_user.has_usable_password():
             principal_user.set_password('admin123')
             principal_user.is_staff = True
             principal_user.is_superuser = True
@@ -101,6 +105,6 @@ class Command(BaseCommand):
             profile, _ = UserProfile.objects.get_or_create(user=principal_user)
             profile.role = UserProfile.ROLE_ADMIN
             profile.save()
-            self.stdout.write(self.style.SUCCESS("  [OK] 'Principal' password synchronized to admin123"))
+            self.stdout.write(self.style.SUCCESS("  [OK] 'Principal' default password initialized."))
 
         self.stdout.write(self.style.SUCCESS("All demo credentials are now active and functional!"))

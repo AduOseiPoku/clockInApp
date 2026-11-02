@@ -276,7 +276,11 @@
 
             {% if is_scoped_fee_teacher %}
             <!-- Compact Scoped Roster Bar -->
-            <div id="scoped-bus-mode-banner" style="display: {% if is_guest_mode_initial %}none{% else %}flex{% endif %}; background: var(--surface-subtle); border: 1px solid var(--border); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% if is_guest_mode_initial %}
+            <div id="scoped-bus-mode-banner" style="display: none; background: var(--surface-subtle); border: 1px solid var(--border); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% else %}
+            <div id="scoped-bus-mode-banner" style="display: flex; background: var(--surface-subtle); border: 1px solid var(--border); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% endif %}
                 <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-main);">🚌 {{ assigned_bus.name }}</span>
                 <button type="button" id="btn-toggle-guest-mode" class="btn-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.65rem; min-height: 32px;">
                     + Guest Rider
@@ -284,7 +288,11 @@
             </div>
 
             <!-- Compact Guest Mode Bar -->
-            <div id="guest-mode-banner" style="display: {% if is_guest_mode_initial %}flex{% else %}none{% endif %}; background: hsla(38, 92%, 50%, 0.1); border: 1px solid #f59e0b; padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% if is_guest_mode_initial %}
+            <div id="guest-mode-banner" style="display: flex; background: hsla(38, 92%, 50%, 0.1); border: 1px solid #f59e0b; padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% else %}
+            <div id="guest-mode-banner" style="display: none; background: hsla(38, 92%, 50%, 0.1); border: 1px solid #f59e0b; padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% endif %}
                 <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; color: #b45309;">
                     <span>⚠️ Guest Rider Mode ({{ assigned_bus.name }})</span>
                 </div>
@@ -480,13 +488,28 @@
 <script id="scoped-classes-data" type="application/json">{{ scoped_classes_json|safe }}</script>
 <script id="all-classes-data" type="application/json">{{ all_classes_json|safe }}</script>
 <script id="buses-data" type="application/json">{{ buses_json|safe }}</script>
+<script id="payment-config-data" type="application/json">
+{
+    "isScopedFeeTeacher": {{ is_scoped_fee_teacher|yesno:'true,false' }},
+    "isGuestMode": {{ is_guest_mode_initial|yesno:'true,false' }},
+    "assignedBusId": "{{ assigned_bus.id|default:'' }}",
+    "assignedBusName": "{{ assigned_bus.name|default:''|escapejs }}",
+    "initialStudentId": "{{ initial_student_id|default:'' }}",
+    "initialClassId": "{{ initial_class_id|default:'' }}",
+    "currency": "{{ CURRENCY_SYMBOL|escapejs }}"
+}
+</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const isScopedFeeTeacher = "{{ is_scoped_fee_teacher|yesno:'true,false' }}" === "true";
-    let isGuestMode = "{{ is_guest_mode_initial|yesno:'true,false' }}" === "true";
-    const assignedBusId = "{{ assigned_bus.id|default:'' }}";
-    const assignedBusName = "{{ assigned_bus.name|default:'' }}";
+    let paymentConfig = {};
+    try {
+        paymentConfig = JSON.parse(document.getElementById('payment-config-data')?.textContent || '{}');
+    } catch(e) {}
+    const isScopedFeeTeacher = Boolean(paymentConfig.isScopedFeeTeacher);
+    let isGuestMode = Boolean(paymentConfig.isGuestMode);
+    const assignedBusId = paymentConfig.assignedBusId || '';
+    const assignedBusName = paymentConfig.assignedBusName || '';
 
     const scopedStudentsEl = document.getElementById('scoped-students-data');
     const allStudentsEl = document.getElementById('all-students-data');
@@ -537,9 +560,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const liveTotalDisplay = document.getElementById('live-total-display');
     const totalSummaryText = document.getElementById('total-summary-text');
 
-    const initialStudentId = "{{ initial_student_id }}";
-    const initialClassId = "{{ initial_class_id }}";
-    const currency = "{{ CURRENCY_SYMBOL }}";
+    const initialStudentId = paymentConfig.initialStudentId || '';
+    const initialClassId = paymentConfig.initialClassId || '';
+    const currency = paymentConfig.currency || 'GH₵';
 
     let currentStudent = null;
     let currentStudentActiveBusBalance = 0;

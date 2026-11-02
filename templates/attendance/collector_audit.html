@@ -7,9 +7,15 @@
 <div class="page-header" style="margin-bottom: 1.25rem;">
     <div class="page-title-group">
         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+            {% if user.profile.can_view_revenue %}
             <a href="{% url 'payment_list' %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
                 ← Back to Payments Ledger
             </a>
+            {% else %}
+            <a href="{% if user.profile.is_bus_fee_teacher and user.profile.assigned_bus %}{% url 'bus_analytics' user.profile.assigned_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                ← Back to {% if user.profile.is_bus_fee_teacher %}Bus Roster{% else %}Dashboard{% endif %}
+            </a>
+            {% endif %}
             <span style="color: var(--border);">/</span>
             <span style="font-size: 0.78rem; color: var(--text-muted);">Teacher Financial Audit</span>
         </div>
@@ -222,7 +228,7 @@
 
     <!-- The Audit Log Table -->
     {% if audit_logs %}
-    <div class="table-responsive">
+    <div class="table-responsive desktop-only">
         <table class="data-table">
             <thead>
                 <tr>
@@ -313,6 +319,50 @@
                 {% endfor %}
             </tbody>
         </table>
+    </div>
+
+    <!-- Mobile Card View for Audit Log -->
+    <div class="mobile-only" style="padding: 0.75rem;">
+        {% for p in audit_logs %}
+        <div style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.35rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
+                        {{ p.student.initials }}
+                    </div>
+                    <div>
+                        <div style="font-weight: 700; font-size: 0.88rem; color: var(--text-main);">
+                            {{ p.student.full_name }}
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">
+                            {{ p.student.student_class }} &bull; {{ p.payment_date|date:"M d, Y" }}
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 0.92rem; font-weight: 700; color: var(--success-text);">
+                        +{{ currency }}{{ p.amount|floatformat:2 }}
+                    </div>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">{{ p.get_payment_method_display }}</span>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.4rem; border-top: 1px solid var(--border-subtle); margin-top: 0.35rem;">
+                <div>
+                    {% if p.fee_type == 'BUS' %}
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem;">🚌 Bus</span>
+                    {% else %}
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem;">🍽️ Lunch</span>
+                    {% endif %}
+                    {% if p.is_advance %}
+                        <span class="badge" style="font-size: 0.62rem; background: #ede9fe; color: #6d28d9;">{{ p.days_covered }}d Adv</span>
+                    {% endif %}
+                </div>
+                <a href="{% url 'payment_receipt' p.id %}" target="_blank" class="btn-secondary" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; text-decoration: none;">
+                    📄 Receipt
+                </a>
+            </div>
+        </div>
+        {% endfor %}
     </div>
     {% else %}
     <div style="text-align: center; padding: 2.5rem 1rem;">

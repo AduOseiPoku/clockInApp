@@ -9,18 +9,23 @@
     <title>{% block title %}Clock-In & Fee Tracker{% endblock %} | {{ SCHOOL_NAME }}</title>
 
     <!-- Minimalist Design System -->
-    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=1.4">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=1.5">
     {% block extra_css %}{% endblock %}
 </head>
 
-<body data-currency="{{ CURRENCY_SYMBOL }}">
+<body data-currency="{{ CURRENCY_SYMBOL }}" class="{% if user.is_authenticated %}has-sidebar{% endif %}">
 
-    <!-- Minimalist Navbar -->
-    <header class="navbar">
-        <div class="navbar-inner">
-            <div class="navbar-left">
+    <div class="app-layout">
+        {% if user.is_authenticated %}
+        <!-- Off-Canvas Side Drawer Backdrop Overlay (Mobile only) -->
+        <div id="side-drawer-backdrop" class="side-drawer-backdrop" onclick="closeSideDrawer()" aria-hidden="true"></div>
+
+        <!-- Unified Navigation Sidebar (Permanent on Desktop, Off-Canvas Drawer on Mobile) -->
+        <aside id="side-drawer" class="app-sidebar side-drawer" role="navigation" aria-label="Main Navigation">
+            <!-- Sidebar Header -->
+            <div class="side-drawer-header">
                 <div class="brand-wrapper">
-                    <a href="{% if user.profile and user.profile.role == 'ACCOUNTANT' %}{% url 'payment_list' %}{% else %}{% url 'dashboard' %}{% endif %}" class="brand-logo-icon" title="{{ SCHOOL_NAME }}">
+                    <a href="{% if user.profile and user.profile.role == 'ACCOUNTANT' %}{% url 'payment_list' %}{% else %}{% url 'dashboard' %}{% endif %}" class="brand-logo-icon" title="{{ SCHOOL_NAME }}" style="width: 32px; height: 32px;">
                         <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -30,274 +35,292 @@
                         <span class="brand-title">{{ SCHOOL_NAME }}</span>
                     </div>
                 </div>
+                <!-- Close Button (Mobile Only) -->
+                <button type="button" class="side-drawer-close-btn" aria-label="Close navigation menu" onclick="closeSideDrawer()">
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
 
-                <div class="navbar-divider"></div>
-
-                <nav class="main-nav">
-                <ul class="nav-links">
-                    {% if user.is_authenticated and user.profile.role != 'ACCOUNTANT' %}
-                    <li>
-                        <a href="{% if user.profile and user.profile.is_bus_fee_teacher and user.profile.assigned_bus %}{% url 'bus_analytics' user.profile.assigned_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}"
-                            class="nav-link {% if request.resolver_match.url_name == 'dashboard' or request.resolver_match.url_name == 'bus_analytics' and user.profile.is_bus_fee_teacher %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {% if user.profile and user.profile.is_bus_fee_teacher %}Bus Roster{% elif user.profile and user.profile.role == 'TEACHER' %}Class Roster{% else %}Dashboard{% endif %}
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if user.profile.can_view_revenue %}
-                    <li>
-                        <a href="{% url 'payment_list' %}"
-                            class="nav-link {% if 'payment' in request.resolver_match.url_name %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                            </svg>
-                            Payments
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'reports' %}"
-                            class="nav-link {% if request.resolver_match.url_name == 'reports' %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                            </svg>
-                            Reports
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if user.profile.can_view_revenue or user.profile.can_register_students or user.profile.is_teacher %}
-                    <li>
-                        <a href="{% url 'student_list' %}"
-                            class="nav-link {% if 'student' in request.resolver_match.url_name %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                            </svg>
-                            Students
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if user.profile.can_view_revenue %}
-                    <li>
-                        <a href="{% url 'bus_list' %}"
-                            class="nav-link {% if 'bus' in request.resolver_match.url_name %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M8 7h8m-8 4h8m-8 4h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" />
-                            </svg>
-                            Buses
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'teacher_list' %}"
-                            class="nav-link {% if 'teacher' in request.resolver_match.url_name %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                            </svg>
-                            Teachers
-                        </a>
-                    </li>
-                    {% endif %}
-                    {% if user.profile.is_principal %}
-                    <li>
-                        <a href="{% url 'class_list' %}"
-                            class="nav-link {% if 'class' in request.resolver_match.url_name %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                            </svg>
-                            Classes
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'notifications' %}"
-                            class="nav-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                            </svg>
-                            Alerts
-                        </a>
-                    </li>
-                    <li>
-                        <a href="{% url 'school_settings' %}"
-                            class="nav-link {% if request.resolver_match.url_name == 'school_settings' %}active{% endif %}">
-                            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            Settings
-                        </a>
-                    </li>
-                    {% endif %}
-                </ul>
-            </nav>
-        </div>
-
-        <div class="nav-actions">
-                {% if user.is_authenticated and user.profile.can_register_students and not user.profile.is_principal %}
-                <a href="{% url 'student_create' %}" class="nav-action-btn" style="background: var(--primary, #4f46e5); color: #fff; font-weight: 600;">
-                    + Enroll Student
-                </a>
-                {% endif %}
-                {% if user.is_authenticated and user.profile.can_record_payments and not user.profile.is_principal %}
-                <a href="{% url 'payment_create' %}" class="nav-action-btn">
-                    + Record Fee
-                </a>
-                {% endif %}
-
-                {% if user.is_authenticated %}
-                    {% if user.profile.is_principal or user.is_superuser %}
-                    <a href="{% url 'logout' %}" class="btn-signout" title="Sign Out" style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card); color: var(--text-muted); font-size: 0.82rem; font-weight: 500; text-decoration: none;">
-                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                        </svg>
-                        <span>Sign Out</span>
-                    </a>
-                    {% else %}
-                    <div class="user-badge">
-                        <span class="user-badge-name">{{ user.username }}</span>
+            <!-- Sidebar User Profile Card -->
+            <div class="side-drawer-user-card">
+                <div class="side-drawer-avatar">
+                    {{ user.username|slice:":2"|upper }}
+                </div>
+                <div class="side-drawer-user-info">
+                    <span class="side-drawer-user-name">{% if user.get_full_name %}{{ user.get_full_name }}{% else %}{{ user.username }}{% endif %}</span>
+                    <div class="side-drawer-user-badges">
                         {% if user.profile %}
-                        <span class="user-badge-role">{{ user.profile.get_role_display }}</span>
+                        <span class="side-drawer-user-role">{{ user.profile.get_role_display }}</span>
+                        {% if user.profile.is_teacher and user.profile.fee_teacher_title != 'Teacher' %}
+                        <span class="side-drawer-bus-badge" title="{{ user.profile.fee_teacher_title }}">{{ user.profile.fee_teacher_title }}</span>
                         {% endif %}
-                        <a href="{% url 'logout' %}" class="btn-signout" title="Sign Out">
-                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                            </svg>
-                        </a>
+                        {% endif %}
                     </div>
-                    {% endif %}
-                    <!-- Mobile Menu Hamburger Button -->
-                    <button type="button" id="mobile-menu-toggle" class="mobile-menu-btn" aria-label="Toggle navigation menu" onclick="toggleMobileMenu()">
-                        <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                    </button>
-                {% else %}
-                    <a href="{% url 'login' %}" class="btn-secondary">
-                        Sign In
-                    </a>
-                {% endif %}
+                </div>
             </div>
-        </div>
 
-        {% if user.is_authenticated %}
-        <!-- Slide-Down Mobile Drawer Navigation -->
-        <nav id="mobile-nav-drawer" class="mobile-nav-drawer" aria-label="Mobile Navigation Drawer">
-            <div class="mobile-nav-user-header">
-                <span class="user-badge-name" style="font-weight: 700;">{{ user.username }}</span>
-                {% if user.profile %}
-                <span class="user-badge-role" style="font-size: 0.75rem; color: var(--text-muted);">({{ user.profile.get_role_display }})</span>
-                {% endif %}
-            </div>
-            <ul class="mobile-nav-links">
+            <!-- Sidebar Body Navigation Links (Scrollable) -->
+            <div class="side-drawer-body">
+                <!-- Section 1: Daily Attendance & Transit -->
                 {% if user.profile.role != 'ACCOUNTANT' %}
-                <li>
-                    <a href="{% if user.profile and user.profile.is_bus_fee_teacher and user.profile.assigned_bus %}{% url 'bus_analytics' user.profile.assigned_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}"
-                       class="mobile-nav-link {% if request.resolver_match.url_name == 'dashboard' or request.resolver_match.url_name == 'bus_analytics' and user.profile.is_bus_fee_teacher %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        {% if user.profile and user.profile.is_bus_fee_teacher %}Bus Roster{% elif user.profile and user.profile.role == 'TEACHER' %}Class Roster{% else %}Dashboard{% endif %}
-                    </a>
-                </li>
+                <div class="side-drawer-section">
+                    <div class="side-drawer-section-label">Daily Attendance & Transit</div>
+                    <ul class="side-drawer-menu">
+                        <li>
+                            <a href="{% if user.profile and user.profile.is_bus_fee_teacher and user.profile.assigned_bus %}{% url 'bus_analytics' user.profile.assigned_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}"
+                               class="side-drawer-link {% if request.resolver_match.url_name == 'dashboard' or request.resolver_match.url_name == 'bus_analytics' and user.profile.is_bus_fee_teacher %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">{% if user.profile and user.profile.is_bus_fee_teacher %}Bus Roster{% elif user.profile and user.profile.role == 'TEACHER' %}Class Roster{% else %}Dashboard{% endif %}</span>
+                            </a>
+                        </li>
+                        {% if user.profile and user.profile.primary_bus and not user.profile.is_bus_fee_teacher %}
+                        <li>
+                            <a href="{% url 'bus_analytics' user.profile.primary_bus.pk %}" class="side-drawer-link {% if request.resolver_match.url_name == 'bus_analytics' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8m-8 4h8m-8 4h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Bus Roster</span>
+                                <span class="side-drawer-tag">{{ user.profile.primary_bus.name }}</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if user.profile and user.profile.can_view_my_collections %}
+                        <li>
+                            <a href="{% url 'my_collections' %}" class="side-drawer-link {% if request.resolver_match.url_name == 'my_collections' or request.resolver_match.url_name == 'collector_audit' and teacher.id == user.id %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">My Collections</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
                 {% endif %}
 
-                {% if user.profile.can_view_revenue %}
-                <li>
-                    <a href="{% url 'payment_list' %}" class="mobile-nav-link {% if 'payment' in request.resolver_match.url_name %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
-                        Payments
-                    </a>
-                </li>
-                <li>
-                    <a href="{% url 'reports' %}" class="mobile-nav-link {% if request.resolver_match.url_name == 'reports' %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-                        Reports
-                    </a>
-                </li>
+                <!-- Section 2: Financials & Audit -->
+                {% if user.profile.can_view_revenue or user.profile.can_record_payments %}
+                <div class="side-drawer-section">
+                    <div class="side-drawer-section-label">Financials & Audit</div>
+                    <ul class="side-drawer-menu">
+                        {% if user.profile.can_view_revenue %}
+                        <li>
+                            <a href="{% url 'payment_list' %}" class="side-drawer-link {% if 'payment' in request.resolver_match.url_name and request.resolver_match.url_name != 'payment_create' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Payments Ledger</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if user.profile.can_record_payments and not user.profile.is_principal %}
+                        <li>
+                            <a href="{% url 'payment_create' %}" class="side-drawer-link side-drawer-action-link {% if request.resolver_match.url_name == 'payment_create' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">+ Record Fee</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if user.profile.can_view_revenue %}
+                        <li>
+                            <a href="{% url 'reports' %}" class="side-drawer-link {% if request.resolver_match.url_name == 'reports' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Financial Reports</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
                 {% endif %}
 
-                {% if user.profile.can_view_revenue or user.profile.can_register_students or user.profile.is_teacher %}
-                <li>
-                    <a href="{% url 'student_list' %}" class="mobile-nav-link {% if 'student' in request.resolver_match.url_name %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                        Students
-                    </a>
-                </li>
+                <!-- Section 3: School Roster & Fleet -->
+                {% if user.profile.can_view_revenue or user.profile.can_register_students or user.profile.is_teacher or user.profile.is_principal %}
+                <div class="side-drawer-section">
+                    <div class="side-drawer-section-label">School Roster & Fleet</div>
+                    <ul class="side-drawer-menu">
+                        <li>
+                            <a href="{% url 'student_list' %}" class="side-drawer-link {% if 'student' in request.resolver_match.url_name and request.resolver_match.url_name != 'student_create' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Students</span>
+                            </a>
+                        </li>
+                        {% if user.profile.can_register_students %}
+                        <li>
+                            <a href="{% url 'student_create' %}" class="side-drawer-link side-drawer-action-link {% if request.resolver_match.url_name == 'student_create' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">+ Enroll Student</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if user.profile.can_view_revenue %}
+                        <li>
+                            <a href="{% url 'bus_list' %}" class="side-drawer-link {% if 'bus' in request.resolver_match.url_name and request.resolver_match.url_name != 'bus_analytics' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8m-8 4h8m-8 4h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Buses</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if user.profile.is_principal %}
+                        <li>
+                            <a href="{% url 'teacher_list' %}" class="side-drawer-link {% if 'teacher' in request.resolver_match.url_name %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Staff & Teachers</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="{% url 'class_list' %}" class="side-drawer-link {% if 'class' in request.resolver_match.url_name %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Classes</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="{% url 'notifications' %}" class="side-drawer-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Alerts & Logs</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="{% url 'school_settings' %}" class="side-drawer-link {% if request.resolver_match.url_name == 'school_settings' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">School Settings</span>
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
                 {% endif %}
 
-                {% if user.profile.can_view_revenue %}
-                <li>
-                    <a href="{% url 'bus_list' %}" class="mobile-nav-link {% if 'bus' in request.resolver_match.url_name %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8m-8 4h8m-8 4h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" /></svg>
-                        Buses
-                    </a>
-                </li>
-                <li>
-                    <a href="{% url 'teacher_list' %}" class="mobile-nav-link {% if 'teacher' in request.resolver_match.url_name %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                        Teachers
-                    </a>
-                </li>
-                {% endif %}
-
-                {% if user.profile.is_principal %}
-                <li>
-                    <a href="{% url 'class_list' %}" class="mobile-nav-link {% if 'class' in request.resolver_match.url_name %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                        Classes
-                    </a>
-                </li>
-                <li>
-                    <a href="{% url 'notifications' %}" class="mobile-nav-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                        Alerts
-                    </a>
-                </li>
-                <li>
-                    <a href="{% url 'school_settings' %}" class="mobile-nav-link {% if request.resolver_match.url_name == 'school_settings' %}active{% endif %}">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                        Settings
-                    </a>
-                </li>
-                {% endif %}
-
-                <li style="border-top: 1px solid var(--border); padding-top: 0.5rem; margin-top: 0.5rem;">
-                    <a href="{% url 'logout' %}" class="mobile-nav-link" style="color: var(--danger-text);">
-                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        Sign Out
-                    </a>
-                </li>
-            </ul>
-        </nav>
-        {% endif %}
-    </header>
-
-    <!-- Main Container -->
-    <main class="container">
-        <!-- Django Flash Messages -->
-        {% if messages %}
-        <div class="messages-wrapper">
-            {% for message in messages %}
-            <div class="alert alert-{{ message.tags }}">
-                <span>{{ message }}</span>
-                <button type="button" onclick="this.parentElement.remove()"
-                    style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:currentColor;">✕</button>
+                <!-- Section 4: Account & Security -->
+                <div class="side-drawer-section side-drawer-section-account">
+                    <div class="side-drawer-section-label">Account & Security</div>
+                    <ul class="side-drawer-menu">
+                        <li>
+                            <a href="{% url 'change_password' %}" class="side-drawer-link {% if request.resolver_match.url_name == 'change_password' %}active{% endif %}">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Change Password</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="{% url 'logout' %}" class="side-drawer-link side-drawer-logout-link">
+                                <span class="side-drawer-link-icon">
+                                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                                </span>
+                                <span class="side-drawer-link-text">Sign Out</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
             </div>
-            {% endfor %}
-        </div>
+        </aside>
         {% endif %}
 
-        {% block content %}{% endblock %}
-    </main>
+        <!-- App Main Wrapper -->
+        <div class="app-main-wrapper">
+            <!-- Slim Top Utility Bar (52px) -->
+            <header class="app-topbar">
+                <div class="app-topbar-inner">
+                    <!-- Mobile Left Brand (Hidden on Desktop) -->
+                    <div class="topbar-mobile-left mobile-only">
+                        <div class="brand-wrapper">
+                            <a href="{% if user.profile and user.profile.role == 'ACCOUNTANT' %}{% url 'payment_list' %}{% else %}{% url 'dashboard' %}{% endif %}" class="brand-logo-icon" title="{{ SCHOOL_NAME }}" style="width: 28px; height: 28px;">
+                                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </a>
+                            <div class="brand-text">
+                                <span class="brand-title">{{ SCHOOL_NAME }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Desktop Left Context (Hidden on Mobile) -->
+                    <div class="topbar-desktop-left desktop-only">
+                        <div class="topbar-context-badge">
+                            <span class="topbar-period-pill">{{ CURRENT_ACADEMIC_PERIOD|default:"Term 1 - 2026" }}</span>
+                            <span class="topbar-divider">&bull;</span>
+                            <span class="topbar-system-name">{{ SCHOOL_NAME }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Topbar Actions (Right) -->
+                    <div class="topbar-actions">
+                        {% if user.is_authenticated %}
+                            <!-- Mobile Quick Collections shortcut & Hamburger Toggle -->
+                            {% if user.profile and user.profile.can_view_my_collections %}
+                            <a href="{% url 'my_collections' %}" class="mobile-menu-btn" title="My History & Collections" style="margin-right: 0.35rem; text-decoration: none; font-size: 1.1rem; display: inline-flex; align-items: center; justify-content: center;">
+                                📅
+                            </a>
+                            {% endif %}
+
+                            <button type="button" id="side-drawer-toggle" class="mobile-menu-btn" aria-label="Toggle navigation menu" onclick="toggleSideDrawer()">
+                                <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                                </svg>
+                            </button>
+                        {% else %}
+                            <a href="{% url 'login' %}" class="btn-secondary">
+                                Sign In
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Container -->
+            <main class="container">
+                <!-- Django Flash Messages -->
+                {% if messages %}
+                <div class="messages-wrapper">
+                    {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }}">
+                        <span>{{ message }}</span>
+                        <button type="button" onclick="this.parentElement.remove()"
+                            style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:currentColor;">✕</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% block content %}{% endblock %}
+            </main>
+
+            <!-- Minimalist Footer -->
+            <footer class="site-footer">
+                <div class="container footer-inner">
+                    <div>
+                        &copy; 2026 <strong>{{ SCHOOL_NAME }}</strong> &bull; Student Attendance & Fee Verification
+                    </div>
+                    <div>
+                        {{ CURRENT_ACADEMIC_PERIOD }}
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
 
     <!-- Quick Payment Modal -->
     <div id="quick-payment-modal" class="modal-overlay">
@@ -405,18 +428,6 @@
 
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container"></div>
-
-    <!-- Minimalist Footer -->
-    <footer class="site-footer">
-        <div class="container footer-inner">
-            <div>
-                &copy; 2026 <strong>Geosake Model School</strong> &bull; Student Attendance & Fee Verification
-            </div>
-            <div>
-                {{ CURRENT_ACADEMIC_PERIOD }}
-            </div>
-        </div>
-    </footer>
 
     <!-- App Scripts -->
     <script src="{% static 'js/clockin.js' %}"></script>
