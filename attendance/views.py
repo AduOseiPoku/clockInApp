@@ -743,11 +743,35 @@ def dashboard_view(request):
             recorded_by__profile__role=UserProfile.ROLE_TEACHER
         ).values('recorded_by').distinct().count()
 
+    # Smart contextual pagination:
+    # High page size (80) when scoped to a class or bus so whole rosters fit on 1 page for roll call.
+    # Responsive page size (40) when viewing all classes/buses across the whole school.
+    is_single_group = bool(class_filter or (bus_filter and bus_filter != 'my_buses') or is_class_teacher_scoped)
+    page_size = 80 if is_single_group else 40
+
+    paginator = Paginator(student_items, page_size)
+    page_number = request.GET.get('page', 1)
+    try:
+        page_obj = paginator.page(page_number)
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
+
+    query_params = request.GET.copy()
+    if 'page' in query_params:
+        query_params.pop('page')
+    extra_querystring = query_params.urlencode()
+
     context = {
         'target_date': target_date,
         'date_str': target_date.strftime('%Y-%m-%d'),
         'period': period,
-        'student_items': student_items,
+        'student_items': page_obj,
+        'page_obj': page_obj,
+        'paginator': paginator,
+        'is_paginated': page_obj.has_other_pages(),
+        'extra_querystring': extra_querystring,
         'total_filtered': len(student_items),
         'available_classes': available_classes,
         'buses': buses,
