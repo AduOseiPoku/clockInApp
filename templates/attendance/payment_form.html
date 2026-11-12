@@ -12,7 +12,7 @@
 }
 
 .payment-form-card {
-    background: var(--surface);
+    background: var(--surface-card, #ffffff);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 1.5rem;
@@ -42,7 +42,7 @@
 }
 
 .fee-item-card {
-    background: var(--surface);
+    background: var(--surface-card, #ffffff);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 0.95rem;
@@ -106,7 +106,7 @@
     font-weight: 600;
     text-align: center;
     border-radius: var(--radius-xs);
-    background: var(--surface);
+    background: var(--surface-card, #ffffff);
     border: 1px solid var(--border);
     color: var(--text-main);
     cursor: pointer;
@@ -123,7 +123,7 @@
 .total-charge-banner {
     margin-top: 1rem;
     padding: 0.85rem 1rem;
-    background: var(--surface);
+    background: var(--surface-card, #ffffff);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     display: flex;
@@ -163,6 +163,279 @@
 .payment-form-card textarea {
     width: 100%;
     min-height: 42px;
+}
+
+/* Quick Student Name Search */
+.quick-search-wrapper {
+    position: relative;
+    margin-bottom: 1rem;
+}
+
+.quick-search-input-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.quick-search-icon {
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    display: inline-flex;
+    pointer-events: none;
+}
+
+#student-quick-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding-left: 2.5rem;
+    padding-right: 2.4rem;
+    min-height: 44px;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid var(--border);
+    background: var(--surface-subtle, #f4f4f5);
+}
+
+#student-quick-search:focus {
+    background: var(--surface-card, #ffffff);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(24, 24, 27, 0.08);
+}
+
+.btn-clear-search {
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    line-height: 1;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.35rem 0.5rem;
+    display: none;
+}
+
+.quick-search-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--surface-card, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+    z-index: 40;
+    display: none;
+}
+
+.quick-search-item {
+    padding: 0.65rem 0.9rem;
+    min-height: 44px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    background: var(--surface-card, #ffffff);
+    border-bottom: 1px solid var(--border);
+    transition: background 0.12s;
+}
+
+.quick-search-item:last-child {
+    border-bottom: none;
+}
+
+.quick-search-item:hover,
+.quick-search-item.active {
+    background: var(--surface-hover, #f9fafb);
+}
+
+.quick-search-item-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.quick-search-item-name {
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quick-search-item-sub {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quick-search-item .class-badge {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Prepaid / Bulk Covered Clock-In Panel */
+.bulk-covered-panel {
+    border: 2px solid #22c55e;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(16, 185, 129, 0.02));
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    display: none;
+}
+
+.bulk-covered-panel.is-partial {
+    border-color: #f59e0b;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.02));
+}
+
+.btn-payment-clockin.is-partial {
+    background: #d97706;
+}
+
+.btn-payment-clockin.is-partial:hover {
+    background: #b45309;
+}
+
+.wallet-method-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.25rem;
+}
+
+.wallet-method-pills {
+    display: inline-flex;
+    gap: 0.35rem;
+}
+
+.wallet-method-pill {
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    background: var(--surface-card, #ffffff);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.12s;
+}
+
+.wallet-method-pill.active {
+    background: #fef3c7;
+    color: #92400e;
+    border-color: #f59e0b;
+}
+
+.bulk-covered-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.bulk-paid-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.28rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: #dcfce7;
+    color: #15803d;
+    border: 1px solid #86efac;
+}
+
+.bulk-remaining-card {
+    background: var(--surface-card, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.9rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.bulk-remaining-amount {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #15803d;
+    line-height: 1.1;
+}
+
+.bulk-clockin-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.btn-payment-clockin {
+    width: 100%;
+    min-height: 48px;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: #16a34a;
+    color: #ffffff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.btn-payment-clockin:hover {
+    background: #15803d;
+}
+
+.btn-payment-clockin:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.bulk-clocked-in-state {
+    width: 100%;
+    min-height: 48px;
+    padding: 0.6rem 1rem;
+    border-radius: var(--radius-sm);
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    color: #15803d;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.bulk-secondary-links {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
 }
 
 /* =========================================================
@@ -303,7 +576,7 @@
                 </div>
             </div>
             {% elif is_one_off_mode %}
-            <div style="background: hsla(var(--primary-hsl), 0.08); border: 1px solid var(--primary); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; color: var(--primary);">
+            <div style="background: rgba(24, 24, 27, 0.05); border: 1px solid var(--primary); padding: 0.65rem 0.95rem; border-radius: var(--radius-sm); margin-bottom: 1.15rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; color: var(--primary);">
                 <span>🚌 Guest Trip: {{ locked_bus.name|default:"Selected route" }}</span>
             </div>
             {% endif %}
@@ -322,6 +595,23 @@
             {% else %}
             <input type="hidden" name="payment_date" id="id_payment_date" value="{% now 'Y-m-d' %}">
             {% endif %}
+
+            <!-- Instant Student Name Search -->
+            <div class="quick-search-wrapper">
+                <label class="form-label" for="student-quick-search" style="font-size: 0.84rem; font-weight: 700;">
+                    Quick Search Student
+                </label>
+                <div class="quick-search-input-box">
+                    <span class="quick-search-icon">
+                        <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </span>
+                    <input type="text" id="student-quick-search" class="form-input" placeholder="Type student name to search..." autocomplete="off">
+                    <button type="button" id="btn-clear-student-search" class="btn-clear-search" title="Clear search">✕</button>
+                </div>
+                <div id="student-search-results" class="quick-search-dropdown"></div>
+            </div>
 
             <!-- Class, Student & Bus Route Selection -->
             <div class="form-grid-3col">
@@ -353,8 +643,52 @@
                 </div>
             </div>
 
+            <!-- Prepaid / Bulk-Paid Direct Clock-In Card -->
+            <div id="bulk-covered-panel" class="bulk-covered-panel">
+                <div class="bulk-covered-header">
+                    <div>
+                        <div id="bulk-panel-student-name" style="font-size: 1.08rem; font-weight: 800; color: var(--text-main);">Student Name</div>
+                        <div id="bulk-panel-student-meta" style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">Class &bull; Route</div>
+                    </div>
+                    <span id="bulk-panel-paid-badge" class="bulk-paid-pill">✓ Paid (Bulk Credit)</span>
+                </div>
+
+                <div class="bulk-remaining-card">
+                    <div>
+                        <div id="bulk-panel-remaining-label" style="font-size: 0.74rem; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.03em;">
+                            Amount Remaining
+                        </div>
+                        <div id="bulk-panel-remaining-sub" style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem;">
+                            Balance left after today
+                        </div>
+                        <div id="bulk-panel-breakdown" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem;"></div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div id="bulk-panel-remaining-amount" class="bulk-remaining-amount">{{ CURRENCY_SYMBOL }}0.00</div>
+                        <div id="bulk-panel-remaining-days" style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); margin-top: 0.15rem;"></div>
+                    </div>
+                </div>
+
+                <div class="bulk-clockin-actions">
+                    <div id="bulk-clockin-control">
+                        <button type="button" id="btn-payment-clockin" class="btn-payment-clockin">
+                            ✓ Clock In Student
+                        </button>
+                    </div>
+
+                    <div class="bulk-secondary-links">
+                        <button type="button" id="btn-toggle-topup-form" style="background: none; border: none; color: var(--primary); font-size: 0.78rem; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0.25rem 0;">
+                            + Add Additional Payment / Top-Up
+                        </button>
+                        <button type="button" id="btn-next-student-search" style="background: none; border: none; color: var(--text-muted); font-size: 0.78rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0;">
+                            🔍 Search Next Student
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Dual Fee Payment Box -->
-            <div class="fee-breakdown-box">
+            <div id="fee-breakdown-box" class="fee-breakdown-box">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.85rem;">
                     <h4 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: var(--text-main);">
                         Fee Breakdown
@@ -367,7 +701,7 @@
                 </div>
 
                 <!-- Clean Multi-Pay Prepayment Bar -->
-                <div class="multipay-card" style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 0.95rem; margin-bottom: 1rem;">
+                <div class="multipay-card" style="background: var(--surface-card, #ffffff); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 0.95rem; margin-bottom: 1rem;">
                     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
                         <label for="input-custom-multipay" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main); margin: 0;">
                             Multi-Day Lump Sum
@@ -457,6 +791,13 @@
                 <div class="total-charge-banner">
                     <div style="font-size: 0.82rem; color: var(--text-muted);">
                         <span id="total-summary-text">Select student and enter amount</span>
+                        <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Payment Method:</span>
+                            <div class="wallet-method-pills" id="manual-method-pills">
+                                <button type="button" class="wallet-method-pill manual-method-pill active" data-method="CASH">💵 Cash</button>
+                                <button type="button" class="wallet-method-pill manual-method-pill" data-method="MOBILE_MONEY">📱 MoMo</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="total-charge-box">
                         <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 600; color: var(--text-muted); margin-right: 0.5rem;">Total to Charge</div>
@@ -473,7 +814,10 @@
             {{ form.notes }}
 
             <div class="payment-actions-bar">
-                <a href="{% url 'payment_list' %}" class="btn-secondary">Cancel</a>
+                <a href="{% if user.profile and user.profile.can_view_revenue %}{% url 'payment_list' %}{% elif user.profile and user.profile.can_view_my_collections %}{% url 'my_collections' %}{% else %}{% url 'dashboard' %}{% endif %}" class="btn-secondary">Cancel</a>
+                <button type="submit" id="btn-save-and-add" name="save_and_add" value="1" class="btn-secondary" style="border-color: var(--primary); color: var(--primary); font-weight: 600;">
+                    + Save & Record Another
+                </button>
                 <button type="submit" id="btn-submit-payment" class="btn-primary">
                     Save
                 </button>
@@ -564,13 +908,193 @@ document.addEventListener('DOMContentLoaded', () => {
     const initialClassId = paymentConfig.initialClassId || '';
     const currency = paymentConfig.currency || 'GH₵';
 
+    const quickSearchInput = document.getElementById('student-quick-search');
+    const btnClearSearch = document.getElementById('btn-clear-student-search');
+    const searchResultsEl = document.getElementById('student-search-results');
+
+    const bulkPanel = document.getElementById('bulk-covered-panel');
+    const feeBreakdownBox = document.getElementById('fee-breakdown-box');
+    const btnSubmitPayment = document.getElementById('btn-submit-payment');
+    const btnSaveAndAdd = document.getElementById('btn-save-and-add');
+    const paymentForm = document.getElementById('payment-form');
+    const bulkStudentName = document.getElementById('bulk-panel-student-name');
+    const bulkStudentMeta = document.getElementById('bulk-panel-student-meta');
+    const bulkPaidBadge = document.getElementById('bulk-panel-paid-badge');
+    const bulkRemainingAmount = document.getElementById('bulk-panel-remaining-amount');
+    const bulkRemainingDays = document.getElementById('bulk-panel-remaining-days');
+    const bulkRemainingLabel = document.getElementById('bulk-panel-remaining-label');
+    const bulkRemainingSub = document.getElementById('bulk-panel-remaining-sub');
+    const bulkBreakdown = document.getElementById('bulk-panel-breakdown');
+    const bulkClockinControl = document.getElementById('bulk-clockin-control');
+    const btnToggleTopupForm = document.getElementById('btn-toggle-topup-form');
+    const btnNextStudentSearch = document.getElementById('btn-next-student-search');
+
     let currentStudent = null;
     let currentStudentActiveBusBalance = 0;
     let currentStudentActiveCanteenBalance = 0;
+    let isShowingManualTopup = false;
+    let lastAppliedMultipayAmount = 0;
+    let selectedWalletMethod = 'CASH';
+
+    function syncStudentCache(studentId, details) {
+        if (!details || !studentId) return;
+        [allStudents, scopedStudents].forEach(group => {
+            if (!group) return;
+            Object.keys(group).forEach(clsKey => {
+                (group[clsKey] || []).forEach(item => {
+                    if (String(item.id) === String(studentId)) {
+                        Object.assign(item, details);
+                        if (details.bus_wallet_balance !== undefined) {
+                            item.bus_wallet = details.bus_wallet_balance;
+                        }
+                        if (details.canteen_wallet_balance !== undefined) {
+                            item.canteen_wallet = details.canteen_wallet_balance;
+                        }
+                    }
+                });
+            });
+        });
+    }
 
     function formatMoney(val) {
         return `${currency}${parseFloat(val || 0).toFixed(2)}`;
     }
+
+    function getCsrfToken() {
+        const input = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (input && input.value) return input.value;
+        if (typeof getCookie === 'function') return getCookie('csrftoken');
+        const cookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
+        return cookie ? cookie.split('=')[1] : '';
+    }
+
+    function setPaymentFormVisible(visible) {
+        if (feeBreakdownBox) {
+            feeBreakdownBox.style.display = visible ? 'block' : 'none';
+        }
+        if (btnSubmitPayment) {
+            btnSubmitPayment.style.display = visible ? 'inline-flex' : 'none';
+        }
+        if (btnSaveAndAdd) {
+            btnSaveAndAdd.style.display = visible ? 'inline-flex' : 'none';
+        }
+    }
+
+    function getFlatActiveStudents() {
+        const list = [];
+        Object.keys(activeStudentsByClass).forEach(clsId => {
+            const arr = activeStudentsByClass[clsId] || [];
+            arr.forEach(s => {
+                list.push({ ...s, class_id: s.class_id || clsId });
+            });
+        });
+        return list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+
+    function renderQuickSearchResults(query) {
+        if (!searchResultsEl) return;
+        const q = (query || '').trim().toLowerCase();
+        if (btnClearSearch) {
+            btnClearSearch.style.display = q.length > 0 ? 'inline-block' : 'none';
+        }
+        if (!q) {
+            searchResultsEl.style.display = 'none';
+            searchResultsEl.innerHTML = '';
+            return;
+        }
+
+        const matches = getFlatActiveStudents().filter(s =>
+            (s.name || '').toLowerCase().includes(q) ||
+            (s.class_name || '').toLowerCase().includes(q)
+        ).slice(0, 20);
+
+        if (matches.length === 0) {
+            searchResultsEl.innerHTML = `<div style="padding: 0.75rem 0.9rem; font-size: 0.84rem; color: var(--text-muted);">No matching students found.</div>`;
+            searchResultsEl.style.display = 'block';
+            return;
+        }
+
+        const esc = (str) => String(str || '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+
+        searchResultsEl.innerHTML = matches.map(s => {
+            const routeTag = s.bus_name ? `🚌 ${s.bus_name}` : 'Walker';
+            const walletAmt = (parseFloat(s.bus_wallet || 0) + parseFloat(s.canteen_wallet || 0));
+            const walletTag = walletAmt > 0
+                ? `<span class="class-badge" style="font-size: 0.7rem; background: #dcfce7; color: #15803d; margin-right: 0.35rem;">Wallet ${formatMoney(walletAmt)}</span>`
+                : '';
+            return `
+                <div class="quick-search-item" data-class-id="${esc(s.class_id)}" data-student-id="${esc(s.id)}" data-student-name="${esc(s.name)}">
+                    <div class="quick-search-item-main">
+                        <div class="quick-search-item-name">${esc(s.name)}</div>
+                        <div class="quick-search-item-sub">${esc(s.class_name)} &bull; ${esc(routeTag)}</div>
+                    </div>
+                    <div>
+                        ${walletTag}<span class="class-badge" style="font-size: 0.72rem;">Select →</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        searchResultsEl.style.display = 'block';
+    }
+
+    function selectStudentFromSearch(classId, studentId, studentName) {
+        if (searchResultsEl) searchResultsEl.style.display = 'none';
+        if (quickSearchInput) quickSearchInput.value = studentName || '';
+        if (btnClearSearch) btnClearSearch.style.display = studentName ? 'inline-block' : 'none';
+        if (classSelect) {
+            classSelect.value = classId;
+        }
+        updateStudentDropdown(classId, studentId);
+    }
+
+    if (quickSearchInput) {
+        quickSearchInput.addEventListener('input', (e) => {
+            renderQuickSearchResults(e.target.value);
+        });
+        quickSearchInput.addEventListener('focus', () => {
+            if (quickSearchInput.value.trim() && (!currentStudent || quickSearchInput.value.trim() !== currentStudent.name)) {
+                renderQuickSearchResults(quickSearchInput.value);
+            }
+        });
+        quickSearchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && searchResultsEl) {
+                searchResultsEl.style.display = 'none';
+            } else if (e.key === 'Enter' && searchResultsEl && searchResultsEl.style.display === 'block') {
+                const firstItem = searchResultsEl.querySelector('.quick-search-item');
+                if (firstItem) {
+                    e.preventDefault();
+                    selectStudentFromSearch(firstItem.dataset.classId, firstItem.dataset.studentId, firstItem.dataset.studentName);
+                }
+            }
+        });
+    }
+
+    if (searchResultsEl) {
+        searchResultsEl.addEventListener('click', (e) => {
+            const item = e.target.closest('.quick-search-item');
+            if (!item) return;
+            selectStudentFromSearch(item.dataset.classId, item.dataset.studentId, item.dataset.studentName);
+        });
+    }
+
+    if (btnClearSearch) {
+        btnClearSearch.addEventListener('click', () => {
+            if (quickSearchInput) {
+                quickSearchInput.value = '';
+                quickSearchInput.focus();
+            }
+            btnClearSearch.style.display = 'none';
+            if (searchResultsEl) searchResultsEl.style.display = 'none';
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (searchResultsEl && !e.target.closest('.quick-search-wrapper')) {
+            searchResultsEl.style.display = 'none';
+        }
+    });
 
     function calculateTotal() {
         const b = parseFloat(busAmountInput.value) || 0;
@@ -594,40 +1118,353 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function getTopupToggleLabel(student) {
+        const settled = Boolean(student && student.is_fully_settled_today);
+        const cashNeeded = parseFloat((student && student.total_cash_needed) || 0);
+        if (isShowingManualTopup) {
+            return 'Hide Payment Form';
+        }
+        return (!settled && cashNeeded > 0) ? '+ Or Pay Multi-Day Bulk Instead' : '+ Add Additional Payment / Top-Up';
+    }
+
+    function renderBulkClockinControl(student) {
+        if (!bulkClockinControl || !student) return;
+        const firstName = (student.name || 'Student').split(' ')[0];
+        const settled = Boolean(student.is_fully_settled_today);
+        const toDeduct = parseFloat(student.total_to_deduct || 0);
+        const cashNeeded = parseFloat(student.total_cash_needed || 0);
+        const walletBal = parseFloat(student.total_wallet_balance || 0);
+
+        if (settled && student.is_clocked_in) {
+            bulkClockinControl.innerHTML = `
+                <div class="bulk-clocked-in-state">
+                    <span>✓ Clocked In ${student.clock_in_time ? 'at ' + student.clock_in_time : 'Today'}</span>
+                    <button type="button" id="btn-payment-undo-clockin" class="btn-secondary" style="font-size: 0.78rem; padding: 0.28rem 0.65rem; min-height: 32px;">
+                        Undo
+                    </button>
+                </div>
+            `;
+        } else if (settled) {
+            bulkClockinControl.innerHTML = `
+                <button type="button" id="btn-payment-clockin" class="btn-payment-clockin">
+                    ✓ Clock In ${firstName}
+                </button>
+            `;
+        } else if (cashNeeded > 0) {
+            const creditPrefix = toDeduct > 0 ? `Use ${formatMoney(toDeduct)} Credit + ` : '';
+            bulkClockinControl.innerHTML = `
+                <div class="wallet-method-row">
+                    <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Collect remainder via:</span>
+                    <div class="wallet-method-pills">
+                        <button type="button" class="wallet-method-pill ${selectedWalletMethod === 'CASH' ? 'active' : ''}" data-method="CASH">💵 Cash</button>
+                        <button type="button" class="wallet-method-pill ${selectedWalletMethod === 'MOBILE_MONEY' ? 'active' : ''}" data-method="MOBILE_MONEY">📱 MoMo</button>
+                    </div>
+                </div>
+                <button type="button" id="btn-payment-clockin" class="btn-payment-clockin is-partial">
+                    ✓ ${creditPrefix}Collect ${formatMoney(cashNeeded)} &amp; Clock In ${firstName}
+                </button>
+            `;
+        } else if (toDeduct > 0) {
+            bulkClockinControl.innerHTML = `
+                <button type="button" id="btn-payment-clockin" class="btn-payment-clockin">
+                    ✓ Deduct ${formatMoney(toDeduct)} &amp; Clock In ${firstName}
+                </button>
+            `;
+        } else {
+            bulkClockinControl.innerHTML = `
+                <button type="button" id="btn-payment-clockin" class="btn-payment-clockin">
+                    ✓ Clock In ${firstName}
+                </button>
+            `;
+        }
+    }
+
+    function renderBulkCoveredPanel(student) {
+        if (!bulkPanel) return;
+        const isOneOff = Boolean(isGuestMode || (isOneOffInput && isOneOffInput.checked));
+        const walletBal = parseFloat((student && student.total_wallet_balance) || 0);
+        const toDeduct = parseFloat((student && student.total_to_deduct) || 0);
+        const cashNeeded = parseFloat((student && student.total_cash_needed) || 0);
+        const walletAfter = parseFloat((student && student.total_wallet_after) || 0);
+        const settled = Boolean(student && student.is_fully_settled_today);
+        const showWalletCard = Boolean(
+            student && student.has_applicable_fees && !isOneOff && (settled || walletBal > 0 || toDeduct > 0)
+        );
+
+        if (!showWalletCard) {
+            bulkPanel.classList.remove('is-partial');
+            bulkPanel.style.display = 'none';
+            setPaymentFormVisible(true);
+            return;
+        }
+
+        bulkPanel.style.display = 'block';
+        isShowingManualTopup = false;
+        setPaymentFormVisible(false);
+        if (btnToggleTopupForm) {
+            btnToggleTopupForm.textContent = getTopupToggleLabel(student);
+        }
+
+        if (bulkStudentName) bulkStudentName.textContent = student.name || 'Student';
+        if (bulkStudentMeta) {
+            const routeText = student.has_bus ? `🚌 ${student.bus_name}` : 'Walker';
+            const mealText = student.canteen_enrolled ? '🍽️ Canteen Enrolled' : 'No Lunch';
+            bulkStudentMeta.textContent = `${student.class_name || ''} • ${routeText} • ${mealText}`;
+        }
+
+        const hasBulk = Boolean(student.has_bulk_payment);
+        const busWallet = parseFloat(student.bus_wallet_balance || 0);
+        const canWallet = parseFloat(student.canteen_wallet_balance || 0);
+        const busToDeduct = parseFloat(student.bus_to_deduct || 0);
+        const canToDeduct = parseFloat(student.canteen_to_deduct || 0);
+        const busCashNeeded = parseFloat(student.bus_cash_needed || 0);
+        const canCashNeeded = parseFloat(student.canteen_cash_needed || 0);
+        const busAfter = parseFloat(student.bus_wallet_after || 0);
+        const canAfter = parseFloat(student.canteen_wallet_after || 0);
+        const busDays = parseInt(student.bus_credit_days || 0, 10);
+        const canDays = parseInt(student.canteen_credit_days || 0, 10);
+        const isPartialState = !settled && cashNeeded > 0;
+
+        bulkPanel.classList.toggle('is-partial', isPartialState);
+
+        if (bulkPaidBadge) {
+            if (isPartialState) {
+                bulkPaidBadge.textContent = '⚠ Partial Credit • Top-Up Needed';
+                bulkPaidBadge.style.background = '#fef3c7';
+                bulkPaidBadge.style.color = '#92400e';
+                bulkPaidBadge.style.borderColor = '#fcd34d';
+            } else if (!settled && toDeduct > 0) {
+                bulkPaidBadge.textContent = '💳 Bulk Credit Ready';
+                bulkPaidBadge.style.background = '#dcfce7';
+                bulkPaidBadge.style.color = '#15803d';
+                bulkPaidBadge.style.borderColor = '#86efac';
+            } else if (hasBulk) {
+                bulkPaidBadge.textContent = '✓ Settled (Bulk Wallet)';
+                bulkPaidBadge.style.background = '#dcfce7';
+                bulkPaidBadge.style.color = '#15803d';
+                bulkPaidBadge.style.borderColor = '#86efac';
+            } else {
+                bulkPaidBadge.textContent = '✓ Paid Today';
+                bulkPaidBadge.style.background = '#dcfce7';
+                bulkPaidBadge.style.color = '#15803d';
+                bulkPaidBadge.style.borderColor = '#86efac';
+            }
+        }
+
+        if (bulkRemainingLabel) {
+            if (isPartialState) {
+                bulkRemainingLabel.textContent = 'Cash / MoMo Top-Up Needed';
+            } else if (!settled && toDeduct > 0) {
+                bulkRemainingLabel.textContent = 'Wallet After Today\'s Deduction';
+            } else {
+                bulkRemainingLabel.textContent = 'Remaining Wallet Balance';
+            }
+        }
+
+        if (bulkRemainingAmount) {
+            if (isPartialState) {
+                bulkRemainingAmount.textContent = formatMoney(cashNeeded);
+                bulkRemainingAmount.style.color = '#b45309';
+            } else {
+                const displayWallet = settled ? walletBal : walletAfter;
+                bulkRemainingAmount.textContent = formatMoney(displayWallet);
+                bulkRemainingAmount.style.color = displayWallet > 0 ? '#15803d' : '#b45309';
+            }
+        }
+
+        if (bulkRemainingSub) {
+            if (isPartialState) {
+                const totalDue = toDeduct + cashNeeded;
+                bulkRemainingSub.innerHTML = `Today's due: <strong>${formatMoney(totalDue)}</strong> &minus; Wallet credit: <strong>${formatMoney(toDeduct)}</strong>`;
+            } else if (!settled && toDeduct > 0) {
+                const lastDayNote = walletAfter === 0
+                    ? ` &bull; <span style="color:#b45309;font-weight:600;">⚠ Last prepaid day</span>`
+                    : '';
+                bulkRemainingSub.innerHTML = `Current wallet: <strong>${formatMoney(walletBal)}</strong> &minus; Deduct today: <strong>${formatMoney(toDeduct)}</strong>${lastDayNote}`;
+            } else if (hasBulk && walletBal === 0) {
+                bulkRemainingSub.innerHTML = `<span style="color:#b45309; font-weight:600;">⚠ Last prepaid day used — remind parent to top up</span>`;
+            } else if (hasBulk) {
+                bulkRemainingSub.textContent = 'Wallet balance left for future school days';
+            } else {
+                bulkRemainingSub.textContent = 'Today\'s fee settled (no bulk balance)';
+            }
+        }
+
+        if (bulkRemainingDays) {
+            const maxDays = Math.max(busDays, canDays);
+            if (isPartialState) {
+                bulkRemainingDays.textContent = `Wallet after: ${formatMoney(walletAfter)}`;
+            } else if ((!settled && walletAfter > 0 && maxDays > 0) || (settled && walletBal > 0 && maxDays > 0)) {
+                bulkRemainingDays.textContent = `${maxDays} school day${maxDays !== 1 ? 's' : ''} left`;
+            } else if (hasBulk && (settled ? walletBal === 0 : walletAfter === 0)) {
+                bulkRemainingDays.textContent = '0 days left';
+            } else {
+                bulkRemainingDays.textContent = '';
+            }
+        }
+
+        if (bulkBreakdown) {
+            const badges = [];
+            if (student.has_bus && (busWallet > 0 || busCashNeeded > 0 || busToDeduct > 0 || student.has_bus_bulk)) {
+                if (isPartialState) {
+                    const msg = busCashNeeded > 0
+                        ? `${busToDeduct > 0 ? formatMoney(busToDeduct) + ' wallet + ' : ''}${formatMoney(busCashNeeded)} cash`
+                        : `Wallet ${formatMoney(busWallet)} − ${formatMoney(busToDeduct)}`;
+                    badges.push(`<span class="fee-rate-badge" style="background:#fef3c7;color:#92400e;">🚌 Bus: ${msg}</span>`);
+                } else if (!settled && busToDeduct > 0) {
+                    badges.push(`<span class="fee-rate-badge" style="background:#eff6ff;color:#1d4ed8;">🚌 Bus: ${formatMoney(busWallet)} − ${formatMoney(busToDeduct)} → ${formatMoney(busAfter)}${busDays > 0 ? ` (${busDays}d)` : ''}</span>`);
+                } else {
+                    badges.push(`<span class="fee-rate-badge" style="background:#eff6ff;color:#1d4ed8;">🚌 Bus: ${formatMoney(busWallet)}${busDays > 0 ? ` (${busDays}d)` : ''}</span>`);
+                }
+            }
+            if (student.canteen_enrolled && (canWallet > 0 || canCashNeeded > 0 || canToDeduct > 0 || student.has_canteen_bulk)) {
+                if (isPartialState) {
+                    const msg = canCashNeeded > 0
+                        ? `${canToDeduct > 0 ? formatMoney(canToDeduct) + ' wallet + ' : ''}${formatMoney(canCashNeeded)} cash`
+                        : `Wallet ${formatMoney(canWallet)} − ${formatMoney(canToDeduct)}`;
+                    badges.push(`<span class="fee-rate-badge" style="background:#ffedd5;color:#9a3412;">🍽️ Canteen: ${msg}</span>`);
+                } else if (!settled && canToDeduct > 0) {
+                    badges.push(`<span class="fee-rate-badge" style="background:#fff7ed;color:#c2410c;">🍽️ Canteen: ${formatMoney(canWallet)} − ${formatMoney(canToDeduct)} → ${formatMoney(canAfter)}${canDays > 0 ? ` (${canDays}d)` : ''}</span>`);
+                } else {
+                    badges.push(`<span class="fee-rate-badge" style="background:#fff7ed;color:#c2410c;">🍽️ Canteen: ${formatMoney(canWallet)}${canDays > 0 ? ` (${canDays}d)` : ''}</span>`);
+                }
+            }
+            bulkBreakdown.innerHTML = badges.join('');
+        }
+
+        renderBulkClockinControl(student);
+    }
+
+    async function handleRecordClockIn(action) {
+        if (!currentStudent) return;
+        const paymentDateInput = document.getElementById('id_payment_date');
+        const targetDate = paymentDateInput ? paymentDateInput.value : '';
+        const btn = document.getElementById('btn-payment-clockin') || document.getElementById('btn-payment-undo-clockin');
+        if (btn) btn.disabled = true;
+
+        try {
+            const response = await fetch('/api/wallet/settle-and-clockin/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken(),
+                },
+                body: JSON.stringify({
+                    student_id: currentStudent.id,
+                    date: targetDate,
+                    action: action === 'undo' ? 'undo' : 'settle_and_clockin',
+                    method: selectedWalletMethod,
+                    collect_remainder: true,
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                if (data.details) {
+                    Object.assign(currentStudent, data.details);
+                    currentStudent.loaded_date = targetDate;
+                    syncStudentCache(currentStudent.id, data.details);
+                }
+                renderStudentCards(currentStudent);
+                if (typeof showToast === 'function') {
+                    showToast(data.message || 'Wallet and attendance updated.', 'success');
+                }
+            } else {
+                if (typeof showToast === 'function') {
+                    showToast(data.error || 'Could not settle fee and clock in.', 'error');
+                }
+                if (btn) btn.disabled = false;
+            }
+        } catch (err) {
+            console.error('Wallet settle error:', err);
+            if (typeof showToast === 'function') {
+                showToast('Network error while settling fee.', 'error');
+            }
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    if (bulkClockinControl) {
+        bulkClockinControl.addEventListener('click', (e) => {
+            const methodBtn = e.target.closest('.wallet-method-pill');
+            if (methodBtn && methodBtn.dataset.method) {
+                selectedWalletMethod = methodBtn.dataset.method;
+                renderBulkClockinControl(currentStudent);
+                return;
+            }
+            if (e.target.closest('#btn-payment-clockin')) {
+                handleRecordClockIn('settle_and_clockin');
+            } else if (e.target.closest('#btn-payment-undo-clockin')) {
+                handleRecordClockIn('undo');
+            }
+        });
+    }
+
+    if (btnToggleTopupForm) {
+        btnToggleTopupForm.addEventListener('click', () => {
+            isShowingManualTopup = !isShowingManualTopup;
+            setPaymentFormVisible(isShowingManualTopup);
+            btnToggleTopupForm.textContent = getTopupToggleLabel(currentStudent);
+        });
+    }
+
+    if (btnNextStudentSearch) {
+        btnNextStudentSearch.addEventListener('click', () => {
+            if (studentSelect) studentSelect.value = '';
+            clearStudentCards();
+            if (quickSearchInput) {
+                quickSearchInput.value = '';
+                quickSearchInput.focus();
+            }
+            if (btnClearSearch) btnClearSearch.style.display = 'none';
+        });
+    }
+
     function syncBusFee(forceAmount = true) {
         const selectedBusId = busSelect ? busSelect.value : '';
 
         if (selectedBusId && busesById[selectedBusId]) {
             const b = busesById[selectedBusId];
             const busFee = b.fee;
+            const sameAssignedBus = Boolean(currentStudent && currentStudent.bus_id && String(currentStudent.bus_id) === String(selectedBusId) && !isGuestMode);
             const busPaid = (currentStudent && currentStudent.bus_paid) ? currentStudent.bus_paid : 0;
-            const busHasPartial = Boolean(currentStudent && currentStudent.bus_has_partial);
+            const busHasPartial = sameAssignedBus && Boolean(currentStudent && currentStudent.bus_has_partial);
             const busRemainder = (currentStudent && currentStudent.bus_remainder_due !== undefined) ? currentStudent.bus_remainder_due : 0;
             const busCredit = (currentStudent && currentStudent.bus_credit !== undefined) ? currentStudent.bus_credit : 0;
-            const busBal = Math.max(0, busFee - busPaid);
+            const isBusCovered = sameAssignedBus && Boolean(currentStudent && currentStudent.is_bus_paid);
+            const hasBusBulk = sameAssignedBus && Boolean(currentStudent && currentStudent.has_bus_bulk);
+            const busRem = (currentStudent && currentStudent.bus_credit_remaining !== undefined) ? currentStudent.bus_credit_remaining : 0;
+            const busDays = (currentStudent && currentStudent.bus_credit_days !== undefined) ? currentStudent.bus_credit_days : 0;
+            const busBal = sameAssignedBus && currentStudent && currentStudent.bus_balance !== undefined
+                ? currentStudent.bus_balance
+                : Math.max(0, busFee - busPaid);
 
-            // Amount to fill when clicking "Pay Full" or "Pay Remainder":
+            // Amount to fill when auto-populating or clicking "Pay Full":
             let fullAmountToCharge;
-            if (busHasPartial && busRemainder > 0) {
+            if (isBusCovered) {
+                fullAmountToCharge = 0;
+            } else if (busHasPartial && busRemainder > 0) {
                 fullAmountToCharge = busRemainder;
             } else if (busBal > 0) {
                 fullAmountToCharge = busBal;
             } else {
                 fullAmountToCharge = busFee;
             }
-            currentStudentActiveBusBalance = fullAmountToCharge;
+            currentStudentActiveBusBalance = isBusCovered ? busFee : fullAmountToCharge;
 
             cardBusRoute.textContent = `Route: ${b.name}`;
             cardBusBadge.textContent = `${formatMoney(busFee)} / day`;
             cardBusBadge.style.background = '#e0f2fe';
             cardBusBadge.style.color = '#0369a1';
 
-            if (busHasPartial) {
+            if (hasBusBulk) {
+                cardBusBalance.innerHTML = `<span style="color:var(--success-text); font-weight:700;">✓ Paid (Bulk Credit)</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(busRem)} left${busDays > 0 ? `, ${busDays}d` : ''})</span>`;
+                btnBusFull.textContent = `1 Day (${formatMoney(busFee)})`;
+            } else if (isBusCovered) {
+                cardBusBalance.innerHTML = `<span style="color:var(--success-text); font-weight:600;">✓ Paid (${formatMoney(busPaid || busFee)})</span>`;
+                btnBusFull.textContent = `1 Day (${formatMoney(busFee)})`;
+            } else if (busHasPartial) {
                 cardBusBalance.innerHTML = `<span style="color:#b45309; font-weight:700;">${formatMoney(busRemainder)} Top-Up</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(busCredit)} credit applied)</span>`;
                 btnBusFull.textContent = `Top-Up (${formatMoney(busRemainder)})`;
-            } else if (currentStudent && busPaid > 0 && busBal === 0) {
-                cardBusBalance.innerHTML = `<span style="color:var(--success-text); font-weight:600;">Paid (${formatMoney(busPaid)})</span>`;
-                btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
             } else if (currentStudent && busPaid > 0) {
                 cardBusBalance.innerHTML = `<span style="color:var(--danger-text); font-weight:700;">${formatMoney(busBal)}</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(busPaid)} paid)</span>`;
                 btnBusFull.textContent = `Pay Full (${formatMoney(fullAmountToCharge)})`;
@@ -646,7 +1483,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            if (forceAmount || !busAmountInput.value || parseFloat(busAmountInput.value) === 0) {
+            if (isBusCovered) {
+                if (forceAmount || !busAmountInput.value || parseFloat(busAmountInput.value) === busFee) {
+                    busAmountInput.value = '0.00';
+                }
+            } else if (forceAmount || !busAmountInput.value || parseFloat(busAmountInput.value) === 0) {
                 busAmountInput.value = fullAmountToCharge.toFixed(2);
             }
         } else {
@@ -696,6 +1537,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (guestBanner) guestBanner.style.display = active ? 'flex' : 'none';
 
         activeStudentsByClass = active ? allStudents : scopedStudents;
+        if (quickSearchInput) quickSearchInput.value = '';
+        if (searchResultsEl) searchResultsEl.style.display = 'none';
         renderClassOptions('');
         updateStudentDropdown('');
 
@@ -748,10 +1591,23 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStudentDetails();
     }
 
+    function resetMultipayInput() {
+        lastAppliedMultipayAmount = 0;
+        const mpEl = document.getElementById('input-custom-multipay');
+        if (mpEl) mpEl.value = '';
+        const mpPreview = document.getElementById('multipay-preview-container');
+        if (mpPreview) mpPreview.style.display = 'none';
+    }
+
     function clearStudentCards() {
         currentStudent = null;
         currentStudentActiveBusBalance = 0;
         currentStudentActiveCanteenBalance = 0;
+        isShowingManualTopup = false;
+        resetMultipayInput();
+        if (bulkPanel) bulkPanel.style.display = 'none';
+        setPaymentFormVisible(true);
+
         if (busSelect) {
             if (isScopedFeeTeacher && assignedBusId) {
                 busSelect.value = assignedBusId;
@@ -789,12 +1645,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderStudentCards(student) {
         currentStudent = student;
         quickFillAll.style.display = 'block';
+        if (quickSearchInput && student.name && document.activeElement !== quickSearchInput) {
+            quickSearchInput.value = student.name;
+            if (btnClearSearch) btnClearSearch.style.display = 'inline-block';
+        }
 
         // 1. Bus Selection & Lock
         if (isScopedFeeTeacher && assignedBusId) {
-            if (busSelect) busSelect.value = assignedBusId;
+            const preferredBus = (!isGuestMode && student.bus_id) ? String(student.bus_id) : String(assignedBusId);
+            if (busSelect) busSelect.value = preferredBus;
             if (isOneOffInput) {
-                isOneOffInput.checked = Boolean(isGuestMode || (student.bus_id && String(student.bus_id) !== String(assignedBusId)));
+                isOneOffInput.checked = Boolean(isGuestMode || (student.bus_id && String(student.bus_id) !== String(busSelect ? busSelect.value : assignedBusId)));
             }
         } else if (busSelect) {
             busSelect.value = student.bus_id ? String(student.bus_id) : '';
@@ -807,7 +1668,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const canHasPartial = Boolean(student && student.canteen_has_partial);
         const canRemainder = (student && student.canteen_remainder_due !== undefined) ? student.canteen_remainder_due : 0;
         const canCredit = (student && student.canteen_credit !== undefined) ? student.canteen_credit : 0;
-        const canteenFullAmount = canHasPartial ? canRemainder : (canteenBal > 0 ? canteenBal : canteenFee);
+        const isCanCovered = Boolean(student && student.canteen_enrolled && student.is_canteen_paid);
+        const hasCanBulk = Boolean(student && student.has_canteen_bulk);
+        const canRem = (student && student.canteen_credit_remaining !== undefined) ? student.canteen_credit_remaining : 0;
+        const canDays = (student && student.canteen_credit_days !== undefined) ? student.canteen_credit_days : 0;
+        const canteenFullAmount = isCanCovered ? canteenFee : (canHasPartial ? canRemainder : (canteenBal > 0 ? canteenBal : canteenFee));
         currentStudentActiveCanteenBalance = canteenFullAmount;
 
         if (student.canteen_enrolled) {
@@ -816,11 +1681,18 @@ document.addEventListener('DOMContentLoaded', () => {
             cardCanteenBadge.style.background = '#ecfdf5';
             cardCanteenBadge.style.color = '#047857';
 
-            if (canHasPartial) {
+            if (hasCanBulk) {
+                cardCanteenBalance.innerHTML = `<span style="color:var(--success-text); font-weight:700;">✓ Paid (Bulk Credit)</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(canRem)} left${canDays > 0 ? `, ${canDays}d` : ''})</span>`;
+                btnCanteenFull.textContent = `1 Day (${formatMoney(canteenFee)})`;
+            } else if (isCanCovered) {
+                cardCanteenBalance.innerHTML = `<span style="color:var(--success-text); font-weight:600;">✓ Paid (${formatMoney(student.canteen_paid || canteenFee)})</span>`;
+                btnCanteenFull.textContent = `1 Day (${formatMoney(canteenFee)})`;
+            } else if (canHasPartial) {
                 cardCanteenBalance.innerHTML = `<span style="color:#b45309; font-weight:700;">${formatMoney(canRemainder)} Top-Up</span> <span style="font-size:0.72rem; color:var(--text-muted); font-weight:normal;">(${formatMoney(canCredit)} credit applied)</span>`;
                 btnCanteenFull.textContent = `Top-Up (${formatMoney(canRemainder)})`;
             } else {
                 cardCanteenBalance.textContent = formatMoney(student.canteen_balance !== undefined ? student.canteen_balance : 0);
+                cardCanteenBalance.style.color = 'var(--danger-text)';
                 btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFullAmount)})`;
             }
         } else {
@@ -832,8 +1704,10 @@ document.addEventListener('DOMContentLoaded', () => {
             btnCanteenFull.textContent = `Pay Full (${formatMoney(canteenFee)})`;
         }
 
-        // Auto-fill suggested canteen amount if field is empty or 0
-        if (!canteenAmountInput.value || parseFloat(canteenAmountInput.value) === 0) {
+        // Auto-fill suggested canteen amount ONLY when unpaid
+        if (isCanCovered) {
+            canteenAmountInput.value = '0.00';
+        } else if (!canteenAmountInput.value || parseFloat(canteenAmountInput.value) === 0) {
             if (canHasPartial) {
                 canteenAmountInput.value = canRemainder.toFixed(2);
             } else if (student.canteen_balance > 0) {
@@ -846,6 +1720,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         calculateTotal();
+        renderBulkCoveredPanel(student);
     }
 
     function updateStudentDetails() {
@@ -863,11 +1738,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Reset input amounts when switching to a student so stale amounts don't leak across selections
+        busAmountInput.value = '0.00';
+        canteenAmountInput.value = '0.00';
+        resetMultipayInput();
+        if (bulkPanel) bulkPanel.style.display = 'none';
+
         const paymentDateInput = document.getElementById('id_payment_date');
         const paymentDate = paymentDateInput ? paymentDateInput.value : '';
 
         // If financial details are already loaded for this student on this date:
-        if (student.bus_balance !== undefined && (!student.loaded_date || student.loaded_date === paymentDate)) {
+        if (student.bus_balance !== undefined && student.is_fully_paid !== undefined && (!student.loaded_date || student.loaded_date === paymentDate)) {
             renderStudentCards(student);
             return;
         }
@@ -897,6 +1778,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.success && data.details) {
                     Object.assign(student, data.details);
                     student.loaded_date = paymentDate;
+                    syncStudentCache(student.id, data.details);
                     if (studentSelect.value === String(student.id)) {
                         renderStudentCards(student);
                     }
@@ -998,8 +1880,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    busAmountInput.addEventListener('input', calculateTotal);
-    canteenAmountInput.addEventListener('input', calculateTotal);
+    busAmountInput.addEventListener('input', () => {
+        resetMultipayInput();
+        calculateTotal();
+    });
+    canteenAmountInput.addEventListener('input', () => {
+        resetMultipayInput();
+        calculateTotal();
+    });
 
     classSelect.addEventListener('change', () => {
         updateStudentDropdown(classSelect.value);
@@ -1052,6 +1940,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    if (quickSearchInput && new URLSearchParams(window.location.search).get('focus_search') === '1' && !initialStudentId) {
+        quickSearchInput.focus();
+    }
+
     function getDailyRates() {
         const selectedBusId = busSelect ? busSelect.value : '';
         const busFee = (selectedBusId && busesById[selectedBusId]) ? parseFloat(busesById[selectedBusId].fee) : 0;
@@ -1086,7 +1978,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const daysCovered = Math.floor(customAmount / totalDaily);
             const remainder = Math.round((customAmount % totalDaily) * 100) / 100;
 
-            let details = `<span class="badge" style="background:hsla(var(--primary-hsl),0.1);color:var(--primary);font-weight:600;">🚌 Bus: ${formatMoney(allocatedBus)} (~${Math.floor(allocatedBus / busFee)}d)</span> `;
+            let details = `<span class="badge" style="background:rgba(24,24,27,0.08);color:var(--primary);font-weight:600;">🚌 Bus: ${formatMoney(allocatedBus)} (~${Math.floor(allocatedBus / busFee)}d)</span> `;
             details += `<span class="badge" style="background:hsla(24,95%,53%,0.1);color:#ea580c;font-weight:600;">🍽️ Lunch: ${formatMoney(allocatedCanteen)} (~${Math.floor(allocatedCanteen / canteenFee)}d)</span>`;
             if (remainder > 0) {
                 details += ` <span style="color:var(--text-muted);font-size:0.72rem;">(+${formatMoney(remainder)} partial credit)</span>`;
@@ -1106,7 +1998,7 @@ document.addEventListener('DOMContentLoaded', () => {
             coverageInfoEl.innerHTML = `
                 ${prefix} <strong>${formatMoney(customAmount)}</strong>
                 <span style="color:var(--border);">&bull;</span>
-                <span class="badge" style="background:hsla(var(--primary-hsl),0.1);color:var(--primary);font-weight:600;">🚌 Covers ~${daysCovered} day${daysCovered !== 1 ? 's' : ''} bus${remText}</span>
+                <span class="badge" style="background:rgba(24,24,27,0.08);color:var(--primary);font-weight:600;">🚌 Covers ~${daysCovered} day${daysCovered !== 1 ? 's' : ''} bus${remText}</span>
             `;
         } else if (canteenFee > 0) {
             const daysCovered = Math.floor(customAmount / canteenFee);
@@ -1138,6 +2030,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (totalDaily <= 0) {
             busAmountInput.value = customAmount.toFixed(2);
             canteenAmountInput.value = '0.00';
+            lastAppliedMultipayAmount = customAmount;
             renderMultipayPreview(customAmount, true);
             calculateTotal();
             return;
@@ -1157,6 +2050,7 @@ document.addEventListener('DOMContentLoaded', () => {
             canteenAmountInput.value = customAmount.toFixed(2);
         }
 
+        lastAppliedMultipayAmount = customAmount;
         renderMultipayPreview(customAmount, true);
 
         const notesEl = document.getElementById('id_notes');
@@ -1173,12 +2067,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (inputCustomMultipay) {
         inputCustomMultipay.addEventListener('input', () => {
             const amt = parseFloat(inputCustomMultipay.value) || 0;
+            if (amt <= 0) lastAppliedMultipayAmount = 0;
             renderMultipayPreview(amt, false);
         });
         inputCustomMultipay.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 applyCustomMultipay();
+            }
+        });
+    }
+
+    if (paymentForm) {
+        paymentForm.addEventListener('submit', () => {
+            if (feeBreakdownBox && feeBreakdownBox.style.display !== 'none' && inputCustomMultipay && currentStudent) {
+                const rawBulk = parseFloat(inputCustomMultipay.value) || 0;
+                if (rawBulk > 0 && rawBulk !== lastAppliedMultipayAmount) {
+                    applyCustomMultipay();
+                }
             }
         });
     }
@@ -1204,6 +2110,22 @@ document.addEventListener('DOMContentLoaded', () => {
             applyCustomMultipay();
         });
     });
+
+    // Manual Payment Method Pill Selector (Cash vs Mobile Money)
+    const manualMethodHidden = document.getElementById('id_payment_method');
+    const manualMethodPills = document.querySelectorAll('.manual-method-pill');
+    if (manualMethodHidden && manualMethodPills.length > 0) {
+        const currentMethod = (manualMethodHidden.value || 'CASH').toUpperCase();
+        manualMethodHidden.value = currentMethod;
+        manualMethodPills.forEach(p => p.classList.toggle('active', p.dataset.method === currentMethod));
+        manualMethodPills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                const chosen = pill.dataset.method || 'CASH';
+                manualMethodHidden.value = chosen;
+                manualMethodPills.forEach(p => p.classList.toggle('active', p.dataset.method === chosen));
+            });
+        });
+    }
 
     calculateTotal();
 });

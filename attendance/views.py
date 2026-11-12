@@ -25,11 +25,12 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 from .models import (
-    Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog,
+    Bus, Student, FeePayment, ClockInRecord, CreditTransaction, UserProfile, NotificationLog,
     SchoolClass, SchoolSetting, get_default_canteen_fee, TeacherRemittance,
     get_term_date_range, get_current_term_metrics,
-    get_active_academic_period, get_active_currency_symbol
+    get_active_academic_period, get_active_currency_symbol, AuditLog
 )
+from .audit import log_activity
 from .forms import (
     BusForm, StudentForm, FeePaymentForm, SchoolSettingsForm,
     TeacherCreationForm, TeacherUpdateForm, TeacherPasswordResetForm,
@@ -37,19 +38,121 @@ from .forms import (
 )
 from .decorators import principal_required, finance_required, payment_recording_required, login_required_ajax
 
-def get_stats_data(target_date=None, period=None, precomputed=None):
+def _get_credit_ledger_maps(target_date, student_ids=None):
+    """
+    Pre-fetch explicit CreditTransaction aggregates up to target_date in one query
+    to prevent N+1 queries in dashboard, stats, bus analytics, and bursar views.
+    """
+    qs = CreditTransaction.objects.filter(date__lte=target_date)
+    if student_ids is not None:
+        qs = qs.filter(student_id__in=student_ids)
+
+    rows = qs.values('student_id', 'fee_type').annotate(
+        bal_top=Sum('amount', filter=Q(transaction_type=CreditTransaction.TYPE_TOP_UP)),
+        bal_rev=Sum('amount', filter=Q(transaction_type=CreditTransaction.TYPE_REVERSAL)),
+        bal_ded=Sum('amount', filter=Q(transaction_type=CreditTransaction.TYPE_DEDUCTION)),
+        day_ded=Sum('amount', filter=Q(date=target_date, transaction_type=CreditTransaction.TYPE_DEDUCTION)),
+        day_rev=Sum('amount', filter=Q(date=target_date, transaction_type=CreditTransaction.TYPE_REVERSAL)),
+        day_top=Sum('amount', filter=Q(date=target_date, transaction_type=CreditTransaction.TYPE_TOP_UP)),
+    )
+
+    wallet_as_of = {}
+    deducted_on_date = {}
+    topup_on_date = {}
+    has_ledger = set()
+
+    for r in rows:
+        key = (r['student_id'], r['fee_type'])
+        has_ledger.add(key)
+        bal = (r['bal_top'] or Decimal('0.00')) + (r['bal_rev'] or Decimal('0.00')) - (r['bal_ded'] or Decimal('0.00'))
+        wallet_as_of[key] = max(Decimal('0.00'), bal)
+        net_ded = (r['day_ded'] or Decimal('0.00')) - (r['day_rev'] or Decimal('0.00'))
+        deducted_on_date[key] = max(Decimal('0.00'), net_ded)
+        topup_on_date[key] = max(Decimal('0.00'), r['day_top'] or Decimal('0.00'))
+
+    return {
+        'wallet_as_of': wallet_as_of,
+        'deducted_on_date': deducted_on_date,
+        'topup_on_date': topup_on_date,
+        'has_ledger': has_ledger,
+    }
+
+
+def _wallet_for_student(student, fee_type, ledger):
+    """Return wallet balance as of target_date using ledger or direct wallet fallback."""
+    key = (student.id, fee_type)
+    if key in ledger['has_ledger']:
+        return ledger['wallet_as_of'].get(key, Decimal('0.00'))
+    raw = student.bus_credit_wallet if fee_type == 'BUS' else student.canteen_credit_wallet
+    return max(Decimal('0.00'), raw or Decimal('0.00'))
+
+
+def _normalize_payment_method(raw_method):
+    """Normalize UI payment method strings (e.g. 'MOMO') into canonical FeePayment.PAYMENT_METHODS codes."""
+    code = str(raw_method or 'CASH').strip().upper()
+    if code == 'MOMO':
+        code = 'MOBILE_MONEY'
+    valid_codes = {choice[0] for choice in FeePayment.PAYMENT_METHODS}
+    return code if code in valid_codes else 'CASH'
+
+
+def _get_teacher_stat_scope(user_profile):
+    """Return (bus_ids, student_class) scope tuple for restricted teachers, or (None, None) for full school."""
+    if not user_profile or user_profile.is_school_admin or user_profile.role != UserProfile.ROLE_TEACHER:
+        return None, None
+    if user_profile.assigned_class:
+        return None, user_profile.assigned_class
+    assigned_bus_ids = user_profile.get_assigned_bus_ids()
+    if assigned_bus_ids:
+        return assigned_bus_ids, None
+    return None, None
+
+
+def _deduct_wallet_credits_for_clockin(student, target_date, clock_in, actor):
+    """Deduct available daily Bus and Canteen wallet credits upon clock-in."""
+    bus_ded = Decimal('0.00')
+    can_ded = Decimal('0.00')
+    if student.bus_id and student.bus_fee_required > Decimal('0.00'):
+        bus_ded = student.apply_credit_for_date('BUS', target_date=target_date, actor=actor, clock_in=clock_in)
+    if student.canteen_enrolled and student.canteen_fee_required > Decimal('0.00'):
+        can_ded = student.apply_credit_for_date('CANTEEN', target_date=target_date, actor=actor, clock_in=clock_in)
+    return {'BUS': bus_ded, 'CANTEEN': can_ded, 'total': bus_ded + can_ded}
+
+
+def _undo_clockin_and_refund_wallet(student, target_date, clock_in, actor):
+    """Refund wallet deductions tied to clock_in/target_date and delete the ClockInRecord if present."""
+    refunded = student.reverse_clockin_credit_deductions(
+        target_date=target_date,
+        clock_in=clock_in,
+        actor=actor,
+    )
+    clock_in_removed = False
+    if clock_in:
+        clock_in.delete()
+        clock_in_removed = True
+    return refunded, clock_in_removed
+
+
+def get_stats_data(target_date=None, period=None, precomputed=None, bus_ids=None, student_class=None):
     """
     Calculate aggregated stats for daily dashboard counters.
     Reconciles daily attendance, daily bus fare collections, and daily canteen revenue.
-    Accepts optional precomputed dictionary of payments/attendance to eliminate duplicate queries.
+    Accepts optional precomputed dictionary of payments/attendance to eliminate duplicate queries,
+    and optional bus_ids / student_class filters for scoped teacher dashboards.
     """
     if target_date is None:
         target_date = timezone.localdate()
 
     students = Student.objects.filter(is_active=True).select_related('bus')
-    total_students = students.count()
-    
     clocked_in_records = ClockInRecord.objects.filter(date=target_date, student__is_active=True)
+    if student_class:
+        students = students.filter(student_class=student_class)
+        clocked_in_records = clocked_in_records.filter(student__student_class=student_class)
+    if bus_ids:
+        students = students.filter(bus_id__in=bus_ids)
+        clocked_in_records = clocked_in_records.filter(student__bus_id__in=bus_ids)
+
+    total_students = students.count()
     clocked_in_count = clocked_in_records.count()
     clocked_in_pct = round((clocked_in_count / total_students * 100), 1) if total_students > 0 else 0
     
@@ -58,15 +161,9 @@ def get_stats_data(target_date=None, period=None, precomputed=None):
 
     pre = precomputed or {}
 
-    # Pre-fetch past attendance counts before target_date for credit calculations
-    past_attendance_counts = pre.get('past_attendance_counts')
-    if past_attendance_counts is None:
-        past_attendance_counts = dict(
-            ClockInRecord.objects.filter(date__lt=target_date)
-            .values('student_id')
-            .annotate(c=Count('id'))
-            .values_list('student_id', 'c')
-        )
+    credit_ledger = pre.get('credit_ledger')
+    if credit_ledger is None:
+        credit_ledger = _get_credit_ledger_maps(target_date)
 
     # Pre-fetch direct payments on target_date
     today_bus_payments = pre.get('today_bus_payments')
@@ -87,25 +184,6 @@ def get_stats_data(target_date=None, period=None, precomputed=None):
             .values_list('student_id', 'total')
         )
 
-    # Pre-fetch cumulative payments up to target_date
-    total_bus_payments = pre.get('total_bus_payments')
-    if total_bus_payments is None:
-        total_bus_payments = dict(
-            FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date)
-            .values('student_id')
-            .annotate(total=Sum('amount'))
-            .values_list('student_id', 'total')
-        )
-
-    total_canteen_payments = pre.get('total_canteen_payments')
-    if total_canteen_payments is None:
-        total_canteen_payments = dict(
-            FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date)
-            .values('student_id')
-            .annotate(total=Sum('amount'))
-            .values_list('student_id', 'total')
-        )
-
     # Actual daily collections on target_date
     daily_bus_collected = FeePayment.objects.filter(fee_type='BUS', payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
     daily_canteen_collected = FeePayment.objects.filter(fee_type='CANTEEN', payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
@@ -120,12 +198,11 @@ def get_stats_data(target_date=None, period=None, precomputed=None):
         req = s.bus.fee
         total_bus_expected += req
         direct_bus = today_bus_payments.get(s.id, Decimal('0.00'))
-        cum_bus = total_bus_payments.get(s.id, Decimal('0.00'))
-        past_days = past_attendance_counts.get(s.id, 0)
-        past_cost = Decimal(past_days) * req
-        credit = max(Decimal('0.00'), cum_bus - past_cost)
+        deducted_bus = credit_ledger['deducted_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
+        wallet_bus = _wallet_for_student(s, 'BUS', credit_ledger)
+        settled_bus = direct_bus + deducted_bus
 
-        if direct_bus >= req or credit >= req:
+        if req <= Decimal('0.00') or settled_bus >= req or (settled_bus + wallet_bus) >= req:
             bus_paid_count += 1
         else:
             bus_unpaid_count += 1
@@ -144,12 +221,11 @@ def get_stats_data(target_date=None, period=None, precomputed=None):
         req = s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee
         total_canteen_expected += req
         direct_can = today_canteen_payments.get(s.id, Decimal('0.00'))
-        cum_can = total_canteen_payments.get(s.id, Decimal('0.00'))
-        past_days = past_attendance_counts.get(s.id, 0)
-        past_cost = Decimal(past_days) * req
-        credit = max(Decimal('0.00'), cum_can - past_cost)
+        deducted_can = credit_ledger['deducted_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
+        wallet_can = _wallet_for_student(s, 'CANTEEN', credit_ledger)
+        settled_can = direct_can + deducted_can
 
-        if direct_can >= req or credit >= req:
+        if req <= Decimal('0.00') or settled_can >= req or (settled_can + wallet_can) >= req:
             canteen_paid_count += 1
         else:
             canteen_unpaid_count += 1
@@ -241,8 +317,9 @@ def get_class_fee_summary(target_date=None):
 def get_collectors_financial_summary(teachers, target_date=None):
     """
     Computes audited daily targets, collections, one-off/guest bus adjustments,
-    and outstanding balances for a list or queryset of teachers on target_date.
-    Optimized to run in constant O(1) database queries.
+    unpaid roster breakdown, and outstanding balances for a list or queryset
+    of teachers on target_date.
+    Optimized to run in constant O(1) database queries with zero N+1 lookups.
     """
     if target_date is None:
         target_date = timezone.localdate()
@@ -252,15 +329,33 @@ def get_collectors_financial_summary(teachers, target_date=None):
     if not teachers_list:
         return {}
 
+    # Bulk pre-fetch UserProfiles and their M2M assigned_buses to guarantee zero N+1 queries
+    teacher_ids = [t.id for t in teachers_list]
+    profiles_by_uid = {
+        prof.user_id: prof
+        for prof in UserProfile.objects.filter(user_id__in=teacher_ids)
+        .select_related('assigned_bus')
+        .prefetch_related('assigned_buses')
+    }
+
     class_to_teacher_ids = defaultdict(list)
     bus_to_teacher_ids = defaultdict(list)
     teacher_meta = {}
 
     for t in teachers_list:
-        p = getattr(t, 'profile', None)
+        p = profiles_by_uid.get(t.id) or getattr(t, 'profile', None)
         t_class = (p.assigned_class or '').strip() if p else ''
-        t_bus_ids = p.get_assigned_bus_ids() if p else set()
-        buses_list = p.get_assigned_buses_list() if p else []
+        if p:
+            buses_list = list(p.assigned_buses.all())
+            if not buses_list and p.assigned_bus:
+                buses_list = [p.assigned_bus]
+            t_bus_ids = {b.id for b in buses_list}
+            if p.assigned_bus_id:
+                t_bus_ids.add(p.assigned_bus_id)
+        else:
+            buses_list = []
+            t_bus_ids = set()
+
         bus_name_str = ", ".join(b.name for b in buses_list) if buses_list else (p.assigned_bus.name if p and p.assigned_bus else '')
         primary_bus_id = p.assigned_bus_id if (p and p.assigned_bus_id) else (list(t_bus_ids)[0] if t_bus_ids else None)
         teacher_meta[t.id] = {
@@ -287,6 +382,12 @@ def get_collectors_financial_summary(teachers, target_date=None):
             'canteen_collected': Decimal('0.00'),
             'today_count': 0,
             'balance': Decimal('0.00'),
+            'present_balance': Decimal('0.00'),
+            'absent_unpaid_count': 0,
+            'absent_unpaid_amount': Decimal('0.00'),
+            'clockin_started_today': False,
+            'unpaid_students': [],
+            'unpaid_count': 0,
             'student_count': 0,
         }
         if t_class:
@@ -294,9 +395,16 @@ def get_collectors_financial_summary(teachers, target_date=None):
         for b_id in t_bus_ids:
             bus_to_teacher_ids[b_id].append(t.id)
 
-    # 1. Fetch active students to establish baseline expectations & prior prepaid coverage
+    # 1. Fetch active students, clock-in records, daily payments & credit ledger in O(1) queries
     active_students = Student.objects.filter(is_active=True).select_related('bus')
+    clocked_in_student_ids = set(
+        ClockInRecord.objects.filter(date=target_date, status__in=['PRESENT', 'LATE'])
+        .values_list('student_id', flat=True)
+    )
+    clockin_started_today = bool(clocked_in_student_ids)
+
     student_to_teacher_ids = defaultdict(set)
+    student_daily_fee_map = {}
     today_bus_payments = dict(
         FeePayment.objects.filter(fee_type='BUS', payment_date=target_date)
         .values('student_id')
@@ -310,52 +418,57 @@ def get_collectors_financial_summary(teachers, target_date=None):
         .values_list('student_id', 'total')
     )
 
-    # Pre-fetch past attendance counts and cumulative payments to avoid N+1 queries in the student loop
-    past_attendance_counts = dict(
-        ClockInRecord.objects.filter(date__lt=target_date)
-        .values('student_id')
-        .annotate(c=Count('id'))
-        .values_list('student_id', 'c')
-    )
-    total_bus_payments = dict(
-        FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date)
-        .values('student_id')
+    # Pre-fetch explicit credit ledger aggregates to avoid N+1 queries in the student loop
+    credit_ledger = _get_credit_ledger_maps(target_date)
+    topup_by_payment = dict(
+        CreditTransaction.objects.filter(
+            date=target_date,
+            transaction_type=CreditTransaction.TYPE_TOP_UP,
+            payment__isnull=False,
+        )
+        .values('payment_id')
         .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-    total_canteen_payments = dict(
-        FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
+        .values_list('payment_id', 'total')
     )
 
     for s in active_students:
         c_name = (s.student_class or '').strip()
         bus_fee = s.bus.fee if s.bus else Decimal('0.00')
         canteen_fee = (s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee) if s.canteen_enrolled else Decimal('0.00')
-        past_days = past_attendance_counts.get(s.id, 0)
+        student_daily_fee_map[(s.id, 'BUS')] = bus_fee
+        student_daily_fee_map[(s.id, 'CANTEEN')] = canteen_fee
 
-        # Check prepaid credit applied today for bus and canteen (both full advance and partial remainder top-up)
+        # Check prepaid credit applied today for bus and canteen (both explicit deductions and prior wallet credit)
         bus_prepaid_applied = Decimal('0.00')
+        today_bus_direct = today_bus_payments.get(s.id, Decimal('0.00'))
         if s.bus_id and bus_fee > Decimal('0.00'):
-            today_bus_direct = today_bus_payments.get(s.id, Decimal('0.00'))
-            cum_bus = total_bus_payments.get(s.id, Decimal('0.00'))
-            past_bus_cost = Decimal(past_days) * bus_fee
-            current_bus_credit = max(Decimal('0.00'), cum_bus - past_bus_cost)
-            prior_bus_credit = max(Decimal('0.00'), current_bus_credit - today_bus_direct)
-            if prior_bus_credit > Decimal('0.00'):
-                bus_prepaid_applied = min(bus_fee, prior_bus_credit)
+            ded_bus = credit_ledger['deducted_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
+            wallet_bus = _wallet_for_student(s, 'BUS', credit_ledger)
+            today_bus_topup = credit_ledger['topup_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
+            cash_for_today_bus = max(Decimal('0.00'), today_bus_direct - today_bus_topup)
+            prior_avail_bus = max(Decimal('0.00'), wallet_bus - today_bus_topup)
+            bus_prepaid_applied = min(
+                max(Decimal('0.00'), bus_fee - cash_for_today_bus),
+                ded_bus + prior_avail_bus,
+            )
 
         canteen_prepaid_applied = Decimal('0.00')
+        today_can_direct = today_canteen_payments.get(s.id, Decimal('0.00'))
         if s.canteen_enrolled and canteen_fee > Decimal('0.00'):
-            today_can_direct = today_canteen_payments.get(s.id, Decimal('0.00'))
-            cum_can = total_canteen_payments.get(s.id, Decimal('0.00'))
-            past_can_cost = Decimal(past_days) * canteen_fee
-            current_can_credit = max(Decimal('0.00'), cum_can - past_can_cost)
-            prior_can_credit = max(Decimal('0.00'), current_can_credit - today_can_direct)
-            if prior_can_credit > Decimal('0.00'):
-                canteen_prepaid_applied = min(canteen_fee, prior_can_credit)
+            ded_can = credit_ledger['deducted_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
+            wallet_can = _wallet_for_student(s, 'CANTEEN', credit_ledger)
+            today_can_topup = credit_ledger['topup_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
+            cash_for_today_can = max(Decimal('0.00'), today_can_direct - today_can_topup)
+            prior_avail_can = max(Decimal('0.00'), wallet_can - today_can_topup)
+            canteen_prepaid_applied = min(
+                max(Decimal('0.00'), canteen_fee - cash_for_today_can),
+                ded_can + prior_avail_can,
+            )
+
+        bus_due = max(Decimal('0.00'), bus_fee - today_bus_direct - bus_prepaid_applied) if s.bus_id else Decimal('0.00')
+        can_due = max(Decimal('0.00'), canteen_fee - today_can_direct - canteen_prepaid_applied) if s.canteen_enrolled else Decimal('0.00')
+        total_due = bus_due + can_due
+        is_present = s.id in clocked_in_student_ids
 
         responsible_tids = []
         if s.bus_id and s.bus_id in bus_to_teacher_ids:
@@ -386,12 +499,30 @@ def get_collectors_financial_summary(teachers, target_date=None):
                 if bus_prepaid_applied == Decimal('0.00'):
                     meta['prepaid_students_count'] += 1
 
+            if total_due > Decimal('0.00'):
+                meta['unpaid_students'].append({
+                    'student_id': s.id,
+                    'full_name': s.full_name,
+                    'initials': s.initials,
+                    'student_class': c_name,
+                    'bus_name': s.bus.name if s.bus else 'Walker',
+                    'bus_due': bus_due,
+                    'canteen_due': can_due,
+                    'total_due': total_due,
+                    'is_present': is_present,
+                })
+                if clockin_started_today and not is_present:
+                    meta['absent_unpaid_count'] += 1
+                    meta['absent_unpaid_amount'] += total_due
+
     for tid, meta in teacher_meta.items():
         meta['baseline_target'] = meta['bus_expected'] + meta['canteen_expected']
         meta['class_expected'] = meta['baseline_target']  # For backward compatibility
 
-    # 2. Fetch all payments on target_date
-    today_payments = FeePayment.objects.filter(payment_date=target_date).select_related('student', 'bus')
+    # 2. Fetch all payments on target_date (include student__bus to avoid any lazy lookup)
+    today_payments = FeePayment.objects.filter(payment_date=target_date).select_related('student', 'student__bus', 'bus')
+    transferred_per_student_fee = defaultdict(Decimal)
+
     for p in today_payments:
         collector_id = p.recorded_by_id
         is_guest = p.is_temporary_bus
@@ -410,27 +541,44 @@ def get_collectors_financial_summary(teachers, target_date=None):
                 daily_fee = p.student.custom_canteen_fee if p.student.custom_canteen_fee is not None else default_canteen_fee
 
             # Advance prepayments: excess amount collected today for future days
-            if p.is_advance or p.amount > daily_fee:
+            if p.id in topup_by_payment:
+                excess = topup_by_payment[p.id]
+            elif p.is_advance or p.amount > daily_fee:
                 excess = max(Decimal('0.00'), p.amount - daily_fee)
-                if excess > Decimal('0.00'):
-                    meta['advance_prepayments'] += excess
+            else:
+                excess = Decimal('0.00')
+            if excess > Decimal('0.00'):
+                meta['advance_prepayments'] += excess
 
             # Check if this was a guest / one-off bus ride or outside baseline roster
             if (is_guest and p.fee_type == 'BUS') or (p.student_id not in meta['baseline_student_ids']):
                 meta['one_off_additions'] += p.amount
                 meta['one_off_additions_count'] += 1
 
-        # Check if this student was in another teacher's baseline, but paid a DIFFERENT teacher on another bus
+        # Adjust baseline teacher down when student paid someone else (Bursar or another teacher)
+        # Capped at 1 day's fee for that student+fee_type so multi-day advances don't over-deduct
         for baseline_tid in student_to_teacher_ids.get(p.student_id, ()):
-            if baseline_tid != collector_id and p.fee_type == 'BUS':
-                # Student paid someone else on another bus route -> adjust baseline teacher's expectation down
-                teacher_meta[baseline_tid]['transfers_out'] += p.amount
+            if baseline_tid != collector_id and p.fee_type in ('BUS', 'CANTEEN'):
+                fee_cap = student_daily_fee_map.get((p.student_id, p.fee_type), Decimal('0.00'))
+                already_transferred = transferred_per_student_fee[(baseline_tid, p.student_id, p.fee_type)]
+                remaining_cap = max(Decimal('0.00'), fee_cap - already_transferred)
+                deduction = min(p.amount, remaining_cap)
+                if deduction > Decimal('0.00'):
+                    teacher_meta[baseline_tid]['transfers_out'] += deduction
+                    transferred_per_student_fee[(baseline_tid, p.student_id, p.fee_type)] += deduction
 
-    # 3. Finalize adjusted target and balances
+    # 3. Finalize adjusted target, balances, and unpaid roster ordering
     for tid, meta in teacher_meta.items():
         adj = meta['baseline_target'] + meta['advance_prepayments'] - meta['prepaid_deductions'] + meta['one_off_additions'] - meta['transfers_out']
         meta['adjusted_target'] = max(Decimal('0.00'), adj)
         meta['balance'] = max(Decimal('0.00'), meta['adjusted_target'] - meta['today_collected'])
+        meta['clockin_started_today'] = clockin_started_today
+        if clockin_started_today:
+            meta['present_balance'] = max(Decimal('0.00'), meta['balance'] - meta['absent_unpaid_amount'])
+        else:
+            meta['present_balance'] = meta['balance']
+        meta['unpaid_students'].sort(key=lambda x: (not x['is_present'], x['student_class'], x['full_name']))
+        meta['unpaid_count'] = len(meta['unpaid_students'])
 
     return teacher_meta
 
@@ -549,13 +697,8 @@ def dashboard_view(request):
     clock_ins = ClockInRecord.objects.filter(date=target_date)
     clock_in_map = {c.student_id: c for c in clock_ins}
 
-    # Pre-fetch past attendance counts before target_date for advance credit calculation
-    past_attendance_counts = dict(
-        ClockInRecord.objects.filter(date__lt=target_date)
-        .values('student_id')
-        .annotate(c=Count('id'))
-        .values_list('student_id', 'c')
-    )
+    # Pre-fetch explicit credit ledger aggregates up to target_date
+    credit_ledger = _get_credit_ledger_maps(target_date)
 
     # Pre-fetch direct daily payments on target_date
     today_bus_payments = dict(
@@ -571,20 +714,6 @@ def dashboard_view(request):
         .values_list('student_id', 'total')
     )
 
-    # Pre-fetch cumulative payments up to target_date
-    total_bus_payments = dict(
-        FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-    total_canteen_payments = dict(
-        FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-
     default_canteen_fee = get_default_canteen_fee()
 
     # Assemble student cards/rows with computed daily fee statuses
@@ -592,31 +721,29 @@ def dashboard_view(request):
     for s in students_qs:
         clock_in = clock_in_map.get(s.id)
         is_clocked_in = clock_in is not None
-        past_days = past_attendance_counts.get(s.id, 0)
 
         # Daily Bus fee calculation
         if s.bus:
             bus_req = s.bus.fee
             direct_bus = today_bus_payments.get(s.id, Decimal('0.00'))
-            cum_bus = total_bus_payments.get(s.id, Decimal('0.00'))
-            past_cost = Decimal(past_days) * bus_req
-            bus_credit = max(Decimal('0.00'), cum_bus - past_cost)
+            ded_bus = credit_ledger['deducted_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
+            wallet_bus = _wallet_for_student(s, 'BUS', credit_ledger)
+            settled_bus = direct_bus + ded_bus
 
-            if direct_bus >= bus_req:
+            if bus_req <= Decimal('0.00') or settled_bus >= bus_req:
                 is_bus_paid = True
                 bus_balance = Decimal('0.00')
-                bus_paid = direct_bus
-                rem = bus_credit - bus_req if bus_credit >= bus_req else Decimal('0.00')
-                bus_credit_days = int(rem // bus_req) if bus_req > 0 else 0
-            elif bus_credit >= bus_req:
+                bus_paid = direct_bus if direct_bus > Decimal('0.00') else min(bus_req, settled_bus)
+                bus_credit_days = int(wallet_bus // bus_req) if bus_req > Decimal('0.00') else 0
+            elif (settled_bus + wallet_bus) >= bus_req:
                 is_bus_paid = True
                 bus_balance = Decimal('0.00')
                 bus_paid = bus_req
-                rem = bus_credit - bus_req
-                bus_credit_days = int(rem // bus_req) if bus_req > 0 else 0
+                rem = wallet_bus - max(Decimal('0.00'), bus_req - settled_bus)
+                bus_credit_days = int(rem // bus_req) if bus_req > Decimal('0.00') else 0
             else:
                 is_bus_paid = False
-                covered = max(direct_bus, bus_credit)
+                covered = settled_bus + wallet_bus
                 bus_balance = max(Decimal('0.00'), bus_req - covered)
                 bus_paid = covered
                 bus_credit_days = 0
@@ -631,25 +758,24 @@ def dashboard_view(request):
         if s.canteen_enrolled:
             canteen_req = s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee
             direct_can = today_canteen_payments.get(s.id, Decimal('0.00'))
-            cum_can = total_canteen_payments.get(s.id, Decimal('0.00'))
-            past_cost = Decimal(past_days) * canteen_req
-            can_credit = max(Decimal('0.00'), cum_can - past_cost)
+            ded_can = credit_ledger['deducted_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
+            wallet_can = _wallet_for_student(s, 'CANTEEN', credit_ledger)
+            settled_can = direct_can + ded_can
 
-            if direct_can >= canteen_req:
+            if canteen_req <= Decimal('0.00') or settled_can >= canteen_req:
                 is_canteen_paid = True
                 canteen_balance = Decimal('0.00')
-                canteen_paid = direct_can
-                rem = can_credit - canteen_req if can_credit >= canteen_req else Decimal('0.00')
-                canteen_credit_days = int(rem // canteen_req) if canteen_req > 0 else 0
-            elif can_credit >= canteen_req:
+                canteen_paid = direct_can if direct_can > Decimal('0.00') else min(canteen_req, settled_can)
+                canteen_credit_days = int(wallet_can // canteen_req) if canteen_req > Decimal('0.00') else 0
+            elif (settled_can + wallet_can) >= canteen_req:
                 is_canteen_paid = True
                 canteen_balance = Decimal('0.00')
                 canteen_paid = canteen_req
-                rem = can_credit - canteen_req
-                canteen_credit_days = int(rem // canteen_req) if canteen_req > 0 else 0
+                rem = wallet_can - max(Decimal('0.00'), canteen_req - settled_can)
+                canteen_credit_days = int(rem // canteen_req) if canteen_req > Decimal('0.00') else 0
             else:
                 is_canteen_paid = False
-                covered = max(direct_can, can_credit)
+                covered = settled_can + wallet_can
                 canteen_balance = max(Decimal('0.00'), canteen_req - covered)
                 canteen_paid = covered
                 canteen_credit_days = 0
@@ -703,14 +829,19 @@ def dashboard_view(request):
         available_classes = Student.objects.filter(is_active=True).values_list('student_class', flat=True).distinct().order_by('student_class')
         buses = Bus.objects.filter(is_active=True).order_by('name')
 
-    # Aggregated stats
-    stats = get_stats_data(target_date, period, precomputed={
-        'past_attendance_counts': past_attendance_counts,
-        'today_bus_payments': today_bus_payments,
-        'today_canteen_payments': today_canteen_payments,
-        'total_bus_payments': total_bus_payments,
-        'total_canteen_payments': total_canteen_payments,
-    })
+    # Aggregated stats (scoped for classroom / bus duty teachers)
+    scoped_bus_ids, scoped_class = _get_teacher_stat_scope(user_profile)
+    stats = get_stats_data(
+        target_date,
+        period,
+        precomputed={
+            'credit_ledger': credit_ledger,
+            'today_bus_payments': today_bus_payments,
+            'today_canteen_payments': today_canteen_payments,
+        },
+        bus_ids=scoped_bus_ids,
+        student_class=scoped_class,
+    )
 
     # Dedicated attendance stats for classroom teachers
     teacher_class_stats = None
@@ -822,44 +953,66 @@ def toggle_clock_in_api(request):
 
         existing = ClockInRecord.objects.filter(student=student, date=target_date).first()
 
+        currency = get_active_currency_symbol()
+
         if action == 'undo' or (action == 'toggle' and existing):
-            if existing:
-                existing.delete()
-                clocked_in = False
-                time_str = ""
-                status_str = ""
+            with transaction.atomic():
+                student = get_object_or_404(Student.objects.select_for_update(), id=student_id, is_active=True)
+                existing = ClockInRecord.objects.filter(student=student, date=target_date).first()
+                refunded, clock_in_removed = _undo_clockin_and_refund_wallet(
+                    student, target_date, existing, request.user
+                )
+            student.refresh_from_db()
+            clocked_in = False
+            time_str = ""
+            status_str = ""
+            total_refunded = refunded['BUS'] + refunded['CANTEEN']
+            if total_refunded > Decimal('0.00'):
+                message = f"Clock-in undone for {student.full_name} & refunded {currency}{total_refunded:.2f} back to wallet."
+            elif clock_in_removed:
                 message = f"Clock-in undone for {student.full_name}."
             else:
-                clocked_in = False
-                time_str = ""
-                status_str = ""
                 message = "Not clocked in."
         else:
             now_time = timezone.localtime().time() if hasattr(timezone, 'localtime') else timezone.now().time()
-            try:
-                record, created = ClockInRecord.objects.get_or_create(
-                    student=student,
-                    date=target_date,
-                    defaults={
-                        'clock_in_time': now_time,
-                        'status': 'PRESENT',
-                        'recorded_by': request.user if request.user.is_authenticated else None,
-                    }
-                )
-            except IntegrityError:
-                record = ClockInRecord.objects.get(student=student, date=target_date)
+            with transaction.atomic():
+                student = get_object_or_404(Student.objects.select_for_update(), id=student_id, is_active=True)
+                try:
+                    record, created = ClockInRecord.objects.get_or_create(
+                        student=student,
+                        date=target_date,
+                        defaults={
+                            'clock_in_time': now_time,
+                            'status': 'PRESENT',
+                            'recorded_by': request.user if request.user.is_authenticated else None,
+                        }
+                    )
+                except IntegrityError:
+                    record = ClockInRecord.objects.get(student=student, date=target_date)
+                deducted = _deduct_wallet_credits_for_clockin(student, target_date, record, request.user)
+            student.refresh_from_db()
             clocked_in = True
             time_str = record.clock_in_time.strftime('%I:%M %p')
             status_str = record.get_status_display()
-            message = f"✓ Clocked in {student.full_name} at {time_str}."
+            if deducted['total'] > Decimal('0.00'):
+                message = f"✓ Clocked in {student.full_name} at {time_str} (Deducted {currency}{deducted['total']:.2f} from wallet)."
+            else:
+                message = f"✓ Clocked in {student.full_name} at {time_str}."
 
-        # Fast lightweight updated quick counters (avoiding full-school financial scans during rush hour)
-        total_enrolled = Student.objects.filter(is_active=True).count()
-        total_clocked_in = ClockInRecord.objects.filter(date=target_date, student__is_active=True).count()
+        # Scoped live stats (matches initial dashboard cards and reflects any wallet settlement)
+        scoped_bus_ids, scoped_class = _get_teacher_stat_scope(user_profile)
+        stats = get_stats_data(target_date, bus_ids=scoped_bus_ids, student_class=scoped_class)
+        # Ensure JSON-serializable numeric types for Decimal totals
         stats = {
-            'total_students': total_enrolled,
-            'clocked_in_count': total_clocked_in,
-            'clocked_in_pct': round((total_clocked_in / total_enrolled * 100), 1) if total_enrolled > 0 else 0,
+            **stats,
+            'total_bus_expected': float(stats['total_bus_expected']),
+            'total_bus_collected': float(stats['total_bus_collected']),
+            'daily_bus_collected': float(stats['daily_bus_collected']),
+            'total_canteen_expected': float(stats['total_canteen_expected']),
+            'total_canteen_collected': float(stats['total_canteen_collected']),
+            'daily_canteen_collected': float(stats['daily_canteen_collected']),
+            'daily_total_collected': float(stats['daily_total_collected']),
+            'daily_total_expected': float(stats['daily_total_expected']),
         }
         if user_profile and user_profile.assigned_class:
             c_name = user_profile.assigned_class
@@ -874,6 +1027,14 @@ def toggle_clock_in_api(request):
             stats['class_absent'] = c_absent
             stats['class_pct'] = c_pct
 
+        payment_summary = get_student_payment_summary(student, target_date)
+        if clocked_in and payment_summary.get('has_bulk_payment'):
+            rem = payment_summary.get('total_credit_remaining', 0.0)
+            message = f"✓ Clocked in {student.full_name} at {time_str} • Remaining credit: {currency}{rem:.2f}"
+            if payment_summary.get('total_cash_needed', 0.0) > 0:
+                needed = payment_summary['total_cash_needed']
+                message = f"✓ Clocked in {student.full_name} at {time_str} • {currency}{needed:.2f} balance still due"
+
         return JsonResponse({
             'success': True,
             'student_id': student.id,
@@ -883,6 +1044,7 @@ def toggle_clock_in_api(request):
             'status': status_str,
             'message': message,
             'stats': stats,
+            'payment_summary': payment_summary,
         })
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=400)
@@ -931,6 +1093,7 @@ def quick_payment_api(request):
                     bus_days_cov = int(bus_amount // student.bus_fee_required) if is_bus_adv else 1
                     p_bus = FeePayment.objects.create(
                         student=student,
+                        bus=student.bus,
                         fee_type='BUS',
                         amount=bus_amount,
                         payment_date=payment_date,
@@ -969,6 +1132,7 @@ def quick_payment_api(request):
                     days_cov = int(amount // daily_req) if is_adv else 1
                     p = FeePayment.objects.create(
                         student=student,
+                        bus=student.bus if fee_type == 'BUS' else None,
                         fee_type=fee_type,
                         amount=amount,
                         payment_date=payment_date,
@@ -984,6 +1148,25 @@ def quick_payment_api(request):
 
         total_amount = sum(p.amount for p in created_payments)
 
+        for p in created_payments:
+            log_activity(
+                action='PAYMENT_RECORDED',
+                target_model='FeePayment',
+                target_id=str(p.id),
+                target_repr=f"Receipt #{p.receipt_number} ({student.full_name})",
+                description=f"Quick modal: Recorded {p.get_fee_type_display()} payment of {currency}{p.amount:.2f} via {p.get_payment_method_display()} for student {student.full_name}.",
+                changes={
+                    'amount': str(p.amount),
+                    'fee_type': p.fee_type,
+                    'payment_method': p.payment_method,
+                    'receipt_number': p.receipt_number,
+                    'payment_date': str(p.payment_date),
+                    'student_id': student.id,
+                    'student_name': student.full_name,
+                },
+                actor=request.user,
+            )
+
         # Re-compute student statuses for payment_date
         bus_req = student.bus_fee_required
         bus_paid = student.get_daily_bus_paid(payment_date)
@@ -997,7 +1180,9 @@ def quick_payment_api(request):
         canteen_bal = student.get_daily_canteen_balance(payment_date)
         canteen_credit_days = student.get_canteen_credit_days(payment_date)
 
-        stats = get_stats_data(payment_date, period)
+        user_profile = getattr(request.user, 'profile', None) if request.user.is_authenticated else None
+        scoped_bus_ids, scoped_class = _get_teacher_stat_scope(user_profile)
+        stats = get_stats_data(payment_date, period, bus_ids=scoped_bus_ids, student_class=scoped_class)
 
         return JsonResponse({
             'success': True,
@@ -1053,7 +1238,7 @@ def collect_both_fees_api(request):
 
     days = int(data.get('days') or 1)
     is_adv = days > 1
-    method = data.get('method') or data.get('payment_method') or 'CASH'
+    method = _normalize_payment_method(data.get('method') or data.get('payment_method'))
     fee_type_req = str(data.get('fee_type', 'BOTH')).strip().upper()
     period = data.get('period') or get_active_academic_period()
     currency = get_active_currency_symbol()
@@ -1123,8 +1308,9 @@ def collect_both_fees_api(request):
                             bus_note = "Fee Teacher bus collection"
                     elif days == 1:
                         bus_credit = student.get_bus_credit_balance(target_date)
-                        if Decimal('0.00') < bus_credit < assigned_bus.fee:
-                            bus_amount = max(Decimal('0.00'), assigned_bus.fee - bus_credit)
+                        owed_bus = max(Decimal('0.00'), assigned_bus.fee - student.get_daily_bus_settled(target_date))
+                        if Decimal('0.00') < bus_credit < owed_bus:
+                            bus_amount = max(Decimal('0.00'), owed_bus - bus_credit)
                             bus_note = f"Fee Teacher remainder top-up collection (Credit applied: {currency}{bus_credit:.2f})"
                         else:
                             bus_amount = assigned_bus.fee
@@ -1175,8 +1361,9 @@ def collect_both_fees_api(request):
                         canteen_note = "Fee Teacher lunch collection"
                 elif days == 1:
                     can_credit = student.get_canteen_credit_balance(target_date)
-                    if Decimal('0.00') < can_credit < daily_canteen:
-                        canteen_amount = max(Decimal('0.00'), daily_canteen - can_credit)
+                    owed_can = max(Decimal('0.00'), daily_canteen - student.get_daily_canteen_settled(target_date))
+                    if Decimal('0.00') < can_credit < owed_can:
+                        canteen_amount = max(Decimal('0.00'), owed_can - can_credit)
                         canteen_note = f"Fee Teacher remainder lunch top-up (Credit applied: {currency}{can_credit:.2f})"
                     else:
                         canteen_amount = daily_canteen
@@ -1201,6 +1388,25 @@ def collect_both_fees_api(request):
                     created_payments.append(p_canteen)
                     canteen_created = True
                     messages_list.append(f"Lunch fee {currency}{canteen_amount:.2f}")
+
+    for p in created_payments:
+        log_activity(
+            action='PAYMENT_RECORDED',
+            target_model='FeePayment',
+            target_id=str(p.id),
+            target_repr=f"Receipt #{p.receipt_number} ({student.full_name})",
+            description=f"1-Tap route collection: Recorded {p.get_fee_type_display()} payment of {currency}{p.amount:.2f} via {p.get_payment_method_display()} for student {student.full_name}.",
+            changes={
+                'amount': str(p.amount),
+                'fee_type': p.fee_type,
+                'payment_method': p.payment_method,
+                'receipt_number': p.receipt_number,
+                'payment_date': str(p.payment_date),
+                'student_id': student.id,
+                'student_name': student.full_name,
+            },
+            actor=request.user,
+        )
 
     total_amount = (bus_amount if bus_created else Decimal('0.00')) + (canteen_amount if canteen_created else Decimal('0.00'))
     msg = f"✓ Collected {currency}{total_amount:.2f} ({', '.join(messages_list)})" if messages_list else "Fees already recorded for today."
@@ -1322,15 +1528,9 @@ def bus_analytics_view(request, pk):
     total_riders = students.count()
     daily_fee = bus.fee
 
-    # 3. Pre-fetch payments and attendance
+    # 3. Pre-fetch payments and explicit credit ledger
     student_ids = list(students.values_list('id', flat=True))
-
-    past_attendance_counts = dict(
-        ClockInRecord.objects.filter(date__lt=target_date, student_id__in=student_ids)
-        .values('student_id')
-        .annotate(c=Count('id'))
-        .values_list('student_id', 'c')
-    )
+    credit_ledger = _get_credit_ledger_maps(target_date, student_ids=student_ids)
 
     today_payments = dict(
         FeePayment.objects.filter(fee_type='BUS', payment_date=target_date, student_id__in=student_ids)
@@ -1339,22 +1539,8 @@ def bus_analytics_view(request, pk):
         .values_list('student_id', 'total')
     )
 
-    cumulative_payments = dict(
-        FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date, student_id__in=student_ids)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-
     today_canteen_payments = dict(
         FeePayment.objects.filter(fee_type='CANTEEN', payment_date=target_date, student_id__in=student_ids)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-
-    cumulative_canteen_payments = dict(
-        FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date, student_id__in=student_ids)
         .values('student_id')
         .annotate(total=Sum('amount'))
         .values_list('student_id', 'total')
@@ -1372,25 +1558,26 @@ def bus_analytics_view(request, pk):
     for s in students:
         total_expected += daily_fee
         direct_paid = today_payments.get(s.id, Decimal('0.00'))
-        cum_paid = cumulative_payments.get(s.id, Decimal('0.00'))
-        past_days = past_attendance_counts.get(s.id, 0)
-        past_cost = Decimal(past_days) * daily_fee
-        credit = max(Decimal('0.00'), cum_paid - past_cost)
+        ded_bus = credit_ledger['deducted_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
+        wallet_bus = _wallet_for_student(s, 'BUS', credit_ledger)
+        settled_bus = direct_paid + ded_bus
+        owed_bus = max(Decimal('0.00'), daily_fee - settled_bus)
+        credit = wallet_bus
 
-        is_paid = (direct_paid >= daily_fee) or (credit >= daily_fee)
-        has_partial_credit = (not is_paid) and (Decimal('0.00') < credit < daily_fee)
-        credit_available = credit if has_partial_credit else Decimal('0.00')
-        bus_credit_days = int((credit - daily_fee) // daily_fee) if (is_paid and credit >= daily_fee and daily_fee > 0) else 0
+        is_paid = (daily_fee <= Decimal('0.00')) or (settled_bus >= daily_fee) or ((settled_bus + wallet_bus) >= daily_fee)
+        has_partial_credit = (not is_paid) and (owed_bus > Decimal('0.00')) and (Decimal('0.00') < wallet_bus < owed_bus)
+        credit_available = wallet_bus if has_partial_credit else Decimal('0.00')
+        bus_credit_days = int((wallet_bus - owed_bus) // daily_fee) if (is_paid and wallet_bus >= owed_bus and daily_fee > Decimal('0.00')) else 0
 
         if is_paid:
             total_paid_count += 1
-            paid_amount = direct_paid if direct_paid > 0 else daily_fee
+            paid_amount = direct_paid if direct_paid > Decimal('0.00') else daily_fee
             total_collected += paid_amount
             balance = Decimal('0.00')
             remainder_due = Decimal('0.00')
         else:
             total_unpaid_count += 1
-            covered = max(direct_paid, credit)
+            covered = settled_bus + wallet_bus
             total_collected += direct_paid
             balance = max(Decimal('0.00'), daily_fee - covered)
             paid_amount = direct_paid
@@ -1399,21 +1586,23 @@ def bus_analytics_view(request, pk):
         # Canteen calculations
         canteen_fee = (s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee) if s.canteen_enrolled else Decimal('0.00')
         direct_canteen = today_canteen_payments.get(s.id, Decimal('0.00'))
-        cum_canteen = cumulative_canteen_payments.get(s.id, Decimal('0.00'))
-        canteen_cost = Decimal(past_days) * canteen_fee
-        canteen_credit = max(Decimal('0.00'), cum_canteen - canteen_cost)
+        ded_canteen = credit_ledger['deducted_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
+        wallet_canteen = _wallet_for_student(s, 'CANTEEN', credit_ledger)
+        settled_canteen = direct_canteen + ded_canteen
+        owed_canteen = max(Decimal('0.00'), canteen_fee - settled_canteen)
+        canteen_credit = wallet_canteen
 
-        canteen_is_paid = not s.canteen_enrolled or (direct_canteen >= canteen_fee) or (canteen_credit >= canteen_fee)
-        canteen_has_partial = (not canteen_is_paid) and s.canteen_enrolled and (Decimal('0.00') < canteen_credit < canteen_fee)
-        canteen_credit_available = canteen_credit if canteen_has_partial else Decimal('0.00')
-        canteen_credit_days = int((canteen_credit - canteen_fee) // canteen_fee) if (canteen_is_paid and s.canteen_enrolled and canteen_credit >= canteen_fee and canteen_fee > 0) else 0
+        canteen_is_paid = (not s.canteen_enrolled) or (canteen_fee <= Decimal('0.00')) or (settled_canteen >= canteen_fee) or ((settled_canteen + wallet_canteen) >= canteen_fee)
+        canteen_has_partial = (not canteen_is_paid) and s.canteen_enrolled and (owed_canteen > Decimal('0.00')) and (Decimal('0.00') < wallet_canteen < owed_canteen)
+        canteen_credit_available = wallet_canteen if canteen_has_partial else Decimal('0.00')
+        canteen_credit_days = int((wallet_canteen - owed_canteen) // canteen_fee) if (canteen_is_paid and s.canteen_enrolled and wallet_canteen >= owed_canteen and canteen_fee > Decimal('0.00')) else 0
 
         if canteen_is_paid:
-            canteen_amount_paid = direct_canteen if direct_canteen > 0 else (canteen_fee if s.canteen_enrolled else Decimal('0.00'))
+            canteen_amount_paid = direct_canteen if direct_canteen > Decimal('0.00') else (canteen_fee if s.canteen_enrolled else Decimal('0.00'))
             canteen_balance = Decimal('0.00')
             canteen_remainder_due = Decimal('0.00')
         else:
-            covered_canteen = max(direct_canteen, canteen_credit)
+            covered_canteen = settled_canteen + wallet_canteen
             canteen_amount_paid = direct_canteen
             canteen_balance = max(Decimal('0.00'), canteen_fee - covered_canteen)
             canteen_remainder_due = canteen_balance
@@ -1687,6 +1876,7 @@ def class_delete_view(request, pk):
 # STUDENT MANAGEMENT VIEWS
 # ==========================================
 @login_required
+@ensure_csrf_cookie
 def student_list_view(request):
     """Student roster listing with bus assignments and canteen status."""
     class_filter = request.GET.get('class', '')
@@ -1785,14 +1975,29 @@ def student_list_view(request):
         page_obj = paginator.page(1)
 
     target_date = timezone.localdate()
-    clock_in_map = {}
-    if is_attendance_only_teacher:
-        page_student_ids = [s.id for s in page_obj]
-        clock_ins = ClockInRecord.objects.filter(date=target_date, student_id__in=page_student_ids)
-        clock_in_map = {c.student_id: c for c in clock_ins}
-        for s in page_obj:
-            s.today_clock_in = clock_in_map.get(s.id)
-            s.is_clocked_in = bool(s.today_clock_in)
+    can_clock_in_students = bool(
+        not user_profile or user_profile.role != UserProfile.ROLE_ACCOUNTANT
+    )
+    page_student_ids = [s.id for s in page_obj]
+    clock_ins = ClockInRecord.objects.filter(date=target_date, student_id__in=page_student_ids)
+    clock_in_map = {c.student_id: c for c in clock_ins}
+    for s in page_obj:
+        s.today_clock_in = clock_in_map.get(s.id)
+        s.is_clocked_in = bool(s.today_clock_in)
+
+    today_onboarded_count = 0
+    my_onboarded_today_count = 0
+    if onboarding_mode_active:
+        today_onboarded_count = Student.objects.filter(
+            is_active=True,
+            created_at__date=target_date,
+        ).count()
+        if request.user.is_authenticated:
+            my_onboarded_today_count = Student.objects.filter(
+                is_active=True,
+                created_at__date=target_date,
+                registered_by=request.user,
+            ).count()
 
     context = {
         'students': page_obj,
@@ -1806,9 +2011,10 @@ def student_list_view(request):
         'search': search,
         'total_count': paginator.count,
         'onboarding_mode_active': onboarding_mode_active,
-        'today_onboarded_count': 0,
-        'my_onboarded_today_count': 0,
+        'today_onboarded_count': today_onboarded_count,
+        'my_onboarded_today_count': my_onboarded_today_count,
         'can_register': can_register,
+        'can_clock_in_students': can_clock_in_students,
         'clock_in_map': clock_in_map,
         'target_date': target_date,
         'date_str': target_date.strftime('%Y-%m-%d'),
@@ -1834,6 +2040,20 @@ def student_create_view(request):
             if not student.registered_by and request.user.is_authenticated:
                 student.registered_by = request.user
             student.save()
+            log_activity(
+                action='STUDENT_CREATED',
+                target_model='Student',
+                target_id=str(student.id),
+                target_repr=f"{student.full_name} ({student.student_class})",
+                description=f"Enrolled student {student.full_name} in class {student.student_class}" + (f" with bus {student.bus.name}" if student.bus else "") + ".",
+                changes={
+                    'full_name': student.full_name,
+                    'student_class': str(student.student_class),
+                    'bus': student.bus.name if student.bus else None,
+                    'canteen_enrolled': student.canteen_enrolled,
+                },
+                actor=request.user,
+            )
             messages.success(request, f"✓ Student '{student.full_name}' enrolled in {student.student_class}!")
             if 'save_and_add' in request.POST:
                 return redirect(f"{reverse('student_create')}?class={student.student_class}")
@@ -1857,6 +2077,15 @@ def toggle_onboarding_registration_view(request):
         'True' if new_state else 'False',
         "Permit teachers to register students during onboarding"
     )
+    log_activity(
+        action='SETTINGS_UPDATED',
+        target_model='SchoolSetting',
+        target_id='ALLOW_TEACHER_STUDENT_REGISTRATION',
+        target_repr='Student Onboarding Mode',
+        description=f"Toggled Student Onboarding Mode to {new_state} (Teachers can enroll students: {new_state}).",
+        changes={'ALLOW_TEACHER_STUDENT_REGISTRATION': new_state},
+        actor=request.user,
+    )
     state_str = "activated (all teachers can now enroll students)" if new_state else "deactivated (restricted to Principal only)"
     messages.success(request, f"🚀 Student Onboarding Mode has been {state_str}.")
     next_url = request.GET.get('next') or request.POST.get('next') or 'student_list'
@@ -1874,6 +2103,20 @@ def student_update_view(request, pk):
             if not student.registered_by and request.user.is_authenticated:
                 student.registered_by = request.user
             student.save()
+            log_activity(
+                action='STUDENT_UPDATED',
+                target_model='Student',
+                target_id=str(student.id),
+                target_repr=f"{student.full_name} ({student.student_class})",
+                description=f"Updated profile for student {student.full_name} ({student.student_class}).",
+                changes={
+                    'full_name': student.full_name,
+                    'student_class': str(student.student_class),
+                    'bus': student.bus.name if student.bus else None,
+                    'canteen_enrolled': student.canteen_enrolled,
+                },
+                actor=request.user,
+            )
             messages.success(request, f"Student '{student.full_name}' updated successfully!")
             return redirect('student_list')
     else:
@@ -1895,6 +2138,16 @@ def toggle_student_lunch_view(request, pk):
         status_text = "Lunch Included" if student.canteen_enrolled else "No Lunch (Opted Out)"
         msg = f"{student.full_name}: {status_text}."
 
+        log_activity(
+            action='LUNCH_TOGGLED',
+            target_model='Student',
+            target_id=str(student.id),
+            target_repr=student.full_name,
+            description=f"Changed lunch program enrollment for {student.full_name} to: {status_text}.",
+            changes={'canteen_enrolled': student.canteen_enrolled},
+            actor=request.user,
+        )
+
         if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
             return JsonResponse({
                 'success': True,
@@ -1914,6 +2167,16 @@ def student_delete_view(request, pk):
     student = get_object_or_404(Student, pk=pk)
     if request.method == 'POST':
         name = student.full_name
+        cls_name = str(student.student_class)
+        log_activity(
+            action='STUDENT_DELETED',
+            target_model='Student',
+            target_id=str(student.id),
+            target_repr=f"{name} ({cls_name})",
+            description=f"Permanently removed student {name} ({cls_name}) from school roster.",
+            changes={'student_name': name, 'student_class': cls_name},
+            actor=request.user,
+        )
         student.delete()
         messages.success(request, f"Student '{name}' removed from roster.")
         return redirect('student_list')
@@ -2315,6 +2578,24 @@ def teacher_remittance_create_view(request):
 
         teacher_name = teacher.get_full_name() or teacher.username
         currency = get_active_currency_symbol()
+
+        log_activity(
+            action='REMITTANCE_SETTLED',
+            target_model='TeacherRemittance',
+            target_id=str(remittance.id),
+            target_repr=f"Slip {ref_code} ({teacher_name})",
+            description=f"Settled physical cash handover of {currency}{amount:,.2f} from {teacher_name}. Slip Ref: {ref_code} (Variance: {currency}{variance:,.2f}).",
+            changes={
+                'amount': str(amount),
+                'expected_amount': str(expected_amount),
+                'variance': str(variance),
+                'teacher': teacher_name,
+                'reference_code': ref_code,
+                'date': str(target_date),
+            },
+            actor=request.user,
+        )
+
         success_msg = f"Successfully received {currency}{amount:,.2f} cash handover from {teacher_name}. Slip Ref: {ref_code}"
         messages.success(request, success_msg)
 
@@ -2384,13 +2665,17 @@ def collector_audit_view(request, pk):
     Dedicated financial audit dossier and collection log for an authorized teacher.
     Accessible to Principal, Accountant, and the teacher themselves for their own intake records.
     Displays:
-    - Target Expected Today (with Base rate breakdown)
-    - Cash Collected Today (with receipt count)
-    - Remaining Balance Due Today (with compliance percentage)
-    - Cumulative intake for current month (with monthly count & all-time total)
-    - Complete timestamped audit log of all fees collected by this teacher.
+    - Target Expected Today (with Bus/Canteen breakdown & absent student insight)
+    - Cash vs Electronic (MoMo/Bank) Collected Today
+    - Cash Remitted to Bursar (with Settlement Slips) vs Cash Still in Hand
+    - Unpaid Student Roster for Today with 1-click collection shortcut
+    - Cumulative intake for current month
+    - Paginated & searchable timestamped log of all fees collected by this teacher.
     """
-    teacher = get_object_or_404(User, pk=pk)
+    teacher = get_object_or_404(
+        User.objects.select_related('profile', 'profile__assigned_bus').prefetch_related('profile__assigned_buses'),
+        pk=pk
+    )
     user_profile = getattr(request.user, 'profile', None)
     
     is_finance_admin = bool(request.user.is_superuser or (user_profile and user_profile.can_view_revenue))
@@ -2404,10 +2689,14 @@ def collector_audit_view(request, pk):
         messages.error(request, "Access denied: You do not have permission to access financial records.")
         return redirect('dashboard')
 
+    is_self_view = (request.user.id == teacher.id and not is_finance_admin)
     today = timezone.localdate()
     
     date_str = request.GET.get('date', '').strip()
     log_period = request.GET.get('period', 'today')  # today, week, month, all
+    search_q = request.GET.get('q', '').strip()
+    fee_type_filter = request.GET.get('fee_type', '').strip()
+    method_filter = request.GET.get('method', '').strip()
     
     target_date = today
     if date_str:
@@ -2421,7 +2710,7 @@ def collector_audit_view(request, pk):
     _, last_day = calendar.monthrange(target_date.year, target_date.month)
     last_day_of_month = target_date.replace(day=last_day)
 
-    # Calculate audited daily expectations & today's collection for this teacher
+    # 1. Audited daily expectations & unpaid roster in O(1) constant queries
     collectors_meta = get_collectors_financial_summary([teacher], target_date)
     meta = collectors_meta.get(teacher.id, {})
 
@@ -2430,15 +2719,45 @@ def collector_audit_view(request, pk):
     class_expected = meta.get('adjusted_target', Decimal('0.00'))
     baseline_target = meta.get('baseline_target', Decimal('0.00'))
     class_balance = meta.get('balance', Decimal('0.00'))
+    present_balance = meta.get('present_balance', class_balance)
     student_count = meta.get('student_count', 0)
+    unpaid_students = meta.get('unpaid_students', [])
 
-    # Monthly cumulative collections
-    month_payments_qs = FeePayment.objects.filter(
+    # 2. Payment method breakdown for target_date (1 aggregate query)
+    today_method_rows = (
+        FeePayment.objects.filter(recorded_by=teacher, payment_date=target_date)
+        .values('payment_method')
+        .annotate(total=Sum('amount'), count=Count('id'))
+    )
+    cash_collected_today = Decimal('0.00')
+    momo_collected_today = Decimal('0.00')
+    bank_collected_today = Decimal('0.00')
+    for row in today_method_rows:
+        amt = row['total'] or Decimal('0.00')
+        m = row['payment_method']
+        if m == 'CASH':
+            cash_collected_today += amt
+        elif m == 'MOBILE_MONEY':
+            momo_collected_today += amt
+        else:
+            bank_collected_today += amt
+    electronic_collected_today = momo_collected_today + bank_collected_today
+
+    # 3. Handover / Remittances accepted by Bursar on target_date (1 query with select_related)
+    remittances_today = list(
+        TeacherRemittance.objects.filter(teacher=teacher, date=target_date)
+        .select_related('received_by', 'received_by__profile')
+        .order_by('-created_at')
+    )
+    cash_remitted_today = sum((r.amount for r in remittances_today), Decimal('0.00'))
+    cash_in_hand = max(Decimal('0.00'), cash_collected_today - cash_remitted_today)
+
+    # 4. Monthly & All-Time cumulative collections (2 aggregate queries)
+    month_data = FeePayment.objects.filter(
         recorded_by=teacher,
         payment_date__gte=first_day_of_month,
         payment_date__lte=last_day_of_month
-    )
-    month_data = month_payments_qs.aggregate(total=Sum('amount'), count=Count('id'))
+    ).aggregate(total=Sum('amount'), count=Count('id'))
     month_total = month_data['total'] or Decimal('0.00')
     month_count = month_data['count']
 
@@ -2464,8 +2783,12 @@ def collector_audit_view(request, pk):
         status_badge_class = 'stat-badge-success' if today_collected > 0 else 'stat-badge-info'
         compliance_pct = 100 if today_collected > 0 else 0
 
-    # Audit log of payments collected by this teacher
-    audit_logs_qs = FeePayment.objects.filter(recorded_by=teacher).select_related('student', 'bus').order_by('-payment_date', '-created_at')
+    # 5. Filtered & Paginated audit log (zero N+1 via select_related)
+    audit_logs_qs = (
+        FeePayment.objects.filter(recorded_by=teacher)
+        .select_related('student', 'student__bus', 'bus')
+        .order_by('-payment_date', '-created_at')
+    )
 
     if log_period == 'today':
         audit_logs_qs = audit_logs_qs.filter(payment_date=target_date)
@@ -2474,15 +2797,34 @@ def collector_audit_view(request, pk):
     elif log_period == 'month':
         audit_logs_qs = audit_logs_qs.filter(payment_date__gte=first_day_of_month, payment_date__lte=last_day_of_month)
     elif log_period == 'all':
-        pass  # All-time
+        pass
+
+    if search_q:
+        audit_logs_qs = audit_logs_qs.filter(
+            Q(student__first_name__icontains=search_q) |
+            Q(student__last_name__icontains=search_q) |
+            Q(receipt_number__icontains=search_q)
+        )
+    if fee_type_filter in ('BUS', 'CANTEEN'):
+        audit_logs_qs = audit_logs_qs.filter(fee_type=fee_type_filter)
+    if method_filter:
+        audit_logs_qs = audit_logs_qs.filter(payment_method=method_filter)
 
     log_data = audit_logs_qs.aggregate(total=Sum('amount'), count=Count('id'))
     filtered_log_total = log_data['total'] or Decimal('0.00')
     audit_logs_count = log_data['count']
 
+    paginator = Paginator(audit_logs_qs, 25)
+    page_number = request.GET.get('page', 1)
+    try:
+        audit_page_obj = paginator.page(page_number)
+    except (PageNotAnInteger, EmptyPage):
+        audit_page_obj = paginator.page(1)
+
     context = {
         'teacher': teacher,
         'profile': getattr(teacher, 'profile', None),
+        'is_self_view': is_self_view,
         'target_date': target_date,
         'date_str': target_date.strftime('%Y-%m-%d'),
         'target_date_str': target_date.strftime('%B %d, %Y'),
@@ -2491,18 +2833,32 @@ def collector_audit_view(request, pk):
         'baseline_target': baseline_target,
         'today_collected': today_collected,
         'today_count': today_count,
+        'cash_collected_today': cash_collected_today,
+        'momo_collected_today': momo_collected_today,
+        'bank_collected_today': bank_collected_today,
+        'electronic_collected_today': electronic_collected_today,
+        'remittances_today': remittances_today,
+        'cash_remitted_today': cash_remitted_today,
+        'cash_in_hand': cash_in_hand,
         'class_balance': class_balance,
+        'present_balance': present_balance,
         'compliance_pct': compliance_pct,
         'month_total': month_total,
         'month_count': month_count,
         'all_total': all_total,
         'all_count': all_count,
         'meta': meta,
+        'unpaid_students': unpaid_students,
         'status_label': status_label,
         'status_badge_class': status_badge_class,
         'student_count': student_count,
         'log_period': log_period,
-        'audit_logs': audit_logs_qs,
+        'search_q': search_q,
+        'fee_type_filter': fee_type_filter,
+        'method_filter': method_filter,
+        'audit_logs': audit_page_obj,
+        'page_obj': audit_page_obj,
+        'is_paginated': audit_page_obj.has_other_pages(),
         'audit_logs_count': audit_logs_count,
         'filtered_log_total': filtered_log_total,
         'currency': get_active_currency_symbol(),
@@ -2512,59 +2868,156 @@ def collector_audit_view(request, pk):
 
 def get_student_payment_summary(student, target_date=None):
     """
-    Computes real-time daily fee context, credits, and partial remainder top-up amounts
-    for a single student on target_date without redundant database queries.
+    Computes real-time daily fee context, explicit prepaid wallet balances,
+    today's deduction status, and partial remainder top-up amounts for a student.
     """
     if target_date is None:
         target_date = timezone.localdate()
 
-    bus_fee = float(student.bus_fee_required)
-    canteen_fee = float(student.canteen_fee_required)
+    bus_fee_dec = student.bus_fee_required if student.bus else Decimal('0.00')
+    canteen_fee_dec = student.canteen_fee_required if student.canteen_enrolled else Decimal('0.00')
 
-    bus_credit = float(student.get_bus_credit_balance(target_date))
-    can_credit = float(student.get_canteen_credit_balance(target_date))
+    bus_wallet_dec = student.get_bus_credit_balance(target_date)
+    can_wallet_dec = student.get_canteen_credit_balance(target_date)
 
-    bus_paid = float(student.get_daily_bus_paid(target_date))
-    can_paid = float(student.get_daily_canteen_paid(target_date))
+    bus_paid_dec = student.get_daily_bus_paid(target_date)
+    can_paid_dec = student.get_daily_canteen_paid(target_date)
 
-    # Partial credit top-up calculations
-    bus_has_partial = bool(student.bus and (bus_paid < bus_fee) and (0.0 < bus_credit < bus_fee))
-    bus_remainder_due = max(0.0, bus_fee - bus_credit - bus_paid) if bus_has_partial else 0.0
+    bus_deducted_dec = student.get_deducted_amount_for_date('BUS', target_date) if (student.bus and bus_fee_dec > 0) else Decimal('0.00')
+    can_deducted_dec = student.get_deducted_amount_for_date('CANTEEN', target_date) if (student.canteen_enrolled and canteen_fee_dec > 0) else Decimal('0.00')
 
-    can_has_partial = bool(student.canteen_enrolled and (can_paid < canteen_fee) and (0.0 < can_credit < canteen_fee))
-    can_remainder_due = max(0.0, canteen_fee - can_credit - can_paid) if can_has_partial else 0.0
+    bus_settled_amt = bus_paid_dec + bus_deducted_dec
+    can_settled_amt = can_paid_dec + can_deducted_dec
 
-    # Remaining balances due today
-    bus_covered = max(bus_paid, bus_credit)
-    bus_balance = max(0.0, bus_fee - bus_covered) if student.bus else 0.0
+    bus_owed_today = max(Decimal('0.00'), bus_fee_dec - bus_settled_amt) if (student.bus and bus_fee_dec > 0) else Decimal('0.00')
+    can_owed_today = max(Decimal('0.00'), canteen_fee_dec - can_settled_amt) if (student.canteen_enrolled and canteen_fee_dec > 0) else Decimal('0.00')
 
-    can_covered = max(can_paid, can_credit)
-    canteen_balance = max(0.0, canteen_fee - can_covered) if student.canteen_enrolled else 0.0
+    bus_to_deduct_dec = min(bus_wallet_dec, bus_owed_today)
+    can_to_deduct_dec = min(can_wallet_dec, can_owed_today)
 
-    # Remaining advance credit days after today
-    bus_credit_days = 0
-    if student.bus and bus_fee > 0 and bus_credit >= bus_fee:
-        bus_credit_days = int((bus_credit - bus_fee) // bus_fee)
+    bus_cash_needed_dec = max(Decimal('0.00'), bus_owed_today - bus_to_deduct_dec)
+    can_cash_needed_dec = max(Decimal('0.00'), can_owed_today - can_to_deduct_dec)
 
-    canteen_credit_days = 0
-    if student.canteen_enrolled and canteen_fee > 0 and can_credit >= canteen_fee:
-        canteen_credit_days = int((can_credit - canteen_fee) // canteen_fee)
+    bus_wallet_after_dec = max(Decimal('0.00'), bus_wallet_dec - bus_to_deduct_dec)
+    can_wallet_after_dec = max(Decimal('0.00'), can_wallet_dec - can_to_deduct_dec)
+
+    bus_fee = float(bus_fee_dec)
+    canteen_fee = float(canteen_fee_dec)
+    bus_credit = float(bus_wallet_dec)
+    can_credit = float(can_wallet_dec)
+    bus_paid = float(bus_paid_dec)
+    can_paid = float(can_paid_dec)
+    bus_deducted_today = float(bus_deducted_dec)
+    canteen_deducted_today = float(can_deducted_dec)
+
+    bus_to_deduct = round(float(bus_to_deduct_dec), 2)
+    canteen_to_deduct = round(float(can_to_deduct_dec), 2)
+    total_to_deduct = round(bus_to_deduct + canteen_to_deduct, 2)
+
+    bus_cash_needed = round(float(bus_cash_needed_dec), 2)
+    canteen_cash_needed = round(float(can_cash_needed_dec), 2)
+    total_cash_needed = round(bus_cash_needed + canteen_cash_needed, 2)
+
+    bus_wallet_after = round(float(bus_wallet_after_dec), 2)
+    canteen_wallet_after = round(float(can_wallet_after_dec), 2)
+    total_wallet_after = round(bus_wallet_after + canteen_wallet_after, 2)
+
+    bus_balance = bus_cash_needed
+    canteen_balance = canteen_cash_needed
+
+    # Partial credit / part-payment top-up calculations
+    bus_has_partial = bool(
+        student.bus
+        and bus_owed_today > Decimal('0.00')
+        and (
+            Decimal('0.00') < bus_wallet_dec < bus_owed_today
+            or Decimal('0.00') < bus_settled_amt < bus_fee_dec
+        )
+    )
+    bus_remainder_due = bus_cash_needed if bus_has_partial else 0.0
+
+    can_has_partial = bool(
+        student.canteen_enrolled
+        and can_owed_today > Decimal('0.00')
+        and (
+            Decimal('0.00') < can_wallet_dec < can_owed_today
+            or Decimal('0.00') < can_settled_amt < canteen_fee_dec
+        )
+    )
+    can_remainder_due = canteen_cash_needed if can_has_partial else 0.0
+
+    # Remaining advance credit days after covering today
+    bus_credit_days = int(bus_wallet_after_dec // bus_fee_dec) if (student.bus and bus_fee_dec > 0 and bus_wallet_dec >= bus_owed_today) else 0
+    bus_credit_remaining = bus_wallet_after if (student.bus and bus_fee_dec > 0 and bus_wallet_dec >= bus_owed_today) else 0.0
+
+    canteen_credit_days = int(can_wallet_after_dec // canteen_fee_dec) if (student.canteen_enrolled and canteen_fee_dec > 0 and can_wallet_dec >= can_owed_today) else 0
+    canteen_credit_remaining = canteen_wallet_after if (student.canteen_enrolled and canteen_fee_dec > 0 and can_wallet_dec >= can_owed_today) else 0.0
+
+    bus_settled_today = bool((not student.bus) or (bus_fee_dec <= Decimal('0.00')) or (bus_owed_today <= Decimal('0.00')))
+    canteen_settled_today = bool((not student.canteen_enrolled) or (canteen_fee_dec <= Decimal('0.00')) or (can_owed_today <= Decimal('0.00')))
+
+    is_bus_paid = bool((not student.bus) or (bus_fee <= 0.0) or (bus_balance <= 0.0))
+    is_canteen_paid = bool((not student.canteen_enrolled) or (canteen_fee <= 0.0) or (canteen_balance <= 0.0))
+    has_applicable_fees = bool((student.bus and bus_fee > 0) or (student.canteen_enrolled and canteen_fee > 0))
+    is_fully_paid = bool(has_applicable_fees and is_bus_paid and is_canteen_paid)
+    is_fully_settled_today = bool(has_applicable_fees and bus_settled_today and canteen_settled_today)
+
+    has_bus_bulk = bool(student.bus and bus_fee > 0 and (bus_wallet_dec > Decimal('0.00') or bus_deducted_dec > Decimal('0.00')))
+    has_canteen_bulk = bool(student.canteen_enrolled and canteen_fee > 0 and (can_wallet_dec > Decimal('0.00') or can_deducted_dec > Decimal('0.00')))
+    has_bulk_payment = has_bus_bulk or has_canteen_bulk
+    total_wallet_balance = round(bus_credit + can_credit, 2)
+    total_credit_remaining = total_wallet_after if is_fully_paid else round(bus_credit_remaining + canteen_credit_remaining, 2)
+    has_wallet_action = bool(has_applicable_fees and (total_wallet_balance > 0 or total_to_deduct > 0 or is_fully_settled_today))
+
+    clock_in = ClockInRecord.objects.filter(student=student, date=target_date).first()
+    is_clocked_in = clock_in is not None
+    clock_in_time = clock_in.clock_in_time.strftime('%I:%M %p') if (clock_in and clock_in.clock_in_time) else ''
 
     return {
         'bus_fee': bus_fee,
         'bus_paid': bus_paid,
+        'bus_deducted_today': bus_deducted_today,
+        'bus_settled_today': bus_settled_today,
         'bus_balance': bus_balance,
         'bus_credit': bus_credit,
+        'bus_wallet_balance': round(bus_credit, 2),
+        'bus_to_deduct': bus_to_deduct,
+        'bus_cash_needed': bus_cash_needed,
+        'bus_wallet_after': bus_wallet_after,
         'bus_has_partial': bus_has_partial,
         'bus_remainder_due': bus_remainder_due,
         'bus_credit_days': bus_credit_days,
+        'bus_credit_remaining': bus_credit_remaining,
         'canteen_fee': canteen_fee,
         'canteen_paid': can_paid,
+        'canteen_deducted_today': canteen_deducted_today,
+        'canteen_settled_today': canteen_settled_today,
         'canteen_balance': canteen_balance,
         'canteen_credit': can_credit,
+        'canteen_wallet_balance': round(can_credit, 2),
+        'canteen_to_deduct': canteen_to_deduct,
+        'canteen_cash_needed': canteen_cash_needed,
+        'canteen_wallet_after': canteen_wallet_after,
         'canteen_has_partial': can_has_partial,
         'canteen_remainder_due': can_remainder_due,
         'canteen_credit_days': canteen_credit_days,
+        'canteen_credit_remaining': canteen_credit_remaining,
+        'total_wallet_balance': total_wallet_balance,
+        'total_to_deduct': total_to_deduct,
+        'total_cash_needed': total_cash_needed,
+        'total_wallet_after': total_wallet_after,
+        'total_credit_remaining': total_credit_remaining,
+        'is_bus_paid': is_bus_paid,
+        'is_canteen_paid': is_canteen_paid,
+        'is_fully_paid': is_fully_paid,
+        'is_fully_settled_today': is_fully_settled_today,
+        'has_applicable_fees': has_applicable_fees,
+        'has_bus_bulk': has_bus_bulk,
+        'has_canteen_bulk': has_canteen_bulk,
+        'has_bulk_payment': has_bulk_payment,
+        'has_wallet_action': has_wallet_action,
+        'is_clocked_in': is_clocked_in,
+        'clock_in_time': clock_in_time,
     }
 
 
@@ -2582,6 +3035,216 @@ def student_payment_details_api(request, student_id):
 
     details = get_student_payment_summary(student, target_date)
     return JsonResponse({'success': True, 'details': details})
+
+
+@payment_recording_required
+@require_POST
+def wallet_settle_and_clockin_api(request):
+    """
+    Explicitly deducts today's fee(s) from the student's prepaid wallet (and collects
+    any exact partial remainder top-up in Cash/MoMo if credit < daily fee), records
+    today's ClockInRecord, and supports action='undo' to reverse deductions & clock-in.
+    """
+    try:
+        data = json.loads(request.body) if (request.body and request.content_type == 'application/json') else request.POST
+    except Exception:
+        data = request.POST
+
+    student_id = data.get('student_id')
+    if not student_id:
+        return JsonResponse({'success': False, 'error': 'Student ID is required.'}, status=400)
+
+    action = str(data.get('action') or 'settle_and_clockin').strip().lower()
+    date_str = (data.get('date') or '').strip()
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            target_date = timezone.localdate()
+    else:
+        target_date = timezone.localdate()
+
+    method = _normalize_payment_method(data.get('method') or data.get('payment_method'))
+
+    raw_collect = data.get('collect_remainder', True)
+    if isinstance(raw_collect, str):
+        collect_remainder = raw_collect.strip().lower() not in ('0', 'false', 'no')
+    else:
+        collect_remainder = bool(raw_collect)
+
+    currency = get_active_currency_symbol()
+    period = get_active_academic_period()
+
+    if action == 'undo':
+        with transaction.atomic():
+            student = get_object_or_404(Student.objects.select_for_update(), pk=student_id, is_active=True)
+            clock_in = ClockInRecord.objects.filter(student=student, date=target_date).first()
+            refunded, clock_in_removed = _undo_clockin_and_refund_wallet(
+                student, target_date, clock_in, request.user
+            )
+
+        student.refresh_from_db()
+        details = get_student_payment_summary(student, target_date)
+        total_refunded = refunded['BUS'] + refunded['CANTEEN']
+        if total_refunded > Decimal('0.00'):
+            msg = f"Undid clock-in for {student.full_name} & refunded {currency}{total_refunded:.2f} back to wallet."
+        elif clock_in_removed:
+            msg = f"Clock-in undone for {student.full_name}."
+        else:
+            msg = f"Nothing to undo for {student.full_name}."
+        return JsonResponse({
+            'success': True,
+            'action': 'undo',
+            'refunded': float(total_refunded),
+            'bus_refunded': float(refunded['BUS']),
+            'canteen_refunded': float(refunded['CANTEEN']),
+            'message': msg,
+            'details': details,
+        })
+
+    # Action: settle_and_clockin
+    now_time = timezone.localtime().time() if hasattr(timezone, 'localtime') else timezone.now().time()
+    receipt_number = f"WLT-{timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
+    created_payments = []
+
+    try:
+        with transaction.atomic():
+            student = get_object_or_404(Student.objects.select_for_update(), pk=student_id, is_active=True)
+            clock_in, clock_in_created = ClockInRecord.objects.get_or_create(
+                student=student,
+                date=target_date,
+                defaults={
+                    'clock_in_time': now_time,
+                    'status': 'PRESENT',
+                    'recorded_by': request.user,
+                },
+            )
+
+            bus_deducted = Decimal('0.00')
+            bus_cash = Decimal('0.00')
+            if student.bus_id and student.bus_fee_required > Decimal('0.00'):
+                bus_owed = max(Decimal('0.00'), student.bus_fee_required - student.get_daily_bus_settled(target_date))
+                if bus_owed > Decimal('0.00'):
+                    bus_deducted = student.apply_credit_for_date(
+                        'BUS', target_date=target_date, actor=request.user, clock_in=clock_in
+                    )
+                    bus_cash = max(Decimal('0.00'), bus_owed - bus_deducted)
+                    if bus_cash > Decimal('0.00'):
+                        if not collect_remainder:
+                            raise ValueError(f"Remaining Bus top-up of {currency}{bus_cash:.2f} is required.")
+                        note = (
+                            f"Partial credit settlement + top-up (Wallet used: {currency}{bus_deducted:.2f})"
+                            if bus_deducted > Decimal('0.00')
+                            else f"Bus fee settled at clock-in"
+                        )
+                        p_bus = FeePayment(
+                            student=student,
+                            bus=student.bus,
+                            is_temporary_bus=False,
+                            fee_type='BUS',
+                            amount=bus_cash,
+                            payment_date=target_date,
+                            period=period,
+                            payment_method=method,
+                            receipt_number=receipt_number,
+                            notes=note,
+                            recorded_by=request.user,
+                        )
+                        p_bus._skip_wallet_sync = True
+                        p_bus.save()
+                        created_payments.append(p_bus)
+
+            canteen_deducted = Decimal('0.00')
+            canteen_cash = Decimal('0.00')
+            if student.canteen_enrolled and student.canteen_fee_required > Decimal('0.00'):
+                can_owed = max(Decimal('0.00'), student.canteen_fee_required - student.get_daily_canteen_settled(target_date))
+                if can_owed > Decimal('0.00'):
+                    canteen_deducted = student.apply_credit_for_date(
+                        'CANTEEN', target_date=target_date, actor=request.user, clock_in=clock_in
+                    )
+                    canteen_cash = max(Decimal('0.00'), can_owed - canteen_deducted)
+                    if canteen_cash > Decimal('0.00'):
+                        if not collect_remainder:
+                            raise ValueError(f"Remaining Canteen top-up of {currency}{canteen_cash:.2f} is required.")
+                        note = (
+                            f"Partial credit settlement + top-up (Wallet used: {currency}{canteen_deducted:.2f})"
+                            if canteen_deducted > Decimal('0.00')
+                            else f"Canteen fee settled at clock-in"
+                        )
+                        p_can = FeePayment(
+                            student=student,
+                            fee_type='CANTEEN',
+                            amount=canteen_cash,
+                            payment_date=target_date,
+                            period=period,
+                            payment_method=method,
+                            receipt_number=receipt_number,
+                            notes=note,
+                            recorded_by=request.user,
+                        )
+                        p_can._skip_wallet_sync = True
+                        p_can.save()
+                        created_payments.append(p_can)
+    except ValueError as err:
+        return JsonResponse({'success': False, 'error': str(err)}, status=400)
+
+    total_deducted = bus_deducted + canteen_deducted
+    total_cash = bus_cash + canteen_cash
+
+    for p in created_payments:
+        log_activity(
+            action='PAYMENT_RECORDED',
+            target_model='FeePayment',
+            target_id=str(p.id),
+            target_repr=f"Receipt #{p.receipt_number} ({student.full_name})",
+            description=f"Collected {currency}{p.amount:.2f} {p.get_fee_type_display()} remainder via {p.get_payment_method_display()} for {student.full_name}.",
+            changes={
+                'amount': str(p.amount),
+                'fee_type': p.fee_type,
+                'payment_method': p.payment_method,
+                'receipt_number': p.receipt_number,
+                'payment_date': str(p.payment_date),
+                'student_id': student.id,
+            },
+            actor=request.user,
+        )
+
+    if clock_in_created:
+        log_activity(
+            action='CLOCK_IN',
+            target_model='Student',
+            target_id=str(student.id),
+            target_repr=student.full_name,
+            description=(
+                f"Clocked in {student.full_name} for {target_date} "
+                f"(Wallet deducted: {currency}{total_deducted:.2f}, Top-up cash: {currency}{total_cash:.2f})."
+            ),
+            actor=request.user,
+        )
+
+    student.refresh_from_db()
+    details = get_student_payment_summary(student, target_date)
+    parts = []
+    if total_deducted > Decimal('0.00'):
+        parts.append(f"deducted {currency}{total_deducted:.2f} from wallet")
+    if total_cash > Decimal('0.00'):
+        parts.append(f"collected {currency}{total_cash:.2f}")
+    if parts:
+        msg = f"✓ Settled ({' + '.join(parts)}) & clocked in {student.full_name}!"
+    else:
+        msg = f"✓ Clocked in {student.full_name} at {details['clock_in_time']}."
+
+    return JsonResponse({
+        'success': True,
+        'action': 'settle_and_clockin',
+        'clock_in_time': details['clock_in_time'],
+        'bus_deducted': float(bus_deducted),
+        'canteen_deducted': float(canteen_deducted),
+        'total_deducted': float(total_deducted),
+        'cash_collected': float(total_cash),
+        'message': msg,
+        'details': details,
+    })
 
 
 @payment_recording_required
@@ -2664,7 +3327,7 @@ def payment_create_view(request):
             canteen_amount = form.cleaned_data.get('canteen_amount') or Decimal('0.00')
             payment_date = form.cleaned_data.get('payment_date') or timezone.localdate()
             period = form.cleaned_data.get('period') or get_active_academic_period()
-            payment_method = form.cleaned_data.get('payment_method') or 'CASH'
+            payment_method = _normalize_payment_method(form.cleaned_data.get('payment_method'))
             receipt_number = form.cleaned_data.get('receipt_number') or f"REC-{timezone.now().strftime('%Y%m%d%H%M%S')}"
             notes = form.cleaned_data.get('notes') or ''
             recorded_by = request.user if request.user.is_authenticated else None
@@ -2719,12 +3382,67 @@ def payment_create_view(request):
 
             currency = get_active_currency_symbol()
             total_amount = sum(p.amount for p in created_payments)
+
+            for p in created_payments:
+                log_activity(
+                    action='PAYMENT_RECORDED',
+                    target_model='FeePayment',
+                    target_id=str(p.id),
+                    target_repr=f"Receipt #{p.receipt_number} ({student.full_name})",
+                    description=f"Recorded {p.get_fee_type_display()} payment of {currency}{p.amount:.2f} via {p.get_payment_method_display()} for student {student.full_name} ({student.student_class}).",
+                    changes={
+                        'amount': str(p.amount),
+                        'fee_type': p.fee_type,
+                        'payment_method': p.payment_method,
+                        'receipt_number': p.receipt_number,
+                        'payment_date': str(p.payment_date),
+                        'student_id': student.id,
+                        'student_name': student.full_name,
+                    },
+                    actor=request.user,
+                )
             if len(created_payments) == 2:
                 breakdown = f" ({currency}{bus_amount:.2f} Bus + {currency}{canteen_amount:.2f} Canteen)"
-            else:
+            elif len(created_payments) == 1:
                 breakdown = f" ({created_payments[0].get_fee_type_display()})"
-            messages.success(request, f"Payment of {currency}{total_amount:.2f}{breakdown} for {student.full_name} recorded! Receipt: {receipt_number}")
-            return redirect('payment_list')
+            else:
+                breakdown = ""
+
+            adv_tags = []
+            if is_bus_adv and bus_amount > Decimal('0.00'):
+                adv_tags.append(f"Bus: {bus_days_cov}d bulk")
+            if is_can_adv and canteen_amount > Decimal('0.00'):
+                adv_tags.append(f"Canteen: {can_days_cov}d bulk")
+            adv_note = f" [{', '.join(adv_tags)}]" if adv_tags else ""
+
+            wallet_topup_total = (
+                CreditTransaction.objects.filter(
+                    payment__in=created_payments,
+                    transaction_type=CreditTransaction.TYPE_TOP_UP,
+                ).aggregate(t=Sum('amount'))['t']
+                or Decimal('0.00')
+            )
+            wallet_note = ""
+            if wallet_topup_total > Decimal('0.00'):
+                today_portion = max(Decimal('0.00'), total_amount - wallet_topup_total)
+                if today_portion > Decimal('0.00'):
+                    wallet_note = f" (Today settled: {currency}{today_portion:.2f}; {currency}{wallet_topup_total:.2f} added to Bulk Wallet)"
+                else:
+                    wallet_note = f" ({currency}{wallet_topup_total:.2f} added to Bulk Wallet)"
+
+            messages.success(request, f"✓ Payment of {currency}{total_amount:.2f}{breakdown}{adv_note} for {student.full_name} recorded!{wallet_note} Receipt: {receipt_number}")
+            if 'save_and_add' in request.POST:
+                params = ['focus_search=1']
+                if selected_bus_obj:
+                    params.append(f"bus_id={selected_bus_obj.id}")
+                if form.cleaned_data.get('is_one_off_bus') or is_one_off_arg:
+                    params.append('is_one_off=1')
+                return redirect(f"{reverse('payment_create')}?{'&'.join(params)}")
+            if user_profile and user_profile.can_view_revenue:
+                return redirect('payment_list')
+            if user_profile and user_profile.can_view_my_collections:
+                return redirect('my_collections')
+            return redirect('dashboard')
     else:
         form = FeePaymentForm(initial=initial)
 
@@ -2743,6 +3461,7 @@ def payment_create_view(request):
         s_dict = {
             'id': s.id,
             'name': s.full_name,
+            'class_id': cls_key,
             'class_name': s.school_class.name if s.school_class else (s.student_class or 'Unassigned'),
             'bus_id': s.bus_id or '',
             'bus_name': s.bus.name if s.bus else 'Walker',
@@ -2750,6 +3469,8 @@ def payment_create_view(request):
             'bus_fee': float(s.bus_fee_required),
             'canteen_enrolled': bool(s.canteen_enrolled),
             'canteen_fee': float(s.canteen_fee_required),
+            'bus_wallet': float(s.bus_credit_wallet or Decimal('0.00')),
+            'canteen_wallet': float(s.canteen_credit_wallet or Decimal('0.00')),
         }
 
         # If a specific student was targeted in the URL, preload their financial details immediately
@@ -2785,6 +3506,19 @@ def payment_create_view(request):
         {'id': str(sc.id), 'name': sc.name}
         for sc in school_classes
     ]
+
+    is_class_only_fee_teacher = bool(
+        not is_admin_user and not is_bus_fee_teacher
+        and user_profile and user_profile.role == UserProfile.ROLE_TEACHER
+        and user_profile.assigned_class
+    )
+    if is_class_only_fee_teacher:
+        assigned_cls_id = class_name_to_id.get(user_profile.assigned_class.strip(), '')
+        if assigned_cls_id:
+            all_classes = [c for c in all_classes if c['id'] == assigned_cls_id]
+            all_students_by_class = {assigned_cls_id: all_students_by_class.get(assigned_cls_id, [])}
+            if not selected_class_id:
+                selected_class_id = assigned_cls_id
 
     active_classes_list = scoped_classes if is_scoped_fee_teacher else all_classes
     form.fields['student_class'].widget.choices = [
@@ -2823,6 +3557,26 @@ def payment_delete_view(request, pk):
     """Delete a payment record."""
     payment = get_object_or_404(FeePayment, pk=pk)
     if request.method == 'POST':
+        receipt_no = payment.receipt_number or f"ID-{payment.id}"
+        student_name = payment.student.full_name if payment.student else "Unknown"
+        amount = str(payment.amount)
+        fee_type = payment.get_fee_type_display()
+        currency = get_active_currency_symbol()
+        log_activity(
+            action='PAYMENT_DELETED',
+            target_model='FeePayment',
+            target_id=str(payment.id),
+            target_repr=f"Receipt #{receipt_no} ({student_name})",
+            description=f"Deleted {fee_type} payment of {currency}{amount} for student {student_name} (Receipt: {receipt_no}).",
+            changes={
+                'deleted_receipt_number': receipt_no,
+                'deleted_amount': amount,
+                'deleted_fee_type': payment.fee_type,
+                'student_name': student_name,
+                'payment_date': str(payment.payment_date),
+            },
+            actor=request.user,
+        )
         payment.delete()
         messages.success(request, f"Payment receipt {payment.receipt_number} deleted.")
         return redirect('payment_list')
@@ -3007,6 +3761,14 @@ def change_password_view(request):
         if form.is_valid():
             user = form.save()
             update_session_auth_hash(request, user)
+            log_activity(
+                action='PASSWORD_CHANGE',
+                target_model='User',
+                target_id=str(user.id),
+                target_repr=user.username,
+                description=f"User @{user.username} self-updated their account password.",
+                actor=user,
+            )
             messages.success(request, "✓ Your password has been successfully updated.")
             return redirect('dashboard')
     else:
@@ -3600,6 +4362,15 @@ def teacher_create_view(request):
         if form.is_valid():
             user = form.save()
             initial_password = form.cleaned_data['password']
+            log_activity(
+                action='TEACHER_CREATED',
+                target_model='User',
+                target_id=str(user.id),
+                target_repr=f"@{user.username} ({user.get_full_name() or 'Staff'})",
+                description=f"Created staff account for @{user.username} ({user.get_full_name() or 'Staff'}).",
+                changes={'username': user.username, 'role': user.profile.get_role_display() if hasattr(user, 'profile') else 'Staff'},
+                actor=request.user,
+            )
             messages.success(
                 request,
                 f"✓ Teacher account created for {user.get_full_name() or user.username} (@{user.username})."
@@ -3641,6 +4412,14 @@ def teacher_update_view(request, pk):
                     'is_edit': True,
                 })
             form.save()
+            log_activity(
+                action='TEACHER_UPDATED',
+                target_model='User',
+                target_id=str(teacher.id),
+                target_repr=f"@{teacher.username}",
+                description=f"Updated profile/permissions for staff member @{teacher.username}.",
+                actor=request.user,
+            )
             messages.success(request, f"✓ Staff member '{teacher.username}' updated successfully.")
             return redirect('teacher_list')
     else:
@@ -3675,6 +4454,14 @@ def teacher_password_reset_view(request, pk):
         if form.is_valid():
             form.save()
             new_password = form.cleaned_data['new_password']
+            log_activity(
+                action='PASSWORD_CHANGE',
+                target_model='User',
+                target_id=str(teacher.id),
+                target_repr=teacher.username,
+                description=f"Administrative password reset performed for staff member @{teacher.username}.",
+                actor=request.user,
+            )
             messages.success(
                 request,
                 f"✓ Password reset for '{teacher.username}'."
@@ -3707,8 +4494,101 @@ def teacher_toggle_status_view(request, pk):
     teacher.is_active = not teacher.is_active
     teacher.save()
     status_str = "activated" if teacher.is_active else "deactivated"
+    log_activity(
+        action='TEACHER_STATUS',
+        target_model='User',
+        target_id=str(teacher.id),
+        target_repr=teacher.username,
+        description=f"Staff account @{teacher.username} was {status_str}.",
+        changes={'is_active': teacher.is_active},
+        actor=request.user,
+    )
     messages.info(request, f"Staff account '{teacher.username}' has been {status_str}.")
     return redirect('teacher_list')
+
+
+@principal_required
+def audit_log_view(request):
+    """
+    Principal Activity & Security Audit Trail.
+    Displays paginated system events with search, action filtering, staff filtering, and date presets.
+    """
+    search_query = request.GET.get('q', '').strip()
+    action_filter = request.GET.get('action', '').strip()
+    actor_filter = request.GET.get('actor', '').strip()
+    date_preset = request.GET.get('preset', '').strip()
+    date_str = request.GET.get('date', '').strip()
+
+    logs_qs = AuditLog.objects.select_related('actor', 'actor__profile')
+
+    # Date filter logic
+    today = timezone.localdate()
+    if date_preset == 'today':
+        logs_qs = logs_qs.filter(timestamp__date=today)
+    elif date_preset == 'yesterday':
+        yesterday = today - timedelta(days=1)
+        logs_qs = logs_qs.filter(timestamp__date=yesterday)
+    elif date_preset == 'week':
+        week_ago = today - timedelta(days=7)
+        logs_qs = logs_qs.filter(timestamp__date__gte=week_ago)
+    elif date_str:
+        try:
+            parsed_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            logs_qs = logs_qs.filter(timestamp__date=parsed_date)
+        except ValueError:
+            pass
+
+    # Action filter
+    if action_filter:
+        logs_qs = logs_qs.filter(action=action_filter)
+
+    # Actor filter
+    if actor_filter:
+        logs_qs = logs_qs.filter(actor_id=actor_filter)
+
+    # Search query
+    if search_query:
+        logs_qs = logs_qs.filter(
+            Q(actor_username__icontains=search_query) |
+            Q(target_repr__icontains=search_query) |
+            Q(target_id__icontains=search_query) |
+            Q(description__icontains=search_query) |
+            Q(ip_address__icontains=search_query)
+        )
+
+    # Compute stat counters efficiently
+    total_logs_count = AuditLog.objects.count()
+    today_count = AuditLog.objects.filter(timestamp__date=today).count()
+    deletions_count = AuditLog.objects.filter(action__in=['PAYMENT_DELETED', 'STUDENT_DELETED']).count()
+    security_count = AuditLog.objects.filter(action__in=['PASSWORD_CHANGE', 'LOGIN', 'FAILED_LOGIN']).count()
+
+    # Pagination
+    paginator = Paginator(logs_qs, 30)
+    page_number = request.GET.get('page')
+    try:
+        page_obj = paginator.get_page(page_number)
+    except (PageNotAnInteger, EmptyPage):
+        page_obj = paginator.get_page(1)
+
+    staff_users = User.objects.filter(is_active=True).order_by('username')
+
+    context = {
+        'logs': page_obj,
+        'page_obj': page_obj,
+        'is_paginated': page_obj.has_other_pages(),
+        'total_logs_count': total_logs_count,
+        'today_count': today_count,
+        'deletions_count': deletions_count,
+        'security_count': security_count,
+        'action_choices': AuditLog.ACTION_CHOICES,
+        'staff_users': staff_users,
+        'search': search_query,
+        'action_filter': action_filter,
+        'actor_filter': actor_filter,
+        'date_preset': date_preset,
+        'date_str': date_str,
+    }
+    return render(request, 'attendance/audit_logs.html', context)
 
 
 @require_GET

@@ -14,6 +14,7 @@ urlpatterns = [
     path('api/clock-in/toggle/', views.toggle_clock_in_api, name='api_clock_in_toggle'),
     path('api/payment/quick/', views.quick_payment_api, name='api_quick_payment'),
     path('api/payment/collect-both/', views.collect_both_fees_api, name='api_collect_both_fees'),
+    path('api/wallet/settle-and-clockin/', views.wallet_settle_and_clockin_api, name='api_wallet_settle_and_clockin'),
     path('api/student/<int:student_id>/payment-details/', views.student_payment_details_api, name='api_student_payment_details'),
 
     # Bus Management
@@ -58,6 +59,7 @@ urlpatterns = [
 
     # Parent Notifications Audit Trail
     path('notifications/', views.notifications_view, name='notifications'),
+    path('audit-logs/', views.audit_log_view, name='audit_log_list'),
 
     # Teacher & Staff Account Management (Principal Only)
     path('teachers/', views.teacher_list_view, name='teacher_list'),

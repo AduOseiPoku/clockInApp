@@ -1,9 +1,9 @@
 import datetime
 from functools import lru_cache
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from decimal import Decimal
 
 
@@ -257,6 +257,8 @@ class Student(models.Model):
     bus = models.ForeignKey(Bus, on_delete=models.SET_NULL, null=True, blank=True, related_name='students')
     canteen_enrolled = models.BooleanField(default=True, help_text="Whether student takes school lunch/canteen")
     custom_canteen_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Override standard canteen fee")
+    bus_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Available prepaid bus credit wallet balance")
+    canteen_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Available prepaid canteen credit wallet balance")
     is_active = models.BooleanField(default=True)
     registered_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -329,122 +331,151 @@ class Student(models.Model):
         result = self.payments.filter(fee_type='CANTEEN', payment_date=target_date).aggregate(total=Sum('amount'))['total']
         return result or Decimal('0.00')
 
+    def get_deducted_amount_for_date(self, fee_type, target_date=None):
+        """Net prepaid wallet credit explicitly deducted for target_date."""
+        if target_date is None:
+            target_date = timezone.localdate()
+        qs = self.credit_transactions.filter(fee_type=fee_type, date=target_date)
+        agg = qs.aggregate(
+            ded=Sum('amount', filter=Q(transaction_type='DEDUCTION')),
+            rev=Sum('amount', filter=Q(transaction_type='REVERSAL')),
+        )
+        net = (agg['ded'] or Decimal('0.00')) - (agg['rev'] or Decimal('0.00'))
+        return max(Decimal('0.00'), net)
+
+    def get_wallet_balance_as_of(self, fee_type, target_date=None):
+        """Available prepaid wallet balance as of target_date."""
+        if target_date is None:
+            target_date = timezone.localdate()
+        txs = self.credit_transactions.filter(fee_type=fee_type, date__lte=target_date)
+        if not txs.exists():
+            live_wallet = self.bus_credit_wallet if fee_type == 'BUS' else self.canteen_credit_wallet
+            return max(Decimal('0.00'), live_wallet or Decimal('0.00'))
+        agg = txs.aggregate(
+            top=Sum('amount', filter=Q(transaction_type='TOP_UP')),
+            rev=Sum('amount', filter=Q(transaction_type='REVERSAL')),
+            ded=Sum('amount', filter=Q(transaction_type='DEDUCTION')),
+        )
+        bal = (agg['top'] or Decimal('0.00')) + (agg['rev'] or Decimal('0.00')) - (agg['ded'] or Decimal('0.00'))
+        return max(Decimal('0.00'), bal)
+
+    def get_daily_bus_settled(self, target_date=None):
+        """Total bus fare settled for target_date (direct payments + explicit wallet deductions)."""
+        if target_date is None:
+            target_date = timezone.localdate()
+        return self.get_daily_bus_paid(target_date) + self.get_deducted_amount_for_date('BUS', target_date)
+
+    def get_daily_canteen_settled(self, target_date=None):
+        """Total canteen fare settled for target_date (direct payments + explicit wallet deductions)."""
+        if target_date is None:
+            target_date = timezone.localdate()
+        return self.get_daily_canteen_paid(target_date) + self.get_deducted_amount_for_date('CANTEEN', target_date)
+
+    def is_bus_settled_for_date(self, target_date=None):
+        """True only when target_date's bus fee has been paid directly or explicitly deducted from wallet."""
+        if not self.bus or self.bus_fee_required <= Decimal('0.00'):
+            return True
+        if target_date is None:
+            target_date = timezone.localdate()
+        return self.get_daily_bus_settled(target_date) >= self.bus_fee_required
+
+    def is_canteen_settled_for_date(self, target_date=None):
+        """True only when target_date's canteen fee has been paid directly or explicitly deducted from wallet."""
+        if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
+            return True
+        if target_date is None:
+            target_date = timezone.localdate()
+        return self.get_daily_canteen_settled(target_date) >= self.canteen_fee_required
+
     def get_bus_credit_balance(self, target_date=None):
-        """
-        Available prepaid credit on target_date before covering target_date.
-        Calculates cumulative bus payments made up to target_date minus cost of past days attended/elapsed.
-        """
+        """Available prepaid bus credit wallet balance as of target_date."""
         if not self.bus or self.bus_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        payments_qs = self.payments.filter(fee_type='BUS', payment_date__lte=target_date)
-        total_paid = payments_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        if total_paid <= Decimal('0.00'):
-            return Decimal('0.00')
-
-        earliest_p = payments_qs.order_by('payment_date').first()
-        start_date = earliest_p.payment_date if earliest_p else target_date
-        if self.clock_in_records.filter(date__gte=start_date).exists():
-            past_attended_days = self.clock_in_records.filter(date__gte=start_date, date__lt=target_date).count()
-        else:
-            past_attended_days = count_school_days_between(start_date, target_date)
-        past_cost = Decimal(past_attended_days) * self.bus_fee_required
-        return max(Decimal('0.00'), total_paid - past_cost)
+        return self.get_wallet_balance_as_of('BUS', target_date)
 
     def get_canteen_credit_balance(self, target_date=None):
-        """
-        Available prepaid canteen credit on target_date before covering target_date.
-        Calculates cumulative canteen payments made up to target_date minus cost of past days attended/elapsed.
-        """
+        """Available prepaid canteen credit wallet balance as of target_date."""
         if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        payments_qs = self.payments.filter(fee_type='CANTEEN', payment_date__lte=target_date)
-        total_paid = payments_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        if total_paid <= Decimal('0.00'):
-            return Decimal('0.00')
-
-        earliest_p = payments_qs.order_by('payment_date').first()
-        start_date = earliest_p.payment_date if earliest_p else target_date
-        if self.clock_in_records.filter(date__gte=start_date).exists():
-            past_attended_days = self.clock_in_records.filter(date__gte=start_date, date__lt=target_date).count()
-        else:
-            past_attended_days = count_school_days_between(start_date, target_date)
-        past_cost = Decimal(past_attended_days) * self.canteen_fee_required
-        return max(Decimal('0.00'), total_paid - past_cost)
+        return self.get_wallet_balance_as_of('CANTEEN', target_date)
 
     def is_bus_paid_for_date(self, target_date=None):
-        """Check if bus fee is covered for target_date via direct payment or prepaid credit."""
+        """True if bus fee for target_date is already settled OR fully covered by available wallet credit."""
         if not self.bus or self.bus_fee_required <= Decimal('0.00'):
             return True
         if target_date is None:
             target_date = timezone.localdate()
-        if self.get_daily_bus_paid(target_date) >= self.bus_fee_required:
+        settled = self.get_daily_bus_settled(target_date)
+        if settled >= self.bus_fee_required:
             return True
-        return self.get_bus_credit_balance(target_date) >= self.bus_fee_required
+        return (settled + self.get_bus_credit_balance(target_date)) >= self.bus_fee_required
 
     def is_canteen_paid_for_date(self, target_date=None):
-        """Check if canteen fee is covered for target_date via direct payment or prepaid credit."""
+        """True if canteen fee for target_date is already settled OR fully covered by available wallet credit."""
         if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
             return True
         if target_date is None:
             target_date = timezone.localdate()
-        if self.get_daily_canteen_paid(target_date) >= self.canteen_fee_required:
+        settled = self.get_daily_canteen_settled(target_date)
+        if settled >= self.canteen_fee_required:
             return True
-        return self.get_canteen_credit_balance(target_date) >= self.canteen_fee_required
+        return (settled + self.get_canteen_credit_balance(target_date)) >= self.canteen_fee_required
 
     def get_daily_bus_balance(self, target_date=None):
-        """Remaining bus fee owed for target_date."""
+        """Cash top-up balance needed for target_date after direct payments, deductions, and wallet credit."""
         if not self.bus or self.bus_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        direct = self.get_daily_bus_paid(target_date)
-        credit = self.get_bus_credit_balance(target_date)
-        covered = max(direct, credit)
-        return max(Decimal('0.00'), self.bus_fee_required - covered)
+        settled = self.get_daily_bus_settled(target_date)
+        wallet = self.get_bus_credit_balance(target_date)
+        return max(Decimal('0.00'), self.bus_fee_required - settled - wallet)
 
     def get_daily_canteen_balance(self, target_date=None):
-        """Remaining canteen fee owed for target_date."""
+        """Cash top-up balance needed for target_date after direct payments, deductions, and wallet credit."""
         if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        direct = self.get_daily_canteen_paid(target_date)
-        credit = self.get_canteen_credit_balance(target_date)
-        covered = max(direct, credit)
-        return max(Decimal('0.00'), self.canteen_fee_required - covered)
+        settled = self.get_daily_canteen_settled(target_date)
+        wallet = self.get_canteen_credit_balance(target_date)
+        return max(Decimal('0.00'), self.canteen_fee_required - settled - wallet)
 
     def get_bus_credit_days(self, target_date=None):
-        """Days of prepaid bus credit remaining after covering target_date."""
+        """Full school days of prepaid bus credit remaining after covering target_date."""
         if not self.bus or self.bus_fee_required <= Decimal('0.00'):
             return 0
         if target_date is None:
             target_date = timezone.localdate()
-        credit = self.get_bus_credit_balance(target_date)
-        if credit >= self.bus_fee_required:
-            remaining = credit - self.bus_fee_required
-            return int(remaining // self.bus_fee_required)
+        settled = self.get_daily_bus_settled(target_date)
+        owed_today = max(Decimal('0.00'), self.bus_fee_required - settled)
+        wallet = self.get_bus_credit_balance(target_date)
+        if wallet >= owed_today:
+            remaining_after_today = wallet - owed_today
+            return int(remaining_after_today // self.bus_fee_required)
         return 0
 
     def get_canteen_credit_days(self, target_date=None):
-        """Days of prepaid canteen credit remaining after covering target_date."""
+        """Full school days of prepaid canteen credit remaining after covering target_date."""
         if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
             return 0
         if target_date is None:
             target_date = timezone.localdate()
-        credit = self.get_canteen_credit_balance(target_date)
-        if credit >= self.canteen_fee_required:
-            remaining = credit - self.canteen_fee_required
-            return int(remaining // self.canteen_fee_required)
+        settled = self.get_daily_canteen_settled(target_date)
+        owed_today = max(Decimal('0.00'), self.canteen_fee_required - settled)
+        wallet = self.get_canteen_credit_balance(target_date)
+        if wallet >= owed_today:
+            remaining_after_today = wallet - owed_today
+            return int(remaining_after_today // self.canteen_fee_required)
         return 0
 
     def get_prepaid_status(self, target_date=None):
         """
-        Summary of prepaid credit and remaining days for bus and canteen on target_date.
-        Includes partial credit detection and remainder top-up calculations.
+        Summary of prepaid wallet credit, daily settlement state, and partial remainder top-up calculations.
         """
         if target_date is None:
             target_date = timezone.localdate()
@@ -452,25 +483,28 @@ class Student(models.Model):
         bus_days = self.get_bus_credit_days(target_date)
         can_credit = self.get_canteen_credit_balance(target_date)
         can_days = self.get_canteen_credit_days(target_date)
-        bus_active = bool(self.bus and bus_credit >= self.bus_fee_required)
-        can_active = bool(self.canteen_enrolled and can_credit >= self.canteen_fee_required)
 
-        bus_paid_today = self.get_daily_bus_paid(target_date)
-        canteen_paid_today = self.get_daily_canteen_paid(target_date)
+        bus_settled_amt = self.get_daily_bus_settled(target_date)
+        can_settled_amt = self.get_daily_canteen_settled(target_date)
+        bus_owed_today = max(Decimal('0.00'), self.bus_fee_required - bus_settled_amt) if self.bus else Decimal('0.00')
+        can_owed_today = max(Decimal('0.00'), self.canteen_fee_required - can_settled_amt) if self.canteen_enrolled else Decimal('0.00')
+
+        bus_active = bool(self.bus and self.bus_fee_required > Decimal('0.00') and (bus_credit >= bus_owed_today and (bus_credit > Decimal('0.00') or self.get_deducted_amount_for_date('BUS', target_date) > Decimal('0.00'))))
+        can_active = bool(self.canteen_enrolled and self.canteen_fee_required > Decimal('0.00') and (can_credit >= can_owed_today and (can_credit > Decimal('0.00') or self.get_deducted_amount_for_date('CANTEEN', target_date) > Decimal('0.00'))))
 
         bus_has_partial = bool(
             self.bus and
-            not self.is_bus_paid_for_date(target_date) and
-            Decimal('0.00') < bus_credit < self.bus_fee_required
+            bus_owed_today > Decimal('0.00') and
+            Decimal('0.00') < bus_credit < bus_owed_today
         )
-        bus_remainder_due = max(Decimal('0.00'), self.bus_fee_required - bus_credit - bus_paid_today) if bus_has_partial else Decimal('0.00')
+        bus_remainder_due = max(Decimal('0.00'), bus_owed_today - bus_credit) if bus_has_partial else Decimal('0.00')
 
         can_has_partial = bool(
             self.canteen_enrolled and
-            not self.is_canteen_paid_for_date(target_date) and
-            Decimal('0.00') < can_credit < self.canteen_fee_required
+            can_owed_today > Decimal('0.00') and
+            Decimal('0.00') < can_credit < can_owed_today
         )
-        can_remainder_due = max(Decimal('0.00'), self.canteen_fee_required - can_credit - canteen_paid_today) if can_has_partial else Decimal('0.00')
+        can_remainder_due = max(Decimal('0.00'), can_owed_today - can_credit) if can_has_partial else Decimal('0.00')
 
         has_credit = bus_active or can_active or bus_has_partial or can_has_partial
         is_expiring = (bus_active and bus_days <= 1) or (can_active and can_days <= 1) or bus_has_partial or can_has_partial
@@ -489,6 +523,92 @@ class Student(models.Model):
             'canteen_remainder_due': can_remainder_due,
             'is_expiring_soon': is_expiring,
         }
+
+    def apply_credit_for_date(self, fee_type, target_date=None, actor=None, clock_in=None, max_amount=None):
+        """
+        Atomically deduct available wallet credit for fee_type on target_date.
+        Returns Decimal amount deducted.
+        """
+        if target_date is None:
+            target_date = timezone.localdate()
+        with transaction.atomic():
+            locked = Student.objects.select_for_update().get(pk=self.pk)
+            daily_fee = locked.bus_fee_required if fee_type == 'BUS' else locked.canteen_fee_required
+            if daily_fee <= Decimal('0.00'):
+                return Decimal('0.00')
+            settled = locked.get_daily_bus_settled(target_date) if fee_type == 'BUS' else locked.get_daily_canteen_settled(target_date)
+            owed = max(Decimal('0.00'), daily_fee - settled)
+            if owed <= Decimal('0.00'):
+                return Decimal('0.00')
+            wallet_field = 'bus_credit_wallet' if fee_type == 'BUS' else 'canteen_credit_wallet'
+            wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
+            if wallet <= Decimal('0.00'):
+                return Decimal('0.00')
+            deduct_amt = min(wallet, owed)
+            if max_amount is not None:
+                deduct_amt = min(deduct_amt, max_amount)
+            if deduct_amt <= Decimal('0.00'):
+                return Decimal('0.00')
+            new_wallet = wallet - deduct_amt
+            setattr(locked, wallet_field, new_wallet)
+            locked.save(update_fields=[wallet_field])
+            setattr(self, wallet_field, new_wallet)
+            CreditTransaction.objects.create(
+                student=locked,
+                fee_type=fee_type,
+                transaction_type=CreditTransaction.TYPE_DEDUCTION,
+                amount=deduct_amt,
+                balance_after=new_wallet,
+                date=target_date,
+                clock_in=clock_in,
+                recorded_by=actor,
+                notes=f"Wallet credit applied for {target_date}",
+            )
+            return deduct_amt
+
+    def reverse_clockin_credit_deductions(self, target_date=None, clock_in=None, actor=None):
+        """
+        Atomically refund wallet deductions made on target_date (linked to clock_in if provided).
+        Returns dict of refunded amounts per fee_type.
+        """
+        if target_date is None:
+            target_date = timezone.localdate()
+        refunded = {'BUS': Decimal('0.00'), 'CANTEEN': Decimal('0.00')}
+        with transaction.atomic():
+            locked = Student.objects.select_for_update().get(pk=self.pk)
+            for ft in ('BUS', 'CANTEEN'):
+                qs = locked.credit_transactions.filter(fee_type=ft, date=target_date)
+                if clock_in is not None:
+                    ded_sum = qs.filter(
+                        Q(transaction_type=CreditTransaction.TYPE_DEDUCTION) & (Q(clock_in=clock_in) | Q(payment__isnull=True))
+                    ).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+                else:
+                    ded_sum = qs.filter(
+                        transaction_type=CreditTransaction.TYPE_DEDUCTION,
+                        payment__isnull=True,
+                    ).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+                rev_sum = qs.filter(transaction_type=CreditTransaction.TYPE_REVERSAL).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+                net_to_refund = max(Decimal('0.00'), ded_sum - rev_sum)
+                if net_to_refund > Decimal('0.00'):
+                    wallet_field = 'bus_credit_wallet' if ft == 'BUS' else 'canteen_credit_wallet'
+                    cur_wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
+                    new_wallet = cur_wallet + net_to_refund
+                    setattr(locked, wallet_field, new_wallet)
+                    locked.save(update_fields=[wallet_field])
+                    setattr(self, wallet_field, new_wallet)
+                    CreditTransaction.objects.create(
+                        student=locked,
+                        fee_type=ft,
+                        transaction_type=CreditTransaction.TYPE_REVERSAL,
+                        amount=net_to_refund,
+                        balance_after=new_wallet,
+                        date=target_date,
+                        clock_in=None,
+                        recorded_by=actor,
+                        notes=f"Reversed clock-in wallet deduction for {target_date}",
+                    )
+                    refunded[ft] = net_to_refund
+        return refunded
 
     def get_bus_paid_amount(self, period_or_date=None):
         if isinstance(period_or_date, (datetime.date, datetime.datetime)):
@@ -633,6 +753,149 @@ class ClockInRecord(models.Model):
 
     def __str__(self):
         return f"{self.student.full_name} - {self.date} at {self.clock_in_time.strftime('%I:%M %p')}"
+
+
+class CreditTransaction(models.Model):
+    """
+    Immutable wallet transaction ledger tracking bulk payment top-ups,
+    explicit daily fee deductions, and reversals for a student.
+    """
+    TYPE_TOP_UP = 'TOP_UP'
+    TYPE_DEDUCTION = 'DEDUCTION'
+    TYPE_REVERSAL = 'REVERSAL'
+    TRANSACTION_TYPES = [
+        (TYPE_TOP_UP, 'Bulk Payment / Top-Up'),
+        (TYPE_DEDUCTION, 'Daily Fare Deduction'),
+        (TYPE_REVERSAL, 'Deduction Reversal / Refund'),
+    ]
+    FEE_TYPES = [
+        ('BUS', 'Bus Fee'),
+        ('CANTEEN', 'Canteen Fee'),
+    ]
+
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='credit_transactions')
+    fee_type = models.CharField(max_length=20, choices=FEE_TYPES, db_index=True)
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES, db_index=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    balance_after = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    date = models.DateField(default=timezone.localdate, db_index=True)
+    payment = models.ForeignKey(FeePayment, on_delete=models.SET_NULL, null=True, blank=True, related_name='credit_transactions')
+    clock_in = models.ForeignKey(ClockInRecord, on_delete=models.SET_NULL, null=True, blank=True, related_name='credit_transactions')
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Credit Transaction'
+        verbose_name_plural = 'Credit Transactions'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['student', 'fee_type', 'date'], name='credtx_std_type_date_idx'),
+            models.Index(fields=['date', 'transaction_type'], name='credtx_date_type_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.student.full_name} [{self.fee_type}] {self.transaction_type} {self.amount:.2f} -> Bal: {self.balance_after:.2f}"
+
+
+def apply_payment_to_wallet(payment):
+    """
+    Sync a newly created FeePayment with the student's prepaid credit wallet:
+    - Excess above today's remaining fee is credited into the wallet (TOP_UP).
+    - If payment is a partial cash remainder top-up (< daily_fee) while wallet credit > 0,
+      applies wallet credit toward completing today's fee (DEDUCTION).
+    """
+    if getattr(payment, '_skip_wallet_sync', False) or payment.amount <= Decimal('0.00'):
+        return
+
+    with transaction.atomic():
+        student = Student.objects.select_for_update().get(pk=payment.student_id)
+        if payment.fee_type == 'BUS':
+            if payment.is_temporary_bus:
+                return
+            daily_fee = student.bus_fee_required
+            if daily_fee <= Decimal('0.00') and payment.bus_id:
+                daily_fee = payment.bus.fee
+            wallet_field = 'bus_credit_wallet'
+        else:
+            daily_fee = student.canteen_fee_required
+            wallet_field = 'canteen_credit_wallet'
+
+        daily_fee = max(Decimal('0.00'), daily_fee or Decimal('0.00'))
+
+        other_direct = (
+            FeePayment.objects.filter(
+                student=student,
+                fee_type=payment.fee_type,
+                payment_date=payment.payment_date,
+            )
+            .exclude(pk=payment.pk)
+            .aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        )
+        deducted = student.get_deducted_amount_for_date(payment.fee_type, payment.payment_date)
+        owed_before = max(Decimal('0.00'), daily_fee - other_direct - deducted)
+        current_wallet = max(Decimal('0.00'), getattr(student, wallet_field) or Decimal('0.00'))
+
+        if payment.amount > owed_before:
+            excess = payment.amount - owed_before
+            new_wallet = current_wallet + excess
+            setattr(student, wallet_field, new_wallet)
+            student.save(update_fields=[wallet_field])
+            if getattr(payment, 'student', None) is not None and payment.student_id == student.id:
+                setattr(payment.student, wallet_field, new_wallet)
+            CreditTransaction.objects.create(
+                student=student,
+                fee_type=payment.fee_type,
+                transaction_type=CreditTransaction.TYPE_TOP_UP,
+                amount=excess,
+                balance_after=new_wallet,
+                date=payment.payment_date,
+                payment=payment,
+                recorded_by=payment.recorded_by,
+                notes=f"Bulk/advance credit from payment {payment.receipt_number or payment.id}",
+            )
+        elif payment.amount < owed_before and current_wallet > Decimal('0.00'):
+            owed_after_cash = owed_before - payment.amount
+            use_wallet = min(current_wallet, owed_after_cash)
+            if use_wallet > Decimal('0.00'):
+                new_wallet = current_wallet - use_wallet
+                setattr(student, wallet_field, new_wallet)
+                student.save(update_fields=[wallet_field])
+                if getattr(payment, 'student', None) is not None and payment.student_id == student.id:
+                    setattr(payment.student, wallet_field, new_wallet)
+                CreditTransaction.objects.create(
+                    student=student,
+                    fee_type=payment.fee_type,
+                    transaction_type=CreditTransaction.TYPE_DEDUCTION,
+                    amount=use_wallet,
+                    balance_after=new_wallet,
+                    date=payment.payment_date,
+                    payment=payment,
+                    recorded_by=payment.recorded_by,
+                    notes=f"Applied wallet credit with remainder payment {payment.receipt_number or payment.id}",
+                )
+
+
+def reverse_payment_wallet_effects(payment):
+    """Reverse wallet TOP_UP or DEDUCTION entries associated with a deleted FeePayment."""
+    with transaction.atomic():
+        student = Student.objects.select_for_update().filter(pk=payment.student_id).first()
+        if not student:
+            return
+        wallet_field = 'bus_credit_wallet' if payment.fee_type == 'BUS' else 'canteen_credit_wallet'
+        current_wallet = max(Decimal('0.00'), getattr(student, wallet_field) or Decimal('0.00'))
+        txs = list(CreditTransaction.objects.filter(payment=payment))
+        delta = Decimal('0.00')
+        for tx in txs:
+            if tx.transaction_type == CreditTransaction.TYPE_TOP_UP:
+                delta -= tx.amount
+            elif tx.transaction_type == CreditTransaction.TYPE_DEDUCTION:
+                delta += tx.amount
+        if delta != Decimal('0.00'):
+            new_wallet = max(Decimal('0.00'), current_wallet + delta)
+            setattr(student, wallet_field, new_wallet)
+            student.save(update_fields=[wallet_field])
+        CreditTransaction.objects.filter(payment=payment).delete()
 
 
 class UserProfile(models.Model):
@@ -873,6 +1136,63 @@ class TeacherRemittance(models.Model):
     def __str__(self):
         t_name = self.teacher.get_full_name() or self.teacher.username
         return f"{self.reference_code}: {t_name} -> {self.amount} ({self.date})"
+
+
+class AuditLog(models.Model):
+    """
+    Centralized activity and security audit trail for the school.
+    Tracks all administrative, financial, attendance, and authentication events.
+    """
+    ACTION_CHOICES = [
+        ('LOGIN', 'User Sign In'),
+        ('LOGOUT', 'User Sign Out'),
+        ('FAILED_LOGIN', 'Failed Login Attempt'),
+        ('PASSWORD_CHANGE', 'Password Changed'),
+        ('PAYMENT_RECORDED', 'Fee Payment Recorded'),
+        ('PAYMENT_DELETED', 'Fee Payment Deleted'),
+        ('REMITTANCE_SETTLED', 'Cash Handover Settled'),
+        ('STUDENT_CREATED', 'Student Enrolled'),
+        ('STUDENT_UPDATED', 'Student Profile Updated'),
+        ('STUDENT_DELETED', 'Student Removed'),
+        ('LUNCH_TOGGLED', 'Lunch Enrollment Changed'),
+        ('TEACHER_CREATED', 'Teacher Account Created'),
+        ('TEACHER_UPDATED', 'Teacher Profile Updated'),
+        ('TEACHER_STATUS', 'Teacher Account Status Toggled'),
+        ('PERMISSION_CHANGE', 'Staff Permission Adjusted'),
+        ('SETTINGS_UPDATED', 'School Settings Changed'),
+        ('CLOCK_IN', 'Student Attendance Clock-In'),
+    ]
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_actions'
+    )
+    actor_username = models.CharField(max_length=150, blank=True)
+    actor_role = models.CharField(max_length=50, blank=True)
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
+    target_model = models.CharField(max_length=60, db_index=True)
+    target_id = models.CharField(max_length=60, blank=True)
+    target_repr = models.CharField(max_length=255, blank=True, help_text="Human-readable label of target item")
+    description = models.TextField(help_text="Detailed description of what occurred")
+    changes = models.JSONField(null=True, blank=True, help_text="Before and after diff")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Audit Log'
+        verbose_name_plural = 'Audit Logs'
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['action', 'timestamp'], name='idx_audit_action_time'),
+            models.Index(fields=['actor', 'timestamp'], name='idx_audit_actor_time'),
+            models.Index(fields=['target_model', 'target_id'], name='idx_audit_target'),
+        ]
+
+    def __str__(self):
+        return f"[{self.timestamp:%Y-%m-%d %H:%M}] {self.actor_username}: {self.get_action_display()} -> {self.target_repr}"
 
 
 from django.db.models.signals import post_save

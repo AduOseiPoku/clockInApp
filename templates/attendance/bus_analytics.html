@@ -1051,10 +1051,11 @@ function setStatusFilter(status) {
 }
 
 function updatePillUI() {
+    const activePill = (currentStatus === 'unpaid') ? 'bus_unpaid' : currentStatus;
     ['all', 'bus_unpaid', 'canteen_unpaid', 'paid'].forEach(function(s) {
         const pill = document.getElementById('pill-filter-' + s);
         if (pill) {
-            if (s === currentStatus) {
+            if (s === activePill) {
                 pill.classList.add('active');
             } else {
                 pill.classList.remove('active');
@@ -1130,7 +1131,7 @@ function applyFilters() {
             const isBothPaid = row.getAttribute('data-both-paid') === '1';
 
             let showRow = true;
-            if (currentStatus === 'bus_unpaid') {
+            if (currentStatus === 'bus_unpaid' || currentStatus === 'unpaid') {
                 showRow = !isBusPaid;
             } else if (currentStatus === 'canteen_unpaid') {
                 showRow = (isCanteenEnrolled && !isCanteenPaid);
@@ -1513,7 +1514,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <input type="radio" name="modal-mp-method" value="CASH" checked> 💵 Cash
                     </label>
                     <label style="flex: 1; display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem;">
-                        <input type="radio" name="modal-mp-method" value="MOMO"> 📱 MoMo
+                        <input type="radio" name="modal-mp-method" value="MOBILE_MONEY"> 📱 MoMo
                     </label>
                 </div>
             </div>

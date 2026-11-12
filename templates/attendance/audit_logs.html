@@ -1,0 +1,300 @@
+{% extends 'base.html' %}
+
+{% block title %}Activity Audit Log | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h2>Activity & Security Audit Trail</h2>
+        <p>Immutable record of administrative, financial, attendance, and authentication events</p>
+    </div>
+    <div class="header-actions">
+        <a href="{% url 'reports' %}" class="btn-secondary" style="font-size: 0.85rem;">
+            📊 Financial Reports
+        </a>
+    </div>
+</div>
+
+<!-- Audit Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Total Logged Events</span>
+        </div>
+        <div class="stat-value">{{ total_logs_count }}</div>
+        <div class="stat-footer">
+            <span>Historical events tracked</span>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Activity</span>
+        </div>
+        <div class="stat-value" style="color: var(--primary);">{{ today_count }}</div>
+        <div class="stat-footer">
+            <span>Actions taken today</span>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-left: 4px solid var(--danger);">
+        <div class="stat-header">
+            <span class="stat-title">Critical Deletions</span>
+        </div>
+        <div class="stat-value" style="color: var(--danger-text);">{{ deletions_count }}</div>
+        <div class="stat-footer">
+            <span>Deleted payments / students</span>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-left: 4px solid #7c3aed;">
+        <div class="stat-header">
+            <span class="stat-title">Security & Credentials</span>
+        </div>
+        <div class="stat-value" style="color: #7c3aed;">{{ security_count }}</div>
+        <div class="stat-footer">
+            <span>Password resets & logins</span>
+        </div>
+    </div>
+</div>
+
+<!-- Filters Control Bar -->
+<form method="GET" action="{% url 'audit_log_list' %}" class="control-bar" style="margin-bottom: 1.25rem;">
+    <div class="search-input-wrapper">
+        <span class="search-icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+        </span>
+        <input type="text" name="q" value="{{ search }}" placeholder="Search by actor, student, receipt #, or description..." class="search-input">
+    </div>
+
+    <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
+        <a href="{% url 'audit_log_list' %}{% if action_filter %}?action={{ action_filter }}{% endif %}{% if actor_filter %}&actor={{ actor_filter }}{% endif %}" 
+           class="btn-secondary filter-preset-btn {% if not date_preset and not date_str %}active{% endif %}">
+           All Time
+        </a>
+        <a href="{% url 'audit_log_list' %}?preset=today{% if action_filter %}&action={{ action_filter }}{% endif %}{% if actor_filter %}&actor={{ actor_filter }}{% endif %}" 
+           class="btn-secondary filter-preset-btn {% if date_preset == 'today' %}active{% endif %}">
+           Today
+        </a>
+        <a href="{% url 'audit_log_list' %}?preset=yesterday{% if action_filter %}&action={{ action_filter }}{% endif %}{% if actor_filter %}&actor={{ actor_filter }}{% endif %}" 
+           class="btn-secondary filter-preset-btn {% if date_preset == 'yesterday' %}active{% endif %}">
+           Yesterday
+        </a>
+        <a href="{% url 'audit_log_list' %}?preset=week{% if action_filter %}&action={{ action_filter }}{% endif %}{% if actor_filter %}&actor={{ actor_filter }}{% endif %}" 
+           class="btn-secondary filter-preset-btn {% if date_preset == 'week' %}active{% endif %}">
+           Last 7 Days
+        </a>
+    </div>
+
+    <div class="filter-controls-group">
+        <select name="action" class="filter-select" onchange="this.form.submit()">
+            <option value="">-- All Action Types --</option>
+            {% for act_key, act_label in action_choices %}
+            <option value="{{ act_key }}" {% if action_filter == act_key %}selected{% endif %}>{{ act_label }}</option>
+            {% endfor %}
+        </select>
+
+        <select name="actor" class="filter-select" onchange="this.form.submit()">
+            <option value="">-- All Staff Members --</option>
+            {% for u in staff_users %}
+            <option value="{{ u.id }}" {% if actor_filter == u.id|stringformat:"s" %}selected{% endif %}>
+                {{ u.get_full_name|default:u.username }} (@{{ u.username }})
+            </option>
+            {% endfor %}
+        </select>
+
+        <input type="date" name="date" value="{{ date_str }}" class="filter-date-input" onchange="this.form.submit()">
+
+        <button type="submit" class="btn-primary" style="font-size: 0.8rem; padding: 0.45rem 0.85rem;">Filter</button>
+        {% if action_filter or actor_filter or search or date_str or date_preset %}
+        <a href="{% url 'audit_log_list' %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.45rem 0.75rem;">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+<!-- Audit Logs Table (Desktop) -->
+<div class="table-card desktop-only">
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Date & Time</th>
+                    <th style="width: 180px;">Staff Member</th>
+                    <th style="width: 170px;">Action</th>
+                    <th style="width: 220px;">Target Item</th>
+                    <th>Description</th>
+                    <th style="width: 100px;">IP Address</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td style="white-space: nowrap; font-size: 0.8rem;">
+                        <div style="font-weight: 600; color: var(--text-main);">{{ log.timestamp|date:"M d, Y" }}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted);">{{ log.timestamp|date:"h:i:s A" }}</div>
+                    </td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="student-avatar" style="width: 26px; height: 26px; font-size: 0.65rem; font-weight: 700; background: var(--primary-subtle); color: var(--primary);">
+                                {{ log.actor_username|slice:":2"|upper }}
+                            </div>
+                            <div>
+                                <div style="font-weight: 600; font-size: 0.82rem; color: var(--text-main);">
+                                    {% if log.actor and log.actor.get_full_name %}{{ log.actor.get_full_name }}{% else %}{{ log.actor_username }}{% endif %}
+                                </div>
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">
+                                    <span class="badge" style="font-size: 0.62rem; padding: 0.05rem 0.3rem;">{{ log.actor_role }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        {% if 'DELETED' in log.action or 'FAILED' in log.action %}
+                            <span class="badge badge-danger" style="font-size: 0.72rem; font-weight: 600;">{{ log.get_action_display }}</span>
+                        {% elif 'PAYMENT' in log.action or 'REMITTANCE' in log.action %}
+                            <span class="badge badge-success" style="font-size: 0.72rem; font-weight: 600;">{{ log.get_action_display }}</span>
+                        {% elif 'PASSWORD' in log.action or 'LOGIN' in log.action %}
+                            <span class="badge" style="font-size: 0.72rem; font-weight: 600; background: hsla(280, 80%, 55%, 0.12); color: #7c3aed; border: 1px solid hsla(280, 80%, 55%, 0.25);">{{ log.get_action_display }}</span>
+                        {% elif 'LUNCH' in log.action %}
+                            <span class="badge" style="font-size: 0.72rem; font-weight: 600; background: hsla(38, 92%, 50%, 0.12); color: #b45309; border: 1px solid #fcd34d;">{{ log.get_action_display }}</span>
+                        {% else %}
+                            <span class="badge badge-primary" style="font-size: 0.72rem; font-weight: 600;">{{ log.get_action_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div style="font-weight: 600; font-size: 0.82rem; color: var(--text-main);">
+                            {{ log.target_repr|default:log.target_id }}
+                        </div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted);">
+                            Model: <code>{{ log.target_model }}</code>
+                        </div>
+                    </td>
+                    <td style="font-size: 0.82rem; color: var(--text-main);">
+                        {{ log.description }}
+                        {% if log.changes %}
+                        <div style="margin-top: 0.25rem;">
+                            <button type="button" class="btn-secondary" style="font-size: 0.68rem; padding: 0.15rem 0.45rem;" onclick="showDiffModal('{{ log.id }}')">
+                                🔍 View Changes Diff
+                            </button>
+                            {{ log.changes|json_script:log.id }}
+                        </div>
+                        {% endif %}
+                    </td>
+                    <td style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">
+                        {{ log.ip_address|default:"—" }}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: var(--text-main);">No activity audit logs found</div>
+                        <p style="margin-top: 0.35rem; font-size: 0.85rem;">Actions taken by staff across the application will be recorded here automatically.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Mobile Cards View -->
+<div class="mobile-only student-cards-list">
+    {% for log in logs %}
+    <div class="student-card" style="margin-bottom: 0.75rem;">
+        <div class="student-card-header">
+            <div>
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-main);">
+                    {% if log.actor and log.actor.get_full_name %}{{ log.actor.get_full_name }}{% else %}{{ log.actor_username }}{% endif %}
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">
+                    {{ log.timestamp|date:"M d, Y h:i A" }} &bull; {{ log.actor_role }}
+                </div>
+            </div>
+            <div>
+                {% if 'DELETED' in log.action or 'FAILED' in log.action %}
+                    <span class="badge badge-danger" style="font-size: 0.68rem;">{{ log.get_action_display }}</span>
+                {% elif 'PAYMENT' in log.action or 'REMITTANCE' in log.action %}
+                    <span class="badge badge-success" style="font-size: 0.68rem;">{{ log.get_action_display }}</span>
+                {% elif 'PASSWORD' in log.action or 'LOGIN' in log.action %}
+                    <span class="badge" style="font-size: 0.68rem; background: hsla(280, 80%, 55%, 0.12); color: #7c3aed;">{{ log.get_action_display }}</span>
+                {% else %}
+                    <span class="badge badge-primary" style="font-size: 0.68rem;">{{ log.get_action_display }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div style="margin-top: 0.5rem; font-size: 0.8rem;">
+            <strong>Target:</strong> {{ log.target_repr|default:log.target_id }} (<code>{{ log.target_model }}</code>)
+        </div>
+        <div style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--text-muted);">
+            {{ log.description }}
+        </div>
+        {% if log.ip_address %}
+        <div style="margin-top: 0.35rem; font-size: 0.72rem; color: var(--text-subtle);">
+            IP: <code>{{ log.ip_address }}</code>
+        </div>
+        {% endif %}
+    </div>
+    {% empty %}
+    <div style="text-align: center; padding: 2.5rem 1rem; background: var(--surface-card); border-radius: var(--radius-md); border: 1px solid var(--border);">
+        <p style="font-size: 0.85rem; color: var(--text-muted);">No activity logs found matching the filter criteria.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if is_paginated %}
+<div class="pagination-container" style="margin-top: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+    <span style="font-size: 0.82rem; color: var(--text-muted);">
+        Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ total_logs_count }} events
+    </span>
+    <div style="display: flex; gap: 0.35rem; align-items: center;">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if actor_filter %}&actor={{ actor_filter }}{% endif %}{% if search %}&q={{ search }}{% endif %}{% if date_preset %}&preset={{ date_preset }}{% endif %}{% if date_str %}&date={{ date_str }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">← Previous</a>
+        {% endif %}
+        <span style="font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.65rem; background: var(--surface-subtle); border-radius: var(--radius-sm);">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if action_filter %}&action={{ action_filter }}{% endif %}{% if actor_filter %}&actor={{ actor_filter }}{% endif %}{% if search %}&q={{ search }}{% endif %}{% if date_preset %}&preset={{ date_preset }}{% endif %}{% if date_str %}&date={{ date_str }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">Next →</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Diff Details Modal -->
+<div id="diffModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 1rem;">
+    <div style="background: var(--surface-card); border: 1px solid var(--border); border-radius: var(--radius-md); max-width: 500px; width: 100%; box-shadow: var(--shadow-lg); overflow: hidden;">
+        <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--text-main);">Event Changes Diff</h3>
+            <button type="button" onclick="closeDiffModal()" style="background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+        </div>
+        <div style="padding: 1.25rem;">
+            <pre id="diffPre" style="background: var(--surface-subtle); padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.78rem; overflow-x: auto; max-height: 300px; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+        </div>
+        <div style="padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end;">
+            <button type="button" onclick="closeDiffModal()" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.85rem;">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function showDiffModal(logId) {
+    const script = document.getElementById(logId);
+    let jsonText = script ? script.textContent : '{}';
+    try {
+        const obj = JSON.parse(jsonText);
+        document.getElementById('diffPre').textContent = JSON.stringify(obj, null, 2);
+    } catch (e) {
+        document.getElementById('diffPre').textContent = jsonText;
+    }
+    document.getElementById('diffModal').style.display = 'flex';
+}
+
+function closeDiffModal() {
+    document.getElementById('diffModal').style.display = 'none';
+}
+</script>
+{% endblock %}

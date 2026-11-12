@@ -65,9 +65,19 @@
         <h2>Payment Receipt Voucher</h2>
     </div>
     <div class="header-actions">
+        {% if user.profile and user.profile.can_view_revenue %}
         <a href="{% url 'payment_list' %}" class="btn-secondary">
             ← Payments
         </a>
+        {% elif user.profile and user.profile.can_view_my_collections %}
+        <a href="{% url 'my_collections' %}" class="btn-secondary">
+            ← My Collections
+        </a>
+        {% else %}
+        <a href="{% url 'dashboard' %}" class="btn-secondary">
+            ← Dashboard
+        </a>
+        {% endif %}
         <button type="button" class="btn-primary" onclick="window.print()">
             Print Receipt
         </button>

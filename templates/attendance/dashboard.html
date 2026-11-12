@@ -349,7 +349,7 @@
                         </td>
                         {% else %}
                         <!-- Attendance-Only Classroom Teacher Columns -->
-                        <td>
+                        <td id="clockin-status-cell-{{ item.student.id }}">
                             {% if item.is_clocked_in %}
                             <span class="badge badge-success" style="font-size: 0.76rem; padding: 0.2rem 0.6rem;">
                                 ● Present

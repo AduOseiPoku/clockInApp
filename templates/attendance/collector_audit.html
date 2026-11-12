@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ teacher.get_full_name|default:teacher.username }} — Intake Audit{% endblock %}
+{% block title %}{% if is_self_view %}My Collections{% else %}{{ teacher.get_full_name|default:teacher.username }} — Intake Audit{% endif %}{% endblock %}
 
 {% block content %}
 <!-- Page Header with Back Link & Audit Controls -->
@@ -12,27 +12,36 @@
                 ← Back to Payments Ledger
             </a>
             {% else %}
-            <a href="{% if user.profile.is_bus_fee_teacher and user.profile.assigned_bus %}{% url 'bus_analytics' user.profile.assigned_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+            <a href="{% if user.profile.is_bus_fee_teacher and user.profile.primary_bus %}{% url 'bus_analytics' user.profile.primary_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
                 ← Back to {% if user.profile.is_bus_fee_teacher %}Bus Roster{% else %}Dashboard{% endif %}
             </a>
             {% endif %}
             <span style="color: var(--border);">/</span>
             <span style="font-size: 0.78rem; color: var(--text-muted);">Teacher Financial Audit</span>
         </div>
-        <h2>{{ teacher.get_full_name|default:teacher.username }}</h2>
-        <p>Daily expectations, monthly revenue intake, and complete timestamped audit log</p>
+        <h2>{% if is_self_view %}My Collections &amp; Cash Handover{% else %}{{ teacher.get_full_name|default:teacher.username }}{% endif %}</h2>
+        <p>{% if is_self_view %}Track daily bus &amp; canteen intake, cash to remit to the Bursar, and pending students{% else %}Daily expectations, cash remittance status, and complete timestamped audit log{% endif %}</p>
     </div>
 
     <div class="header-actions">
         <!-- Date Selector for Audit Target -->
         <form method="GET" action="{% url 'collector_audit' teacher.id %}" class="date-selector-pill" style="margin: 0;">
             <input type="hidden" name="period" value="{{ log_period }}">
+            {% if search_q %}<input type="hidden" name="q" value="{{ search_q }}">{% endif %}
+            {% if fee_type_filter %}<input type="hidden" name="fee_type" value="{{ fee_type_filter }}">{% endif %}
+            {% if method_filter %}<input type="hidden" name="method" value="{{ method_filter }}">{% endif %}
             <label for="audit-date-picker" style="font-size:0.72rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Audit Date</label>
             <input type="date" id="audit-date-picker" name="date" value="{{ date_str }}" onchange="this.form.submit()">
         </form>
 
+        {% if is_self_view %}
+        <a href="{% url 'payment_create' %}" class="btn-primary" style="font-size: 0.82rem; font-weight: 600;">
+            + Record Fee
+        </a>
+        {% endif %}
+
         <button type="button" onclick="window.print()" class="btn-secondary" style="font-size: 0.82rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;" title="Print official remittance audit slip">
-            <span>🖨️</span> Print Audit Report
+            <span>🖨️</span> Print Report
         </button>
     </div>
 </div>
@@ -67,10 +76,7 @@
                     <span>•</span>
                     <span>{{ student_count }} assigned student{{ student_count|pluralize }}</span>
                     <span>•</span>
-                    <span>@{{ teacher.username }}</span>
-                    {% if profile.phone_number %}
-                        <span>• 📞 {{ profile.phone_number }}</span>
-                    {% endif %}
+                    <span>Month ({{ month_name }}): <strong>{{ currency }}{{ month_total|floatformat:2 }}</strong> ({{ month_count }})</span>
                 </div>
             </div>
         </div>
@@ -82,7 +88,7 @@
     </div>
 </div>
 
-<!-- Key Financial Metrics (Target Expected, Cash Collected Today, Balance Due, Cumulative Month) -->
+<!-- Key Financial Metrics (Target Expected, Collected Today, Cash Remittance Status, Balance Due) -->
 <div class="stats-grid" style="margin-bottom: 1.25rem;">
     <!-- 1. Target Expected Today -->
     <div class="stat-card" style="border-left: 3px solid var(--primary);">
@@ -92,44 +98,68 @@
         <div class="stat-value" style="color: var(--text-main);">
             {{ currency }}{{ class_expected|floatformat:2 }}
         </div>
-        <div class="stat-footer">
-            <span>Base: {{ currency }}{{ baseline_target|floatformat:2 }}</span>
-            <span class="stat-badge stat-badge-info">Target</span>
+        <div class="stat-footer" style="flex-wrap: wrap; gap: 0.25rem;">
+            <span>Bus: {{ currency }}{{ meta.bus_expected|floatformat:2 }} &bull; Canteen: {{ currency }}{{ meta.canteen_expected|floatformat:2 }}</span>
+            <span class="stat-badge stat-badge-info">Base {{ currency }}{{ baseline_target|floatformat:0 }}</span>
         </div>
     </div>
 
-    <!-- 2. Cash Collected Today -->
+    <!-- 2. Collected Today (Split Cash vs Electronic) -->
     <div class="stat-card" style="border-left: 3px solid var(--success);">
         <div class="stat-header">
-            <span class="stat-title">Cash Collected Today</span>
+            <span class="stat-title">Collected Today</span>
         </div>
         <div class="stat-value" style="color: var(--success-text);">
             +{{ currency }}{{ today_collected|floatformat:2 }}
         </div>
-        <div class="stat-footer">
-            <span>{{ today_count }} receipt{{ today_count|pluralize }} recorded</span>
-            <span class="stat-badge stat-badge-success">In Hand</span>
+        <div class="stat-footer" style="flex-wrap: wrap; gap: 0.25rem;">
+            <span>Cash: <strong>{{ currency }}{{ cash_collected_today|floatformat:2 }}</strong> &bull; MoMo/Bank: <strong>{{ currency }}{{ electronic_collected_today|floatformat:2 }}</strong></span>
+            <span class="stat-badge stat-badge-success">{{ today_count }} receipt{{ today_count|pluralize }}</span>
         </div>
     </div>
 
-    <!-- 3. Remaining Balance Due -->
+    <!-- 3. Cash Handover / In Hand Status -->
+    <div class="stat-card" style="border-left: 3px solid {% if cash_in_hand > 0 %}#d97706{% else %}#059669{% endif %};">
+        <div class="stat-header">
+            <span class="stat-title">{% if is_self_view %}Cash With Me (To Remit){% else %}Unremitted Cash in Hand{% endif %}</span>
+        </div>
+        <div class="stat-value" style="color: {% if cash_in_hand > 0 %}#b45309{% else %}var(--success-text){% endif %};">
+            {{ currency }}{{ cash_in_hand|floatformat:2 }}
+        </div>
+        <div class="stat-footer" style="flex-wrap: wrap; gap: 0.25rem;">
+            <span>Remitted to Bursar: <strong>{{ currency }}{{ cash_remitted_today|floatformat:2 }}</strong></span>
+            {% if cash_in_hand > 0 %}
+                <span class="stat-badge stat-badge-warning">To Remit</span>
+            {% elif cash_remitted_today > 0 %}
+                <span class="stat-badge stat-badge-success">✓ Settled</span>
+            {% else %}
+                <span class="stat-badge stat-badge-info">No Cash</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 4. Remaining Balance Due from Roster -->
     {% if class_balance > 0 %}
     <div class="stat-card" style="border-left: 3px solid var(--danger);">
         <div class="stat-header">
-            <span class="stat-title">Remaining Balance Due</span>
+            <span class="stat-title">Remaining Roster Due</span>
         </div>
         <div class="stat-value" style="color: var(--danger-text);">
             {{ currency }}{{ class_balance|floatformat:2 }}
         </div>
-        <div class="stat-footer">
-            <span>{{ compliance_pct }}% accounted for</span>
-            <span class="stat-badge stat-badge-danger">Due</span>
+        <div class="stat-footer" style="flex-wrap: wrap; gap: 0.25rem;">
+            {% if meta.clockin_started_today and meta.absent_unpaid_count > 0 %}
+                <span>Present due: <strong>{{ currency }}{{ present_balance|floatformat:2 }}</strong> ({{ meta.absent_unpaid_count }} absent)</span>
+            {% else %}
+                <span>{{ compliance_pct }}% of target collected</span>
+            {% endif %}
+            <span class="stat-badge stat-badge-danger">{{ unpaid_students|length }} unpaid</span>
         </div>
     </div>
     {% else %}
     <div class="stat-card" style="border-left: 3px solid var(--success);">
         <div class="stat-header">
-            <span class="stat-title">Remaining Balance Due</span>
+            <span class="stat-title">Remaining Roster Due</span>
         </div>
         <div class="stat-value" style="color: var(--success-text);">
             {{ currency }}0.00
@@ -140,44 +170,126 @@
         </div>
     </div>
     {% endif %}
-
-    <!-- 4. Cumulative for Current Month -->
-    <div class="stat-card" style="border-left: 3px solid #6366f1;">
-        <div class="stat-header">
-            <span class="stat-title">Cumulative for {{ month_name }}</span>
-        </div>
-        <div class="stat-value" style="color: #4f46e5;">
-            {{ currency }}{{ month_total|floatformat:2 }}
-        </div>
-        <div class="stat-footer">
-            <span>{{ month_count }} receipt{{ month_count|pluralize }} this month</span>
-            <span class="stat-badge" style="background:#ede9fe; color:#6d28d9;">Month-to-Date</span>
-        </div>
-    </div>
 </div>
 
 <!-- Audit Adjustments Breakdown (if any) -->
-{% if meta.prepaid_deductions > 0 or meta.advance_prepayments > 0 or meta.one_off_additions > 0 %}
+{% if meta.prepaid_deductions > 0 or meta.advance_prepayments > 0 or meta.one_off_additions > 0 or meta.transfers_out > 0 %}
 <div class="stat-card" style="margin-bottom: 1.25rem; padding: 0.85rem 1.15rem; background: hsla(var(--primary-hsl), 0.02); border: 1px dashed var(--border);">
     <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.4rem;">
-        ⚡ Target Audit Adjustments Applied Today:
+        ⚡ Target Adjustments Applied on {{ target_date|date:"M d" }}:
     </div>
     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
         {% if meta.prepaid_deductions > 0 %}
         <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
-            -{{ currency }}{{ meta.prepaid_deductions|floatformat:0 }} Prepaid Credits ({{ meta.prepaid_students_count }} student{{ meta.prepaid_students_count|pluralize }} covered in advance)
+            -{{ currency }}{{ meta.prepaid_deductions|floatformat:2 }} Prepaid Credits ({{ meta.prepaid_students_count }} student{{ meta.prepaid_students_count|pluralize }} covered in advance)
+        </span>
+        {% endif %}
+        {% if meta.transfers_out > 0 %}
+        <span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
+            -{{ currency }}{{ meta.transfers_out|floatformat:2 }} Paid to Bursar / Other Collector
         </span>
         {% endif %}
         {% if meta.advance_prepayments > 0 %}
         <span class="badge" style="background: #ede9fe; color: #6d28d9; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
-            +{{ currency }}{{ meta.advance_prepayments|floatformat:0 }} Multi-day Advance Prepayments Recorded
+            +{{ currency }}{{ meta.advance_prepayments|floatformat:2 }} Multi-day Advance Prepayments Recorded
         </span>
         {% endif %}
         {% if meta.one_off_additions > 0 %}
         <span class="badge" style="background: #e0f2fe; color: #0284c7; font-size: 0.72rem; font-weight: 600; padding: 0.35rem 0.6rem;">
-            +{{ currency }}{{ meta.one_off_additions|floatformat:0 }} Guest Bus Fare ({{ meta.one_off_additions_count }} one-off rider{{ meta.one_off_additions_count|pluralize }})
+            +{{ currency }}{{ meta.one_off_additions|floatformat:2 }} Guest Bus / Extra Intake ({{ meta.one_off_additions_count }})
         </span>
         {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Handover Settlement Slips Issued by Bursar -->
+{% if remittances_today %}
+<div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid #059669;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+            <h3 style="font-size: 0.92rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                💵 Handover Settlement Slips ({{ target_date|date:"M d, Y" }})
+            </h3>
+            <p style="font-size: 0.74rem; color: var(--text-muted); margin: 0.1rem 0 0 0;">
+                Verified cash handovers acknowledged by the Bursar
+            </p>
+        </div>
+        <span class="stat-badge stat-badge-success" style="font-size: 0.75rem;">
+            Total Remitted: {{ currency }}{{ cash_remitted_today|floatformat:2 }}
+        </span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 0.45rem;">
+        {% for rem in remittances_today %}
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.55rem 0.85rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); flex-wrap: wrap; gap: 0.5rem; font-size: 0.8rem;">
+            <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+                <code style="font-weight: 700; color: var(--primary);">{{ rem.reference_code }}</code>
+                <strong>+{{ currency }}{{ rem.amount|floatformat:2 }}</strong>
+                <span style="color: var(--text-muted);">Received by {{ rem.received_by.get_full_name|default:rem.received_by.username }} at {{ rem.created_at|time:"h:i A" }}</span>
+                {% if rem.variance == 0 %}
+                    <span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.68rem;">✓ Exact</span>
+                {% elif rem.variance > 0 %}
+                    <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.68rem;">+{{ currency }}{{ rem.variance|floatformat:2 }}</span>
+                {% else %}
+                    <span class="badge" style="background: #fee2e2; color: #991b1b; font-size: 0.68rem;">{{ currency }}{{ rem.variance|floatformat:2 }}</span>
+                {% endif %}
+            </div>
+            <a href="{% url 'teacher_remittance_receipt' rem.id %}" target="_blank" class="btn-secondary" style="font-size: 0.72rem; padding: 0.25rem 0.55rem; text-decoration: none;">
+                🖨️ View Slip
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Actionable Unpaid Students Roster for Target Date -->
+{% if unpaid_students %}
+<div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid #f59e0b;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+        <div>
+            <h3 style="font-size: 0.92rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                ⏳ Unpaid Students Today ({{ unpaid_students|length }})
+            </h3>
+            <p style="font-size: 0.74rem; color: var(--text-muted); margin: 0.1rem 0 0 0;">
+                Assigned students who still have an unsettled bus or canteen fee on {{ target_date|date:"M d, Y" }}
+            </p>
+        </div>
+        <button type="button" onclick="const el = document.getElementById('unpaid-roster-body'); el.style.display = el.style.display === 'none' ? 'block' : 'none';" class="btn-secondary" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+            Show / Hide List
+        </button>
+    </div>
+
+    <div id="unpaid-roster-body" style="max-height: 320px; overflow-y: auto;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 0.55rem;">
+            {% for u in unpaid_students %}
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card); gap: 0.5rem;">
+                <div style="min-width: 0;">
+                    <div style="font-weight: 600; font-size: 0.82rem; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {{ u.full_name }}
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+                        <span>{{ u.student_class }}</span>
+                        {% if u.bus_due > 0 %}<span>&bull; Bus: {{ currency }}{{ u.bus_due|floatformat:2 }}</span>{% endif %}
+                        {% if u.canteen_due > 0 %}<span>&bull; Canteen: {{ currency }}{{ u.canteen_due|floatformat:2 }}</span>{% endif %}
+                        {% if meta.clockin_started_today %}
+                            {% if u.is_present %}
+                                <span style="color: #059669; font-weight: 600;">&bull; Present</span>
+                            {% else %}
+                                <span style="color: #9ca3af;">&bull; Not Clocked In</span>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0;">
+                    <span style="font-weight: 700; font-size: 0.82rem; color: var(--danger-text);">{{ currency }}{{ u.total_due|floatformat:2 }}</span>
+                    <a href="{% url 'payment_create' %}?student_id={{ u.student_id }}" class="btn-primary" style="font-size: 0.7rem; padding: 0.22rem 0.5rem; text-decoration: none;">
+                        Collect
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
     </div>
 </div>
 {% endif %}
@@ -188,33 +300,56 @@
     <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
         <div>
             <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
-                <span>📋</span> Audit Log of Money Taken
+                <span>📋</span> {% if is_self_view %}My Collection Log{% else %}Audit Log of Money Taken{% endif %}
             </h3>
             <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0.15rem 0 0 0;">
-                Complete chronological audit trail of all student fees recorded by {{ teacher.get_full_name|default:teacher.username }}
+                Chronological trail of all student fees recorded by {{ teacher.get_full_name|default:teacher.username }}
             </p>
         </div>
 
         <!-- Period Filter Pills -->
         <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
-            <a href="{% url 'collector_audit' teacher.id %}?period=today{% if date_str %}&date={{ date_str }}{% endif %}" 
+            <a href="{% url 'collector_audit' teacher.id %}?period=today{% if date_str %}&date={{ date_str }}{% endif %}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if fee_type_filter %}&fee_type={{ fee_type_filter }}{% endif %}{% if method_filter %}&method={{ method_filter }}{% endif %}" 
                class="btn-secondary filter-preset-btn {% if log_period == 'today' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
                 Today ({{ target_date|date:"M d" }})
             </a>
-            <a href="{% url 'collector_audit' teacher.id %}?period=week{% if date_str %}&date={{ date_str }}{% endif %}" 
+            <a href="{% url 'collector_audit' teacher.id %}?period=week{% if date_str %}&date={{ date_str }}{% endif %}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if fee_type_filter %}&fee_type={{ fee_type_filter }}{% endif %}{% if method_filter %}&method={{ method_filter }}{% endif %}" 
                class="btn-secondary filter-preset-btn {% if log_period == 'week' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
                 Past 7 Days
             </a>
-            <a href="{% url 'collector_audit' teacher.id %}?period=month{% if date_str %}&date={{ date_str }}{% endif %}" 
+            <a href="{% url 'collector_audit' teacher.id %}?period=month{% if date_str %}&date={{ date_str }}{% endif %}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if fee_type_filter %}&fee_type={{ fee_type_filter }}{% endif %}{% if method_filter %}&method={{ method_filter }}{% endif %}" 
                class="btn-secondary filter-preset-btn {% if log_period == 'month' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
                 {{ month_name }}
             </a>
-            <a href="{% url 'collector_audit' teacher.id %}?period=all{% if date_str %}&date={{ date_str }}{% endif %}" 
+            <a href="{% url 'collector_audit' teacher.id %}?period=all{% if date_str %}&date={{ date_str }}{% endif %}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if fee_type_filter %}&fee_type={{ fee_type_filter }}{% endif %}{% if method_filter %}&method={{ method_filter }}{% endif %}" 
                class="btn-secondary filter-preset-btn {% if log_period == 'all' %}active{% endif %}" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
                 All Time ({{ all_count }})
             </a>
         </div>
     </div>
+
+    <!-- Search & Fee/Method Filter Bar -->
+    <form method="GET" action="{% url 'collector_audit' teacher.id %}" class="no-print" style="padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; background: var(--surface-card);">
+        <input type="hidden" name="period" value="{{ log_period }}">
+        {% if date_str %}<input type="hidden" name="date" value="{{ date_str }}">{% endif %}
+        <input type="text" name="q" value="{{ search_q }}" placeholder="Search student name or receipt #..." class="search-input" style="flex: 1; min-width: 180px; padding: 0.42rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.82rem;">
+        <select name="fee_type" class="filter-select" onchange="this.form.submit()" style="font-size: 0.82rem; padding: 0.42rem 0.65rem;">
+            <option value="">All Fee Types</option>
+            <option value="BUS" {% if fee_type_filter == 'BUS' %}selected{% endif %}>Bus Fee</option>
+            <option value="CANTEEN" {% if fee_type_filter == 'CANTEEN' %}selected{% endif %}>Canteen Fee</option>
+        </select>
+        <select name="method" class="filter-select" onchange="this.form.submit()" style="font-size: 0.82rem; padding: 0.42rem 0.65rem;">
+            <option value="">All Methods</option>
+            <option value="CASH" {% if method_filter == 'CASH' %}selected{% endif %}>Cash</option>
+            <option value="MOBILE_MONEY" {% if method_filter == 'MOBILE_MONEY' %}selected{% endif %}>Mobile Money</option>
+            <option value="BANK_TRANSFER" {% if method_filter == 'BANK_TRANSFER' %}selected{% endif %}>Bank Transfer</option>
+            <option value="CARD" {% if method_filter == 'CARD' %}selected{% endif %}>Card</option>
+        </select>
+        <button type="submit" class="btn-secondary" style="font-size: 0.8rem; padding: 0.42rem 0.85rem;">Filter</button>
+        {% if search_q or fee_type_filter or method_filter %}
+        <a href="{% url 'collector_audit' teacher.id %}?period={{ log_period }}{% if date_str %}&date={{ date_str }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.42rem 0.75rem;">Reset</a>
+        {% endif %}
+    </form>
 
     <!-- Summary Count & Total Intake Bar -->
     <div style="padding: 0.65rem 1.25rem; background: var(--surface-subtle); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem;">
@@ -232,7 +367,7 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th style="padding: 0.65rem 1rem;">Date & Time Taken</th>
+                    <th style="padding: 0.65rem 1rem;">Date &amp; Time Taken</th>
                     <th>Receipt #</th>
                     <th>Student Name</th>
                     <th>Class</th>
@@ -364,12 +499,29 @@
         </div>
         {% endfor %}
     </div>
+
+    {% if is_paginated %}
+    <div class="no-print" style="padding: 0.85rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <span style="font-size: 0.78rem; color: var(--text-muted);">
+            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+        </span>
+        <div style="display: flex; gap: 0.4rem;">
+            {% if page_obj.has_previous %}
+            <a href="{% url 'collector_audit' teacher.id %}?period={{ log_period }}&page={{ page_obj.previous_page_number }}{% if date_str %}&date={{ date_str }}{% endif %}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if fee_type_filter %}&fee_type={{ fee_type_filter }}{% endif %}{% if method_filter %}&method={{ method_filter }}{% endif %}" class="btn-secondary" style="font-size: 0.78rem; padding: 0.3rem 0.7rem;">← Previous</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+            <a href="{% url 'collector_audit' teacher.id %}?period={{ log_period }}&page={{ page_obj.next_page_number }}{% if date_str %}&date={{ date_str }}{% endif %}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if fee_type_filter %}&fee_type={{ fee_type_filter }}{% endif %}{% if method_filter %}&method={{ method_filter }}{% endif %}" class="btn-secondary" style="font-size: 0.78rem; padding: 0.3rem 0.7rem;">Next →</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% else %}
     <div style="text-align: center; padding: 2.5rem 1rem;">
         <div style="font-size: 1.5rem; margin-bottom: 0.35rem;">📝</div>
         <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">No payment receipts recorded for this period</div>
         <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">
-            No transactions found for the selected time filter. Use the filter buttons above to change the range.
+            No transactions found matching your filters. Use the period or search filters above to adjust.
         </p>
     </div>
     {% endif %}
@@ -388,14 +540,14 @@
         </div>
         <div style="flex: 1; text-align: center;">
             <div style="border-bottom: 1px solid #000; width: 80%; margin: 2rem auto 0.5rem;"></div>
-            <p style="font-size: 0.8rem; font-weight: 600; margin: 0;">Official School Stamp & Date</p>
+            <p style="font-size: 0.8rem; font-weight: 600; margin: 0;">Official School Stamp &amp; Date</p>
         </div>
     </div>
 </div>
 
 <style>
 @media print {
-    .navbar, .header-actions, .filter-preset-btn, .page-header a, .btn-secondary, form {
+    .navbar, .app-sidebar, .app-topbar, .header-actions, .filter-preset-btn, .page-header a, .btn-secondary, .btn-primary, form, .no-print {
         display: none !important;
     }
     body {

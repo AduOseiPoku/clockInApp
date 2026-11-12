@@ -46,16 +46,34 @@ function updateLiveStats(stats) {
     const curr = document.body.dataset.currency || 'GH₵';
     const clockedCountElem = document.getElementById('stat-clocked-count');
     const clockedPctElem = document.getElementById('stat-clocked-pct');
+    const busCountElem = document.getElementById('stat-bus-count');
     const busPctElem = document.getElementById('stat-bus-pct');
+    const canteenCountElem = document.getElementById('stat-canteen-count');
     const canteenPctElem = document.getElementById('stat-canteen-pct');
     const dailyRevenueElem = document.getElementById('stat-daily-revenue');
     const busCollectedElem = document.getElementById('stat-bus-collected');
     const canteenCollectedElem = document.getElementById('stat-canteen-collected');
 
-    if (clockedCountElem) clockedCountElem.textContent = `${stats.clocked_in_count} / ${stats.total_students}`;
-    if (clockedPctElem) clockedPctElem.textContent = `${stats.clocked_in_pct}% Present`;
-    if (busPctElem) busPctElem.textContent = `${stats.bus_paid_pct}% Paid`;
-    if (canteenPctElem) canteenPctElem.textContent = `${stats.canteen_paid_pct}% Paid`;
+    if (clockedCountElem && stats.clocked_in_count !== undefined) {
+        clockedCountElem.textContent = `${stats.clocked_in_count} / ${stats.total_students}`;
+    }
+    if (clockedPctElem && stats.clocked_in_pct !== undefined) {
+        clockedPctElem.textContent = `${stats.clocked_in_pct}% Present`;
+    }
+    if (busCountElem && stats.bus_paid_count !== undefined) {
+        busCountElem.innerHTML = `${stats.bus_paid_count} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ ${stats.bus_students_count}</span>`;
+    }
+    if (busPctElem && stats.bus_paid_pct !== undefined) {
+        busPctElem.textContent = `${stats.bus_paid_pct}% Paid`;
+        busPctElem.className = `stat-badge ${stats.bus_paid_pct >= 80 ? 'stat-badge-success' : 'stat-badge-danger'}`;
+    }
+    if (canteenCountElem && stats.canteen_paid_count !== undefined) {
+        canteenCountElem.innerHTML = `${stats.canteen_paid_count} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ ${stats.canteen_students_count}</span>`;
+    }
+    if (canteenPctElem && stats.canteen_paid_pct !== undefined) {
+        canteenPctElem.textContent = `${stats.canteen_paid_pct}% Paid`;
+        canteenPctElem.className = `stat-badge ${stats.canteen_paid_pct >= 80 ? 'stat-badge-success' : 'stat-badge-danger'}`;
+    }
 
     if (dailyRevenueElem && stats.daily_total_collected !== undefined) {
         dailyRevenueElem.textContent = `${curr}${parseFloat(stats.daily_total_collected).toFixed(2)}`;
@@ -123,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (cell) {
                     if (data.is_clocked_in) {
                         cell.innerHTML = `
-                            <div class="clocked-in-badge">
+                            <div class="clocked-in-badge" style="display: inline-flex; align-items: center;">
                                 <span>✓ ${data.clock_in_time}</span>
                                 <button type="button" class="btn-undo-clockin" data-student-id="${studentId}" data-action="undo" title="Undo clock-in">
                                     ✕
@@ -133,8 +151,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         cell.innerHTML = `
                             <button type="button" class="btn-clock-in" data-student-id="${studentId}" data-action="clock_in">
-                                Clock In
+                                ✓ Clock In
                             </button>
+                        `;
+                    }
+                }
+
+                // Update separate Arrival Status badge cell if present (e.g., Students Directory)
+                const statusCell = document.getElementById(`clockin-status-cell-${studentId}`);
+                if (statusCell) {
+                    if (data.is_clocked_in) {
+                        statusCell.innerHTML = `
+                            <span class="badge badge-success" style="font-size: 0.76rem; padding: 0.2rem 0.6rem;">
+                                ● Present
+                            </span>
+                        `;
+                    } else {
+                        statusCell.innerHTML = `
+                            <span class="badge" style="background: var(--surface-subtle); color: var(--text-muted); font-size: 0.76rem; padding: 0.2rem 0.6rem; border: 1px solid var(--border);">
+                                ⏳ Not Clocked In
+                            </span>
                         `;
                     }
                 }

@@ -7,8 +7,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from .models import (
-    Bus, Student, FeePayment, ClockInRecord, UserProfile, NotificationLog, SchoolClass, TeacherRemittance,
-    SchoolSetting, get_term_date_range, calculate_school_weekdays, get_current_term_metrics
+    Bus, Student, FeePayment, ClockInRecord, CreditTransaction, UserProfile, NotificationLog, SchoolClass, TeacherRemittance,
+    SchoolSetting, get_term_date_range, calculate_school_weekdays, get_current_term_metrics, AuditLog
 )
 from .forms import StudentForm, TeacherCreationForm, TeacherUpdateForm
 from .views import get_collectors_financial_summary
@@ -1519,15 +1519,16 @@ class AdvancePaymentAndCreditDeductionTests(TestCase):
         self.assertEqual(status['canteen_credit_days'], 4)
 
     def test_day_by_day_credit_depletion(self):
-        """Credit depletes school day by school day until fully exhausted."""
+        """Credit depletes explicitly on each settled/clocked-in school day while absent days keep balance."""
         monday = datetime.date(2026, 10, 5)
         tuesday = datetime.date(2026, 10, 6)
-        wednesday = datetime.date(2026, 10, 7)
+        wednesday = datetime.date(2026, 10, 7)  # Absent day (no deduction)
         thursday = datetime.date(2026, 10, 8)
         friday = datetime.date(2026, 10, 9)
         next_monday = datetime.date(2026, 10, 12)
+        next_tuesday = datetime.date(2026, 10, 13)
 
-        # Record 5 days advance on Monday
+        # Record 5 days advance on Monday -> GH₵10 covers Monday + GH₵40 in wallet (4 days)
         FeePayment.objects.create(
             student=self.student,
             fee_type='BUS',
@@ -1537,27 +1538,34 @@ class AdvancePaymentAndCreditDeductionTests(TestCase):
             days_covered=5,
             bus=self.bus
         )
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('40.00'))
+        self.assertEqual(self.student.get_bus_credit_days(monday), 4)
 
-        # Tuesday (1 day consumed): 3 days remaining
-        self.assertTrue(self.student.is_bus_paid_for_date(tuesday))
+        # Tuesday: deduct explicitly (40 -> 30)
+        self.assertFalse(self.student.is_bus_settled_for_date(tuesday))
+        ded_tue = self.student.apply_credit_for_date('BUS', target_date=tuesday)
+        self.assertEqual(ded_tue, Decimal('10.00'))
+        self.assertTrue(self.student.is_bus_settled_for_date(tuesday))
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('30.00'))
         self.assertEqual(self.student.get_bus_credit_days(tuesday), 3)
 
-        # Wednesday (2 days consumed): 2 days remaining
-        self.assertTrue(self.student.is_bus_paid_for_date(wednesday))
-        self.assertEqual(self.student.get_bus_credit_days(wednesday), 2)
+        # Wednesday (absent - no deduction): wallet remains 30.00
+        self.assertFalse(self.student.is_bus_settled_for_date(wednesday))
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('30.00'))
 
-        # Thursday (3 days consumed): 1 day remaining
-        self.assertTrue(self.student.is_bus_paid_for_date(thursday))
-        self.assertEqual(self.student.get_bus_credit_days(thursday), 1)
-
-        # Friday (4 days consumed): 0 days remaining after Friday
-        self.assertTrue(self.student.is_bus_paid_for_date(friday))
-        self.assertEqual(self.student.get_bus_credit_days(friday), 0)
-
-        # Next Monday (5 school days consumed): Credit is 0 -> Student owes fee again!
-        self.assertFalse(self.student.is_bus_paid_for_date(next_monday))
+        # Thursday, Friday, Next Monday: deduct 3 remaining days (30 -> 20 -> 10 -> 0)
+        self.assertEqual(self.student.apply_credit_for_date('BUS', target_date=thursday), Decimal('10.00'))
+        self.assertEqual(self.student.apply_credit_for_date('BUS', target_date=friday), Decimal('10.00'))
+        self.assertEqual(self.student.apply_credit_for_date('BUS', target_date=next_monday), Decimal('10.00'))
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('0.00'))
         self.assertEqual(self.student.get_bus_credit_days(next_monday), 0)
-        self.assertEqual(self.student.get_daily_bus_balance(next_monday), Decimal('10.00'))
+
+        # Next Tuesday: Wallet is 0 -> Student owes daily fee again!
+        self.assertFalse(self.student.is_bus_paid_for_date(next_tuesday))
+        self.assertFalse(self.student.is_bus_settled_for_date(next_tuesday))
+        self.assertEqual(self.student.get_daily_bus_balance(next_tuesday), Decimal('10.00'))
 
     def test_bursar_cash_reconciliation_no_phantom_deficit(self):
         """
@@ -1963,7 +1971,7 @@ class PartialCreditTopUpTests(TestCase):
         self.assertEqual(canteen_p.amount, Decimal('25.00'))
         self.assertEqual(canteen_p.days_covered, 5)
         self.assertTrue(canteen_p.is_advance)
-        self.assertEqual(bus_p.payment_method, 'MOMO')
+        self.assertEqual(bus_p.payment_method, 'MOBILE_MONEY')
 
     def test_bus_analytics_contains_multipay_modal(self):
         """Bus analytics template contains the custom amount Multi-Pay modal."""
@@ -2504,6 +2512,80 @@ class TeacherBusRosterStrictIsolationTests(TestCase):
         res_tampered = self.client.get(reverse('student_list'), {'bus': self.bus_madina.id})
         self.assertNotContains(res_tampered, 'Kwame Madina')
 
+    def test_student_list_renders_clockin_instead_of_record_fee(self):
+        """Teachers and principals get 1-click Clock-In on /students/ instead of Record Fee; accountants are read-only."""
+        import json
+        from django.utils import timezone
+
+        # 1. Fee-collecting teacher gets CSRF cookie + Clock-In button, no per-student Record Fee/Payment
+        self.client.force_login(self.bus_teacher)
+        res = self.client.get(reverse('student_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('csrftoken', res.cookies)
+        self.assertContains(res, 'Morning Clock-In')
+        self.assertContains(res, 'btn-clock-in')
+        self.assertContains(res, f'clockin-action-cell-{self.s_tema_2.id}')
+        self.assertContains(res, f'mobile-clockin-action-{self.s_tema_2.id}')
+        self.assertNotContains(res, '/payments/new/?student=')
+        self.assertNotContains(res, 'Record Payment')
+
+        # Can clock in a student via toggle API and see clocked-in state on /students/
+        today_str = timezone.localdate().isoformat()
+        api_res = self.client.post(
+            reverse('api_clock_in_toggle'),
+            data=json.dumps({
+                'student_id': self.s_tema_2.id,
+                'date': today_str,
+                'action': 'clock_in',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(api_res.status_code, 200)
+        res_after = self.client.get(reverse('student_list'))
+        self.assertContains(res_after, 'btn-undo-clockin')
+        self.assertContains(res_after, '✓')
+
+        # 2. Principal gets Clock-In + Edit/Delete, no per-student Record Fee/Payment
+        principal = User.objects.create_user(username='principal_sl', password='Password123!')
+        principal.profile.role = UserProfile.ROLE_ADMIN
+        principal.profile.save()
+        self.client.force_login(principal)
+        res_principal = self.client.get(reverse('student_list'))
+        self.assertEqual(res_principal.status_code, 200)
+        self.assertContains(res_principal, 'btn-clock-in')
+        self.assertContains(res_principal, 'Edit')
+        self.assertContains(res_principal, 'Delete')
+        self.assertNotContains(res_principal, '/payments/new/?student=')
+        self.assertNotContains(res_principal, 'Record Payment')
+
+        # 3. Attendance-only teacher gets Arrival Status cell + Clock-In, no per-student Record Fee/Payment
+        att_teacher = User.objects.create_user(username='att_teacher_sl', password='Password123!')
+        att_teacher.profile.role = UserProfile.ROLE_TEACHER
+        att_teacher.profile.can_collect_fees = False
+        att_teacher.profile.assigned_class = 'Class 1A'
+        att_teacher.profile.save()
+        self.client.force_login(att_teacher)
+        res_att = self.client.get(reverse('student_list'))
+        self.assertEqual(res_att.status_code, 200)
+        self.assertContains(res_att, 'Arrival Status')
+        self.assertContains(res_att, f'clockin-status-cell-{self.s_madina.id}')
+        self.assertContains(res_att, 'btn-clock-in')
+        self.assertNotContains(res_att, '/payments/new/?student=')
+        self.assertNotContains(res_att, 'Record Payment')
+
+        # 4. Accountant sees read-only arrival status only, no Clock-In or per-student Record Fee/Payment
+        accountant = User.objects.create_user(username='accountant_sl', password='Password123!')
+        accountant.profile.role = UserProfile.ROLE_ACCOUNTANT
+        accountant.profile.save()
+        self.client.force_login(accountant)
+        res_acc = self.client.get(reverse('student_list'))
+        self.assertEqual(res_acc.status_code, 200)
+        self.assertContains(res_acc, 'Not Clocked In')
+        self.assertNotContains(res_acc, 'btn-clock-in')
+        self.assertNotContains(res_acc, 'btn-undo-clockin')
+        self.assertNotContains(res_acc, '/payments/new/?student=')
+        self.assertNotContains(res_acc, 'Record Payment')
+
     def test_multi_bus_assignment_shows_all_assigned_routes(self):
         """Teacher assigned to Tema Bus AND Spintex Bus sees students from both, but not Madina or walkers."""
         self.bus_teacher_profile.assigned_buses.add(self.bus_spintex)
@@ -2848,3 +2930,983 @@ class TeacherRemittanceAndReconciliationTests(TestCase):
         self.assertEqual(data['teacher_cash_in_field'], 80.0)
         self.assertEqual(data['drawer_cash_today'], 0.0)
         self.assertTrue(any(c['id'] == self.teacher_user.id and c['cash_in_hand'] == 80.0 for c in data['collectors']))
+
+
+class AuditLogSystemTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin = User.objects.create_superuser('audit_admin', 'admin@audit.com', 'pass123')
+        self.teacher = User.objects.create_user('audit_teacher', 'teacher@audit.com', 'pass123')
+        self.bursar = User.objects.create_user('audit_bursar', 'bursar@audit.com', 'pass123')
+
+        bursar_profile = self.bursar.profile
+        bursar_profile.role = UserProfile.ROLE_ACCOUNTANT
+        bursar_profile.save()
+
+        self.bus = Bus.objects.create(name='Audit Bus', fee=Decimal('10.00'), route_description='Audit Route')
+        self.student = Student.objects.create(
+            first_name='Audit',
+            last_name='Student',
+            student_class='Class 1A',
+            bus=self.bus,
+            canteen_enrolled=True
+        )
+
+    def test_log_activity_direct(self):
+        """Direct invocation of log_activity helper stores structured audit records."""
+        from .audit import log_activity
+        log = log_activity(
+            action='SETTINGS_UPDATED',
+            target_model='SchoolSetting',
+            target_id='TEST_SETTING',
+            target_repr='Test Setting',
+            description='Updated system setting for test.',
+            changes={'key': 'value'},
+            actor=self.admin,
+            ip_address='192.168.1.50'
+        )
+        self.assertIsNotNone(log)
+        self.assertEqual(log.action, 'SETTINGS_UPDATED')
+        self.assertEqual(log.actor, self.admin)
+        self.assertEqual(log.actor_username, 'audit_admin')
+        self.assertEqual(log.ip_address, '192.168.1.50')
+        self.assertEqual(log.changes, {'key': 'value'})
+
+    def test_auth_signals_audit(self):
+        """User login and failed login trigger audit logs."""
+        # Test successful login
+        self.client.login(username='audit_teacher', password='pass123')
+        login_log = AuditLog.objects.filter(action='LOGIN', actor=self.teacher).first()
+        self.assertIsNotNone(login_log)
+        self.assertIn('audit_teacher', login_log.description)
+
+        # Test logout
+        self.client.logout()
+        logout_log = AuditLog.objects.filter(action='LOGOUT', actor=self.teacher).first()
+        self.assertIsNotNone(logout_log)
+
+        # Test failed login
+        self.client.login(username='audit_teacher', password='wrongpassword')
+        failed_log = AuditLog.objects.filter(action='FAILED_LOGIN', target_repr='audit_teacher').first()
+        self.assertIsNotNone(failed_log)
+
+    def test_payment_create_and_delete_audit(self):
+        """Creating and deleting payments generate audit logs."""
+        self.client.force_login(self.admin)
+
+        # Create payment via payment_create view
+        res = self.client.post(reverse('payment_create'), {
+            'student': self.student.id,
+            'bus_amount': '10.00',
+            'canteen_amount': '0.00',
+            'payment_date': str(timezone.localdate()),
+            'payment_method': 'CASH',
+            'receipt_number': 'REC-AUDIT-999',
+            'notes': 'Test payment note'
+        })
+        self.assertEqual(res.status_code, 302)
+
+        created_log = AuditLog.objects.filter(action='PAYMENT_RECORDED', target_repr__contains='REC-AUDIT-999').first()
+        self.assertIsNotNone(created_log)
+        self.assertEqual(created_log.actor, self.admin)
+        self.assertIn('REC-AUDIT-999', created_log.target_repr)
+
+        # Delete payment
+        payment = FeePayment.objects.filter(receipt_number='REC-AUDIT-999').first()
+        self.assertIsNotNone(payment)
+        del_res = self.client.post(reverse('payment_delete', kwargs={'pk': payment.pk}))
+        self.assertEqual(del_res.status_code, 302)
+
+        del_log = AuditLog.objects.filter(action='PAYMENT_DELETED', target_id=str(payment.id)).first()
+        self.assertIsNotNone(del_log)
+        self.assertIn('REC-AUDIT-999', del_log.description)
+        self.assertEqual(del_log.changes['deleted_receipt_number'], 'REC-AUDIT-999')
+
+    def test_teacher_remittance_audit(self):
+        """Bursar settlement of teacher cash remittance logs REMITTANCE_SETTLED."""
+        self.client.force_login(self.bursar)
+        res = self.client.post(reverse('teacher_remittance_create'), {
+            'teacher_id': str(self.teacher.id),
+            'amount': '50.00',
+            'notes': 'Cash handover test',
+        })
+        self.assertEqual(res.status_code, 302)
+
+        remit_log = AuditLog.objects.filter(action='REMITTANCE_SETTLED', actor=self.bursar).first()
+        self.assertIsNotNone(remit_log)
+        self.assertEqual(remit_log.changes['amount'], '50.00')
+
+    def test_student_actions_audit(self):
+        """Student enrollment, update, lunch toggle, and deletion generate audit records."""
+        self.client.force_login(self.admin)
+
+        # Toggle lunch
+        res = self.client.post(reverse('student_toggle_lunch', kwargs={'pk': self.student.pk}))
+        self.assertEqual(res.status_code, 302)
+        lunch_log = AuditLog.objects.filter(action='LUNCH_TOGGLED', target_id=str(self.student.id)).first()
+        self.assertIsNotNone(lunch_log)
+
+        # Delete student
+        del_res = self.client.post(reverse('student_delete', kwargs={'pk': self.student.pk}))
+        self.assertEqual(del_res.status_code, 302)
+        del_log = AuditLog.objects.filter(action='STUDENT_DELETED', target_id=str(self.student.id)).first()
+        self.assertIsNotNone(del_log)
+        self.assertIn('Audit Student', del_log.description)
+
+    def test_audit_log_view_security_and_filtering(self):
+        """Only Principal can access audit logs page; search and filters function correctly."""
+        # Teacher is blocked
+        self.client.force_login(self.teacher)
+        res = self.client.get(reverse('audit_log_list'))
+        self.assertNotEqual(res.status_code, 200)
+
+        # Principal has full access
+        self.client.force_login(self.admin)
+        res = self.client.get(reverse('audit_log_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Activity & Security Audit Trail')
+
+        # Test search query filter
+        res_search = self.client.get(reverse('audit_log_list') + '?q=nonexistent_xyz')
+        self.assertEqual(res_search.status_code, 200)
+        self.assertEqual(len(res_search.context['logs']), 0)
+
+
+class RecordPaymentBulkClockInTests(TestCase):
+    """
+    Validates bulk-paid student detection, remaining balance calculation,
+    scoped teacher search, and 1-tap Clock-In directly on the Record Payment page.
+    """
+    def setUp(self):
+        self.client = Client()
+        self.admin = User.objects.create_superuser('bulk_admin', 'admin@bulk.com', 'pass123')
+        self.bus_1 = Bus.objects.create(name='East Bus', fee=Decimal('10.00'))
+        self.bus_2 = Bus.objects.create(name='West Bus', fee=Decimal('12.00'))
+        self.cls_1a = SchoolClass.objects.create(name='Class 1A')
+        self.cls_2b = SchoolClass.objects.create(name='Class 2B')
+
+        # Bus Fee Teacher assigned to bus_1
+        self.bus_teacher = User.objects.create_user('bulk_bus_teacher', 'bt@bulk.com', 'pass123')
+        bt_prof = self.bus_teacher.profile
+        bt_prof.role = UserProfile.ROLE_TEACHER
+        bt_prof.can_collect_fees = True
+        bt_prof.assigned_bus = self.bus_1
+        bt_prof.save()
+        bt_prof.assigned_buses.add(self.bus_1)
+
+        # Class Fee Teacher assigned to Class 1A (no bus)
+        self.class_teacher = User.objects.create_user('bulk_class_teacher', 'ct@bulk.com', 'pass123')
+        ct_prof = self.class_teacher.profile
+        ct_prof.role = UserProfile.ROLE_TEACHER
+        ct_prof.can_collect_fees = True
+        ct_prof.assigned_class = 'Class 1A'
+        ct_prof.save()
+
+        self.student_bulk = Student.objects.create(
+            first_name='Kwesi',
+            last_name='BulkRider',
+            student_class='Class 1A',
+            school_class=self.cls_1a,
+            bus=self.bus_1,
+            canteen_enrolled=False,
+            is_active=True,
+        )
+        self.student_other_bus = Student.objects.create(
+            first_name='Ama',
+            last_name='OtherBus',
+            student_class='Class 2B',
+            school_class=self.cls_2b,
+            bus=self.bus_2,
+            canteen_enrolled=False,
+            is_active=True,
+        )
+
+    def test_bulk_payment_summary_and_clockin_flow(self):
+        """Searching a bulk-paid student returns Paid + exact remaining amount and supports 1-tap Clock-In."""
+        today = timezone.localdate()
+        # Pay 50.00 for a 10.00/day bus -> covers today + 40.00 (4 days) remaining
+        FeePayment.objects.create(
+            student=self.student_bulk,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=today,
+            is_advance=True,
+            days_covered=5,
+            bus=self.bus_1,
+            recorded_by=self.admin,
+        )
+
+        self.client.force_login(self.bus_teacher)
+
+        # 1. Fetch payment details before clock-in
+        res_details = self.client.get(reverse('api_student_payment_details', args=[self.student_bulk.id]))
+        self.assertEqual(res_details.status_code, 200)
+        d = res_details.json()['details']
+        self.assertTrue(d['is_bus_paid'])
+        self.assertTrue(d['is_fully_paid'])
+        self.assertTrue(d['has_bulk_payment'])
+        self.assertEqual(d['bus_credit_remaining'], 40.0)
+        self.assertEqual(d['total_credit_remaining'], 40.0)
+        self.assertEqual(d['bus_credit_days'], 4)
+        self.assertFalse(d['is_clocked_in'])
+
+        # 2. Clock student in via AJAX API
+        res_ci = self.client.post(
+            reverse('api_clock_in_toggle'),
+            data=json.dumps({'student_id': self.student_bulk.id, 'date': str(today), 'action': 'clock_in'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_ci.status_code, 200)
+        ci_data = res_ci.json()
+        self.assertTrue(ci_data['success'])
+        self.assertTrue(ci_data['is_clocked_in'])
+        self.assertIn('40.00', ci_data['message'])
+        self.assertEqual(ci_data['payment_summary']['total_credit_remaining'], 40.0)
+        self.assertTrue(ci_data['payment_summary']['is_clocked_in'])
+
+        # 3. Verify payment details reflects clocked-in state
+        res_after = self.client.get(reverse('api_student_payment_details', args=[self.student_bulk.id]))
+        self.assertTrue(res_after.json()['details']['is_clocked_in'])
+
+    def test_last_prepaid_day_and_partial_credit_states(self):
+        """Last day of bulk pay shows 0.00 remaining; partial credit (< daily fare) does NOT mark paid."""
+        today = timezone.localdate()
+        # Use a separate student for last prepaid day: paid 20.00 on past day with 1 past clock-in -> 10.00 left today
+        yesterday = today - datetime.timedelta(days=1)
+        student_last = Student.objects.create(
+            first_name='Yaw',
+            last_name='LastDay',
+            student_class='Class 1A',
+            school_class=self.cls_1a,
+            bus=self.bus_1,
+            canteen_enrolled=False,
+            is_active=True,
+        )
+        FeePayment.objects.create(
+            student=student_last,
+            fee_type='BUS',
+            amount=Decimal('20.00'),
+            payment_date=yesterday,
+            is_advance=True,
+            days_covered=2,
+            bus=self.bus_1,
+            recorded_by=self.admin,
+        )
+        ClockInRecord.objects.create(student=student_last, date=yesterday, status='PRESENT')
+
+        self.client.force_login(self.bus_teacher)
+        res_last = self.client.get(reverse('api_student_payment_details', args=[student_last.id]))
+        d_last = res_last.json()['details']
+        self.assertTrue(d_last['is_bus_paid'])
+        self.assertTrue(d_last['is_fully_paid'])
+        self.assertTrue(d_last['has_bulk_payment'])
+        self.assertEqual(d_last['bus_credit_remaining'], 0.0)
+        self.assertEqual(d_last['bus_credit_days'], 0)
+
+        # Partial credit: 5.00 paid on a 10.00/day bus -> not fully paid, top-up of 5.00 due
+        FeePayment.objects.create(
+            student=self.student_bulk,
+            fee_type='BUS',
+            amount=Decimal('5.00'),
+            payment_date=today,
+            bus=self.bus_1,
+            recorded_by=self.admin,
+        )
+        res = self.client.get(reverse('api_student_payment_details', args=[self.student_bulk.id]))
+        d = res.json()['details']
+        self.assertFalse(d['is_bus_paid'])
+        self.assertFalse(d['is_fully_paid'])
+        self.assertTrue(d['bus_has_partial'])
+        self.assertEqual(d['bus_remainder_due'], 5.0)
+        self.assertEqual(d['bus_credit_remaining'], 0.0)
+
+    def test_payment_create_page_contains_search_and_clockin_panel_and_scoping(self):
+        """Record payment page renders instant search & clock-in UI and scopes class/bus fee teachers."""
+        # 1. Bus fee teacher scoping
+        self.client.force_login(self.bus_teacher)
+        res_bt = self.client.get(reverse('payment_create'))
+        self.assertEqual(res_bt.status_code, 200)
+        self.assertContains(res_bt, 'student-quick-search')
+        self.assertContains(res_bt, 'bulk-covered-panel')
+        self.assertContains(res_bt, 'btn-payment-clockin')
+
+        scoped = json.loads(res_bt.context['scoped_students_by_class_json'])
+        scoped_ids = [s['id'] for arr in scoped.values() for s in arr]
+        self.assertIn(self.student_bulk.id, scoped_ids)
+        self.assertNotIn(self.student_other_bus.id, scoped_ids)
+
+        # 2. Class-only fee teacher scoping
+        self.client.force_login(self.class_teacher)
+        res_ct = self.client.get(reverse('payment_create'))
+        self.assertEqual(res_ct.status_code, 200)
+        ct_students = json.loads(res_ct.context['students_by_class_json'])
+        ct_ids = [s['id'] for arr in ct_students.values() for s in arr]
+        self.assertIn(self.student_bulk.id, ct_ids)
+        self.assertNotIn(self.student_other_bus.id, ct_ids)
+        self.assertEqual(res_ct.context['initial_class_id'], str(self.cls_1a.id))
+        self.assertContains(res_ct, 'btn-save-and-add')
+        self.assertContains(res_ct, 'name="save_and_add"')
+
+    def test_save_and_record_another_daily_and_bulk_payments(self):
+        """Save & Record Another stays on /payments/record/ for both regular and bulk payments."""
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+
+        # 1. Regular Save redirects teachers to my_collections (not finance-only payment_list)
+        res_normal = self.client.post(reverse('payment_create'), {
+            'student_class': str(self.cls_1a.id),
+            'student': self.student_bulk.id,
+            'bus': self.bus_1.id,
+            'bus_amount': '10.00',
+            'canteen_amount': '0.00',
+            'payment_date': str(today),
+            'receipt_number': 'REC-SA-001',
+        })
+        self.assertEqual(res_normal.status_code, 302)
+        self.assertEqual(res_normal.url, reverse('my_collections'))
+
+        # 2. Save & Record Another for a daily fee redirects back to payment_create with focus_search=1
+        res_another_daily = self.client.post(reverse('payment_create'), {
+            'student_class': str(self.cls_1a.id),
+            'student': self.student_bulk.id,
+            'bus': self.bus_1.id,
+            'bus_amount': '10.00',
+            'canteen_amount': '0.00',
+            'payment_date': str(today),
+            'receipt_number': 'REC-SA-002',
+            'save_and_add': '1',
+        })
+        self.assertEqual(res_another_daily.status_code, 302)
+        self.assertEqual(res_another_daily.url, f"{reverse('payment_create')}?focus_search=1")
+
+        # 3. Save & Record Another for a BULK multi-day payment redirects back cleanly and marks is_advance
+        res_another_bulk = self.client.post(reverse('payment_create'), {
+            'student_class': str(self.cls_1a.id),
+            'student': self.student_bulk.id,
+            'bus': self.bus_1.id,
+            'bus_amount': '50.00',
+            'canteen_amount': '0.00',
+            'payment_date': str(today),
+            'receipt_number': 'REC-SA-BULK-003',
+            'save_and_add': '1',
+        }, follow=True)
+        self.assertEqual(res_another_bulk.status_code, 200)
+        self.assertContains(res_another_bulk, '5d bulk')
+        bulk_pay = FeePayment.objects.filter(receipt_number='REC-SA-BULK-003').first()
+        self.assertIsNotNone(bulk_pay)
+        self.assertTrue(bulk_pay.is_advance)
+        self.assertEqual(bulk_pay.days_covered, 5)
+
+        # 4. Guest Rider mode preserves bus_id and is_one_off params on Save & Record Another
+        res_guest = self.client.post(
+            f"{reverse('payment_create')}?bus_id={self.bus_1.id}&is_one_off=1",
+            {
+                'student_class': str(self.cls_2b.id),
+                'student': self.student_other_bus.id,
+                'bus': self.bus_1.id,
+                'is_one_off_bus': 'on',
+                'bus_amount': '10.00',
+                'canteen_amount': '0.00',
+                'payment_date': str(today),
+                'receipt_number': 'REC-SA-GUEST-004',
+                'save_and_add': '1',
+            },
+        )
+        self.assertEqual(res_guest.status_code, 302)
+        self.assertEqual(
+            res_guest.url,
+            f"{reverse('payment_create')}?focus_search=1&bus_id={self.bus_1.id}&is_one_off=1",
+        )
+
+    def test_wallet_deduct_and_clockin_plus_undo_reversal(self):
+        """
+        Student with prior wallet credit gets 1-tap Deduct & Clock In that reduces wallet (40 -> 30),
+        is idempotent on double submit, and refunds cleanly on Undo (30 -> 40).
+        """
+        today = timezone.localdate()
+        yesterday = today - datetime.timedelta(days=1)
+
+        # Paid 50 yesterday + clocked in yesterday -> 40.00 in wallet today
+        FeePayment.objects.create(
+            student=self.student_bulk,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=yesterday,
+            is_advance=True,
+            days_covered=5,
+            bus=self.bus_1,
+            recorded_by=self.admin,
+        )
+        ClockInRecord.objects.create(student=self.student_bulk, date=yesterday, status='PRESENT')
+
+        self.client.force_login(self.bus_teacher)
+
+        # Before deduction
+        res_details = self.client.get(reverse('api_student_payment_details', args=[self.student_bulk.id]))
+        self.assertEqual(res_details.status_code, 200)
+        d = res_details.json()['details']
+        self.assertEqual(d['bus_wallet_balance'], 40.0)
+        self.assertEqual(d['bus_to_deduct'], 10.0)
+        self.assertEqual(d['bus_wallet_after'], 30.0)
+        self.assertEqual(d['total_cash_needed'], 0.0)
+        self.assertFalse(d['bus_settled_today'])
+        self.assertFalse(d['is_clocked_in'])
+
+        # Tap "Deduct GH₵10.00 & Clock In"
+        res_settle = self.client.post(
+            reverse('api_wallet_settle_and_clockin'),
+            data=json.dumps({
+                'student_id': self.student_bulk.id,
+                'date': str(today),
+                'action': 'settle_and_clockin',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_settle.status_code, 200)
+        s_data = res_settle.json()
+        self.assertTrue(s_data['success'])
+        self.assertEqual(s_data['bus_deducted'], 10.0)
+        self.assertEqual(s_data['cash_collected'], 0.0)
+        self.assertEqual(s_data['details']['bus_wallet_balance'], 30.0)
+        self.assertEqual(s_data['details']['bus_wallet_after'], 30.0)
+        self.assertTrue(s_data['details']['bus_settled_today'])
+        self.assertTrue(s_data['details']['is_clocked_in'])
+
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('30.00'))
+        self.assertTrue(
+            CreditTransaction.objects.filter(
+                student=self.student_bulk,
+                fee_type='BUS',
+                transaction_type=CreditTransaction.TYPE_DEDUCTION,
+                amount=Decimal('10.00'),
+                date=today,
+            ).exists()
+        )
+
+        # Idempotent retry does not double-deduct
+        res_retry = self.client.post(
+            reverse('api_wallet_settle_and_clockin'),
+            data=json.dumps({
+                'student_id': self.student_bulk.id,
+                'date': str(today),
+                'action': 'settle_and_clockin',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_retry.status_code, 200)
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('30.00'))
+
+        # Tap Undo -> refunds 10.00 back to wallet (30 -> 40) & removes clock-in
+        res_undo = self.client.post(
+            reverse('api_wallet_settle_and_clockin'),
+            data=json.dumps({
+                'student_id': self.student_bulk.id,
+                'date': str(today),
+                'action': 'undo',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_undo.status_code, 200)
+        u_data = res_undo.json()
+        self.assertTrue(u_data['success'])
+        self.assertEqual(u_data['refunded'], 10.0)
+        self.assertEqual(u_data['details']['bus_wallet_balance'], 40.0)
+        self.assertFalse(u_data['details']['is_clocked_in'])
+        self.assertFalse(u_data['details']['bus_settled_today'])
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('40.00'))
+
+    def test_partial_wallet_remainder_topup_clockin_and_payment_delete_reversal(self):
+        """
+        Partial wallet credit (5.00 on 10.00 bus) settles in 1 tap via wallet (5.00) + MoMo cash (5.00),
+        balances Bursar summary with 0 deficit, and FeePayment.delete() cleanly reverses wallet top-up.
+        """
+        today = timezone.localdate()
+        yesterday = today - datetime.timedelta(days=1)
+
+        # Yesterday: paid 15.00 & clocked in -> 5.00 remaining in wallet today
+        FeePayment.objects.create(
+            student=self.student_bulk,
+            fee_type='BUS',
+            amount=Decimal('15.00'),
+            payment_date=yesterday,
+            is_advance=True,
+            days_covered=1,
+            bus=self.bus_1,
+            recorded_by=self.bus_teacher,
+        )
+        ClockInRecord.objects.create(student=self.student_bulk, date=yesterday, status='PRESENT')
+
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('5.00'))
+
+        self.client.force_login(self.bus_teacher)
+        res_det = self.client.get(reverse('api_student_payment_details', args=[self.student_bulk.id]))
+        d = res_det.json()['details']
+        self.assertEqual(d['bus_wallet_balance'], 5.0)
+        self.assertEqual(d['bus_to_deduct'], 5.0)
+        self.assertEqual(d['bus_cash_needed'], 5.0)
+        self.assertEqual(d['bus_wallet_after'], 0.0)
+        self.assertTrue(d['bus_has_partial'])
+        self.assertFalse(d['bus_settled_today'])
+
+        # 1-tap Partial Credit + MoMo Top-Up & Clock In
+        res_topup = self.client.post(
+            reverse('api_wallet_settle_and_clockin'),
+            data=json.dumps({
+                'student_id': self.student_bulk.id,
+                'date': str(today),
+                'action': 'settle_and_clockin',
+                'method': 'MOBILE_MONEY',
+                'collect_remainder': True,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_topup.status_code, 200)
+        t_data = res_topup.json()
+        self.assertTrue(t_data['success'])
+        self.assertEqual(t_data['bus_deducted'], 5.0)
+        self.assertEqual(t_data['cash_collected'], 5.0)
+        self.assertEqual(t_data['details']['bus_wallet_balance'], 0.0)
+        self.assertTrue(t_data['details']['bus_settled_today'])
+        self.assertTrue(t_data['details']['is_clocked_in'])
+
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('0.00'))
+        topup_pay = FeePayment.objects.filter(student=self.student_bulk, payment_date=today).first()
+        self.assertIsNotNone(topup_pay)
+        self.assertEqual(topup_pay.amount, Decimal('5.00'))
+        self.assertEqual(topup_pay.payment_method, 'MOBILE_MONEY')
+
+        # Bursar reconciliation shows zero deficit (5.00 cash + 5.00 prepaid deduction = 10.00)
+        bursar = get_collectors_financial_summary([self.bus_teacher], target_date=today)[self.bus_teacher.id]
+        self.assertEqual(bursar['today_collected'], Decimal('5.00'))
+        self.assertEqual(bursar['prepaid_deductions'], Decimal('5.00'))
+        self.assertEqual(bursar['adjusted_target'], Decimal('5.00'))
+        self.assertEqual(bursar['balance'], Decimal('0.00'))
+
+        # Recording a fresh bulk payment adds excess to wallet, and deleting it reverses the wallet!
+        p_new_bulk = FeePayment.objects.create(
+            student=self.student_bulk,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=today,
+            is_advance=True,
+            days_covered=5,
+            bus=self.bus_1,
+            recorded_by=self.bus_teacher,
+        )
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('50.00'))  # Today already settled!
+        p_new_bulk.delete()
+        self.student_bulk.refresh_from_db()
+        self.assertEqual(self.student_bulk.bus_credit_wallet, Decimal('0.00'))
+
+
+
+class TeacherMyCollectionsUpgradeTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.bursar = User.objects.create_user('bursar_mc', 'bursar@mc.com', 'pass123')
+        self.bursar.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar.profile.save()
+
+        self.bus = Bus.objects.create(name='Bus Gold', fee=Decimal('10.00'), is_active=True)
+
+        self.teacher = User.objects.create_user('teacher_mc', 'teacher@mc.com', 'pass123', first_name='Esi', last_name='Mensah')
+        self.teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher.profile.can_collect_fees = True
+        self.teacher.profile.assigned_bus = self.bus
+        self.teacher.profile.save()
+        self.teacher.profile.assigned_buses.add(self.bus)
+
+        self.s1 = Student.objects.create(first_name='Kwame', last_name='Osei', student_class='Class 1', bus=self.bus, canteen_enrolled=False, is_active=True)
+        self.s2 = Student.objects.create(first_name='Abena', last_name='Boateng', student_class='Class 1', bus=self.bus, canteen_enrolled=True, custom_canteen_fee=Decimal('8.00'), is_active=True)
+
+    def test_my_collections_remittance_cash_vs_momo_and_slips(self):
+        """Teacher collections split Cash vs Electronic and integrate TeacherRemittance slips."""
+        today = timezone.localdate()
+        FeePayment.objects.create(
+            student=self.s1, fee_type='BUS', amount=Decimal('10.00'),
+            payment_method='CASH', payment_date=today, receipt_number='REC-MC-1',
+            bus=self.bus, recorded_by=self.teacher
+        )
+        FeePayment.objects.create(
+            student=self.s2, fee_type='BUS', amount=Decimal('10.00'),
+            payment_method='MOBILE_MONEY', payment_date=today, receipt_number='REC-MC-2',
+            bus=self.bus, recorded_by=self.teacher
+        )
+
+        self.client.force_login(self.teacher)
+        res = self.client.get(reverse('collector_audit', kwargs={'pk': self.teacher.pk}))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.context['cash_collected_today'], Decimal('10.00'))
+        self.assertEqual(res.context['electronic_collected_today'], Decimal('10.00'))
+        self.assertEqual(res.context['cash_in_hand'], Decimal('10.00'))
+        self.assertEqual(res.context['cash_remitted_today'], Decimal('0.00'))
+        self.assertContains(res, 'To Remit')
+
+        # Bursar accepts the GH₵10 physical cash handover
+        rem = TeacherRemittance.objects.create(
+            teacher=self.teacher,
+            received_by=self.bursar,
+            amount=Decimal('10.00'),
+            expected_amount=Decimal('10.00'),
+            variance=Decimal('0.00'),
+            date=today,
+            reference_code='REM-MC-0001'
+        )
+
+        res_after = self.client.get(reverse('collector_audit', kwargs={'pk': self.teacher.pk}))
+        self.assertEqual(res_after.status_code, 200)
+        self.assertEqual(res_after.context['cash_remitted_today'], Decimal('10.00'))
+        self.assertEqual(res_after.context['cash_in_hand'], Decimal('0.00'))
+        self.assertContains(res_after, 'Settled')
+        self.assertContains(res_after, 'REM-MC-0001')
+        self.assertContains(res_after, reverse('teacher_remittance_receipt', kwargs={'pk': rem.pk}))
+
+    def test_bursar_advance_payment_transfers_out_capped_at_single_day(self):
+        """Multi-day advance paid directly to Bursar only deducts 1 day's fee from teacher's daily target."""
+        today = timezone.localdate()
+        # Student 1 pays 5-day bus advance (GH₵50) directly to Bursar
+        FeePayment.objects.create(
+            student=self.s1, fee_type='BUS', amount=Decimal('50.00'),
+            is_advance=True, days_covered=5,
+            payment_method='CASH', payment_date=today, receipt_number='REC-BUR-5D',
+            bus=self.bus, recorded_by=self.bursar
+        )
+        # Student 2 pays Canteen (GH₵8) directly to Bursar
+        FeePayment.objects.create(
+            student=self.s2, fee_type='CANTEEN', amount=Decimal('8.00'),
+            payment_method='CASH', payment_date=today, receipt_number='REC-BUR-CAN',
+            recorded_by=self.bursar
+        )
+
+        meta = get_collectors_financial_summary([self.teacher], target_date=today)[self.teacher.id]
+        # Baseline = s1(10) + s2(10 + 8) = 28.00
+        self.assertEqual(meta['baseline_target'], Decimal('28.00'))
+        # Transfers out = s1 bus(10.00 capped from 50.00) + s2 canteen(8.00) = 18.00
+        self.assertEqual(meta['transfers_out'], Decimal('18.00'))
+        # Adjusted target = 28.00 - 18.00 = 10.00 (only s2's bus fee remains!)
+        self.assertEqual(meta['adjusted_target'], Decimal('10.00'))
+        self.assertEqual(len(meta['unpaid_students']), 1)
+        self.assertEqual(meta['unpaid_students'][0]['student_id'], self.s2.id)
+        self.assertEqual(meta['unpaid_students'][0]['bus_due'], Decimal('10.00'))
+        self.assertEqual(meta['unpaid_students'][0]['canteen_due'], Decimal('0.00'))
+
+    def test_collector_audit_constant_query_count_no_n_plus_1(self):
+        """Verify query count stays O(1) constant as students and payments scale 10x."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        today = timezone.localdate()
+        url = reverse('collector_audit', kwargs={'pk': self.teacher.pk})
+        self.client.force_login(self.teacher)
+
+        # Warm up session/settings cache, then measure with 2 students & 1 payment
+        FeePayment.objects.create(
+            student=self.s1, fee_type='BUS', amount=Decimal('10.00'),
+            payment_method='CASH', payment_date=today, receipt_number='REC-Q-1',
+            bus=self.bus, recorded_by=self.teacher
+        )
+        self.client.get(url)
+        with CaptureQueriesContext(connection) as ctx_small:
+            res_small = self.client.get(url)
+        self.assertEqual(res_small.status_code, 200)
+
+        # Add 15 more students, 15 payments, and 3 remittances
+        for i in range(15):
+            st = Student.objects.create(
+                first_name=f'Stu{i}', last_name='Scale', student_class='Class 1',
+                bus=self.bus, canteen_enrolled=True, custom_canteen_fee=Decimal('8.00'), is_active=True
+            )
+            FeePayment.objects.create(
+                student=st, fee_type='BUS', amount=Decimal('10.00'),
+                payment_method='CASH', payment_date=today, receipt_number=f'REC-SCALE-{i}',
+                bus=self.bus, recorded_by=self.teacher
+            )
+        for j in range(3):
+            TeacherRemittance.objects.create(
+                teacher=self.teacher, received_by=self.bursar, amount=Decimal('10.00'),
+                expected_amount=Decimal('10.00'), variance=Decimal('0.00'),
+                date=today, reference_code=f'REM-SCALE-{j}'
+            )
+
+        with CaptureQueriesContext(connection) as ctx_large:
+            res_large = self.client.get(url)
+        self.assertEqual(res_large.status_code, 200)
+
+        # Zero N+1: query count must remain identical!
+        self.assertEqual(len(ctx_large), len(ctx_small))
+
+    def test_collector_audit_search_and_method_filters(self):
+        """Teacher can search student names and filter by fee_type and method in collection log."""
+        today = timezone.localdate()
+        FeePayment.objects.create(
+            student=self.s1, fee_type='BUS', amount=Decimal('10.00'),
+            payment_method='CASH', payment_date=today, receipt_number='REC-F-1',
+            bus=self.bus, recorded_by=self.teacher
+        )
+        FeePayment.objects.create(
+            student=self.s2, fee_type='CANTEEN', amount=Decimal('8.00'),
+            payment_method='MOBILE_MONEY', payment_date=today, receipt_number='REC-F-2',
+            recorded_by=self.teacher
+        )
+
+        self.client.force_login(self.teacher)
+        url = reverse('collector_audit', kwargs={'pk': self.teacher.pk})
+
+        res_search = self.client.get(url, {'q': 'Abena'})
+        self.assertContains(res_search, 'Abena Boateng')
+        self.assertNotContains(res_search, 'Kwame Osei')
+
+        res_momo = self.client.get(url, {'method': 'MOBILE_MONEY', 'fee_type': 'CANTEEN'})
+        self.assertEqual(res_momo.context['filtered_log_total'], Decimal('8.00'))
+        self.assertEqual(res_momo.context['audit_logs_count'], 1)
+
+
+class TeacherSyncAndWalletAuditTests(TestCase):
+    """Regression suite covering teacher-side wallet sync, payment methods, redirects, onboarding, and UI hooks."""
+
+    def setUp(self):
+        self.client = Client()
+        self.admin = User.objects.create_superuser('audit_admin2', 'admin2@test.com', 'pass123')
+        self.bus = Bus.objects.create(name='Route X', fee=Decimal('10.00'), is_active=True)
+        self.bus2 = Bus.objects.create(name='Route Y', fee=Decimal('12.00'), is_active=True)
+        self.cls = SchoolClass.objects.create(name='Grade 3', is_active=True)
+
+        self.bus_teacher = User.objects.create_user('bus_t_sync', 'bt@test.com', 'pass123')
+        bt_profile = self.bus_teacher.profile
+        bt_profile.role = UserProfile.ROLE_TEACHER
+        bt_profile.can_collect_fees = True
+        bt_profile.assigned_bus = self.bus
+        bt_profile.save()
+
+        self.multi_bus_teacher = User.objects.create_user('multi_t_sync', 'mt@test.com', 'pass123')
+        mt_profile = self.multi_bus_teacher.profile
+        mt_profile.role = UserProfile.ROLE_TEACHER
+        mt_profile.can_collect_fees = True
+        mt_profile.assigned_bus = None
+        mt_profile.save()
+        mt_profile.assigned_buses.add(self.bus2)
+
+        self.att_teacher = User.objects.create_user('att_t_sync', 'att@test.com', 'pass123')
+        at_profile = self.att_teacher.profile
+        at_profile.role = UserProfile.ROLE_TEACHER
+        at_profile.can_collect_fees = False
+        at_profile.assigned_class = 'Grade 3'
+        at_profile.save()
+
+        self.student = Student.objects.create(
+            first_name='Ama',
+            last_name='Kusi',
+            student_class='Grade 3',
+            bus=self.bus,
+            canteen_enrolled=True,
+            custom_canteen_fee=Decimal('8.00'),
+            is_active=True,
+        )
+        self.other_student = Student.objects.create(
+            first_name='Kojo',
+            last_name='Bonsu',
+            student_class='Grade 4',
+            bus=self.bus2,
+            canteen_enrolled=False,
+            is_active=True,
+        )
+
+    def test_toggle_clock_in_deducts_and_refunds_wallet_credit(self):
+        """1-click clock-in via /api/clock-in/toggle/ must deduct wallet credit and refund on undo."""
+        today = timezone.localdate()
+        # Pre-load 3 days of bus (30.00) + canteen (24.00) yesterday so wallet has available credit
+        yesterday = today - datetime.timedelta(days=1)
+        FeePayment.objects.create(
+            student=self.student, fee_type='BUS', bus=self.bus, amount=Decimal('30.00'),
+            payment_method='CASH', payment_date=yesterday, is_advance=True, days_covered=3,
+            recorded_by=self.admin, receipt_number='REC-SYNC-B1'
+        )
+        FeePayment.objects.create(
+            student=self.student, fee_type='CANTEEN', amount=Decimal('24.00'),
+            payment_method='CASH', payment_date=yesterday, is_advance=True, days_covered=3,
+            recorded_by=self.admin, receipt_number='REC-SYNC-C1'
+        )
+        self.student.refresh_from_db()
+        # Yesterday's 10.00 bus + 8.00 canteen settled yesterday; excess (20.00 + 16.00) loaded into wallet
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('20.00'))
+        self.assertEqual(self.student.canteen_credit_wallet, Decimal('16.00'))
+
+        self.client.force_login(self.att_teacher)
+        url = reverse('api_clock_in_toggle')
+
+        # 1. Clock In
+        res_in = self.client.post(
+            url,
+            data=json.dumps({'student_id': self.student.id, 'date': str(today), 'action': 'clock_in'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_in.status_code, 200)
+        data_in = res_in.json()
+        self.assertTrue(data_in['success'])
+        self.assertTrue(data_in['is_clocked_in'])
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('10.00'))
+        self.assertEqual(self.student.canteen_credit_wallet, Decimal('8.00'))
+        self.assertTrue(
+            CreditTransaction.objects.filter(
+                student=self.student, fee_type='BUS', date=today,
+                transaction_type=CreditTransaction.TYPE_DEDUCTION, amount=Decimal('10.00')
+            ).exists()
+        )
+        # Scoped stats for Grade 3 classroom teacher (1 student in Grade 3, not 2 whole-school)
+        self.assertEqual(data_in['stats']['total_students'], 1)
+        self.assertEqual(data_in['stats']['bus_paid_count'], 1)
+
+        # 2. Undo Clock-In refunds wallet credit
+        res_undo = self.client.post(
+            url,
+            data=json.dumps({'student_id': self.student.id, 'date': str(today), 'action': 'undo'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_undo.status_code, 200)
+        data_undo = res_undo.json()
+        self.assertTrue(data_undo['success'])
+        self.assertFalse(data_undo['is_clocked_in'])
+        self.assertIn('refunded', data_undo['message'].lower())
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('20.00'))
+        self.assertEqual(self.student.canteen_credit_wallet, Decimal('16.00'))
+        self.assertTrue(
+            CreditTransaction.objects.filter(
+                student=self.student, fee_type='BUS', date=today,
+                transaction_type=CreditTransaction.TYPE_REVERSAL, amount=Decimal('10.00')
+            ).exists()
+        )
+
+    def test_bus_analytics_momo_value_and_collect_api_normalization(self):
+        """bus_analytics renders MOBILE_MONEY and collect_both_fees_api normalizes MOMO -> MOBILE_MONEY."""
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+
+        res_page = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus.pk}))
+        self.assertEqual(res_page.status_code, 200)
+        self.assertContains(res_page, 'value="MOBILE_MONEY"')
+        self.assertNotContains(res_page, 'value="MOMO"')
+
+        # Even if stale client sends 'MOMO', API stores canonical 'MOBILE_MONEY'
+        res_api = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'method': 'MOMO',
+                'date': str(today),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_api.status_code, 200)
+        p = FeePayment.objects.get(student=self.student, fee_type='BUS', payment_date=today)
+        self.assertEqual(p.payment_method, 'MOBILE_MONEY')
+
+        res_audit = self.client.get(reverse('collector_audit', kwargs={'pk': self.bus_teacher.pk}))
+        self.assertEqual(res_audit.status_code, 200)
+        self.assertEqual(res_audit.context['momo_collected_today'], Decimal('10.00'))
+        self.assertEqual(res_audit.context['bank_collected_today'], Decimal('0.00'))
+
+    def test_teacher_payment_method_selection_and_safe_navigation(self):
+        """Teachers can save MOBILE_MONEY on payment_create, land on my_collections, and see safe Back links."""
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+
+        res_form = self.client.get(reverse('payment_create'))
+        self.assertEqual(res_form.status_code, 200)
+        self.assertContains(res_form, 'id="manual-method-pills"')
+        self.assertContains(res_form, reverse('my_collections'))
+
+        res_post = self.client.post(reverse('payment_create'), {
+            'student_class': str(self.cls.id),
+            'student': self.student.id,
+            'bus': self.bus.id,
+            'bus_amount': '30.00',
+            'canteen_amount': '0.00',
+            'payment_date': str(today),
+            'payment_method': 'MOBILE_MONEY',
+            'receipt_number': 'REC-TNAV-1',
+        }, follow=True)
+        self.assertEqual(res_post.status_code, 200)
+        self.assertEqual(res_post.redirect_chain[0][0], reverse('my_collections'))
+        self.assertEqual(
+            res_post.redirect_chain[-1][0],
+            reverse('collector_audit', kwargs={'pk': self.bus_teacher.pk}),
+        )
+        self.assertNotContains(res_post, 'Access denied')
+
+        p = FeePayment.objects.get(receipt_number='REC-TNAV-1')
+        self.assertEqual(p.payment_method, 'MOBILE_MONEY')
+
+        res_receipt = self.client.get(reverse('payment_receipt', kwargs={'pk': p.pk}))
+        self.assertEqual(res_receipt.status_code, 200)
+        self.assertContains(res_receipt, reverse('my_collections'))
+
+        # Admin continues to redirect to payment_list
+        self.client.force_login(self.admin)
+        res_admin_post = self.client.post(reverse('payment_create'), {
+            'student_class': str(self.cls.id),
+            'student': self.student.id,
+            'bus': self.bus.id,
+            'bus_amount': '10.00',
+            'canteen_amount': '0.00',
+            'payment_date': str(today),
+            'payment_method': 'CASH',
+            'receipt_number': 'REC-ANAV-1',
+        })
+        self.assertEqual(res_admin_post.status_code, 302)
+        self.assertEqual(res_admin_post.url, reverse('payment_list'))
+
+    def test_teacher_onboarding_button_and_real_counts(self):
+        """Enabling ALLOW_TEACHER_STUDENT_REGISTRATION exposes header Enroll button and real today counts."""
+        SchoolSetting.set_setting('ALLOW_TEACHER_STUDENT_REGISTRATION', 'True')
+        Student.objects.filter(pk=self.student.pk).update(registered_by=self.att_teacher)
+
+        self.client.force_login(self.att_teacher)
+        res = self.client.get(reverse('student_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.context['can_register'])
+        self.assertEqual(res.context['today_onboarded_count'], 2)
+        self.assertEqual(res.context['my_onboarded_today_count'], 1)
+        self.assertContains(res, '+ Enroll Student')
+        self.assertContains(res, 'You have enrolled 1 student today.')
+
+    def test_quick_payment_attaches_bus_and_primary_bus_links_and_dashboard_status_id(self):
+        """quick_payment_api sets bus=student.bus, dashboard has status cell id, multi-bus uses primary_bus."""
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+        res_qp = self.client.post(
+            reverse('api_quick_payment'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'amount': '10.00',
+                'payment_date': str(today),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_qp.status_code, 200)
+        p_qp = FeePayment.objects.get(student=self.student, fee_type='BUS', payment_date=today)
+        self.assertEqual(p_qp.bus, self.bus)
+        self.assertEqual(res_qp.json()['stats']['total_students'], 1)
+
+        # Attendance-only dashboard row exposes clockin-status-cell-<id>
+        self.client.force_login(self.att_teacher)
+        res_dash = self.client.get(reverse('dashboard'))
+        self.assertEqual(res_dash.status_code, 200)
+        self.assertContains(res_dash, f'id="clockin-status-cell-{self.student.id}"')
+
+        # Multi-bus teacher without legacy assigned_bus links to primary_bus (bus2) in sidebar & collector audit
+        self.client.force_login(self.multi_bus_teacher)
+        res_audit = self.client.get(reverse('collector_audit', kwargs={'pk': self.multi_bus_teacher.pk}))
+        self.assertEqual(res_audit.status_code, 200)
+        self.assertContains(res_audit, reverse('bus_analytics', kwargs={'pk': self.bus2.pk}))
