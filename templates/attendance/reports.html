@@ -156,6 +156,11 @@
                             <td><span>{{ currency }}{{ br.expected|floatformat:2 }}</span></td>
                             <td>
                                 <span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ br.collected|floatformat:2 }}</span>
+                                {% if br.prepaid_deducted > 0 or br.direct_collected > 0 %}
+                                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem;">
+                                    Direct: {{ currency }}{{ br.direct_collected|floatformat:2 }} &bull; Prepaid: {{ currency }}{{ br.prepaid_deducted|floatformat:2 }}
+                                </div>
+                                {% endif %}
                             </td>
                             <td>
                                 {% if br.balance > 0 %}
@@ -184,7 +189,12 @@
                     <tr style="background: var(--surface-subtle); font-weight: 600;">
                         <td colspan="3">Fleet Total</td>
                         <td>{{ currency }}{{ total_bus_exp|floatformat:2 }}</td>
-                        <td style="color: var(--success-text);">{{ currency }}{{ total_bus_col|floatformat:2 }}</td>
+                        <td style="color: var(--success-text);">
+                            <div>{{ currency }}{{ total_bus_col|floatformat:2 }}</div>
+                            <div style="font-size: 0.72rem; font-weight: 400; color: var(--text-muted);">
+                                Direct: {{ currency }}{{ total_bus_direct|floatformat:2 }} | Prepaid: {{ currency }}{{ total_bus_prepaid|floatformat:2 }}
+                            </div>
+                        </td>
                         <td style="color: var(--danger-text);">{{ currency }}{{ total_bus_bal|floatformat:2 }}</td>
                         <td>—</td>
                     </tr>
@@ -223,7 +233,12 @@
                         <td>{{ canteen_enrolled_count }}</td>
                         <td>{{ currency }}{{ canteen_rate|floatformat:2 }}</td>
                         <td><span>{{ currency }}{{ canteen_expected|floatformat:2 }}</span></td>
-                        <td><span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ canteen_collected|floatformat:2 }}</span></td>
+                        <td>
+                            <span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ canteen_collected|floatformat:2 }}</span>
+                            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem;">
+                                Direct: {{ currency }}{{ canteen_direct|floatformat:2 }} &bull; Prepaid: {{ currency }}{{ canteen_prepaid|floatformat:2 }}
+                            </div>
+                        </td>
                         <td><span style="color: var(--danger-text); font-weight: 600;">{{ currency }}{{ canteen_balance|floatformat:2 }}</span></td>
                     </tr>
                 </tbody>
@@ -253,7 +268,10 @@
                     <tr>
                         <td><strong>Bus Transportation</strong></td>
                         <td style="text-align: right;">{{ currency }}{{ total_bus_exp|floatformat:2 }}</td>
-                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">{{ currency }}{{ total_bus_col|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">
+                            <div>{{ currency }}{{ total_bus_col|floatformat:2 }}</div>
+                            <div style="font-size: 0.7rem; font-weight: 400; color: var(--text-muted);">Direct: {{ currency }}{{ total_bus_direct|floatformat:2 }} | Prepaid: {{ currency }}{{ total_bus_prepaid|floatformat:2 }}</div>
+                        </td>
                         <td style="text-align: right; color: var(--danger-text); font-weight: 600;">{{ currency }}{{ total_bus_bal|floatformat:2 }}</td>
                         <td style="text-align: right;">
                             {% if total_bus_exp > 0 %}
@@ -266,7 +284,10 @@
                     <tr>
                         <td><strong>Canteen Meal Plan</strong></td>
                         <td style="text-align: right;">{{ currency }}{{ canteen_expected|floatformat:2 }}</td>
-                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">{{ currency }}{{ canteen_collected|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">
+                            <div>{{ currency }}{{ canteen_collected|floatformat:2 }}</div>
+                            <div style="font-size: 0.7rem; font-weight: 400; color: var(--text-muted);">Direct: {{ currency }}{{ canteen_direct|floatformat:2 }} | Prepaid: {{ currency }}{{ canteen_prepaid|floatformat:2 }}</div>
+                        </td>
                         <td style="text-align: right; color: var(--danger-text); font-weight: 600;">{{ currency }}{{ canteen_balance|floatformat:2 }}</td>
                         <td style="text-align: right;">
                             {% if canteen_expected > 0 %}
@@ -281,7 +302,10 @@
                     <tr style="background: var(--surface-subtle); font-weight: 700; font-size: 0.95rem;">
                         <td>Grand Total</td>
                         <td style="text-align: right;">{{ currency }}{{ grand_total_exp|floatformat:2 }}</td>
-                        <td style="text-align: right; color: var(--success-text);">{{ currency }}{{ grand_total_col|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text);">
+                            <div>{{ currency }}{{ grand_total_col|floatformat:2 }}</div>
+                            <div style="font-size: 0.7rem; font-weight: 400; color: var(--text-muted);">Direct: {{ currency }}{{ grand_total_direct|floatformat:2 }} | Prepaid: {{ currency }}{{ grand_total_prepaid|floatformat:2 }}</div>
+                        </td>
                         <td style="text-align: right; color: var(--danger-text);">{{ currency }}{{ grand_total_bal|floatformat:2 }}</td>
                         <td style="text-align: right;">
                             {% if grand_total_exp > 0 %}

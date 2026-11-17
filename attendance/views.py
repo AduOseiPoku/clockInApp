@@ -1,7 +1,7 @@
 import csv
 import json
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import calendar
 from collections import defaultdict
 from io import TextIOWrapper
@@ -314,13 +314,19 @@ def get_class_fee_summary(target_date=None):
     return summary
 
 
-def get_collectors_financial_summary(teachers, target_date=None):
+def get_collectors_financial_summary(teachers=None, target_date=None):
     """
     Computes audited daily targets, collections, one-off/guest bus adjustments,
     unpaid roster breakdown, and outstanding balances for a list or queryset
     of teachers on target_date.
     Optimized to run in constant O(1) database queries with zero N+1 lookups.
     """
+    if isinstance(teachers, (date, datetime)) and target_date is None:
+        target_date = teachers
+        teachers = None
+    if teachers is None:
+        teachers = User.objects.filter(profile__role=UserProfile.ROLE_TEACHER).select_related('profile')
+
     if target_date is None:
         target_date = timezone.localdate()
 
@@ -438,6 +444,9 @@ def get_collectors_financial_summary(teachers, target_date=None):
         student_daily_fee_map[(s.id, 'BUS')] = bus_fee
         student_daily_fee_map[(s.id, 'CANTEEN')] = canteen_fee
 
+        is_present = s.id in clocked_in_student_ids
+        is_present_or_pending = is_present or (not clockin_started_today)
+
         # Check prepaid credit applied today for bus and canteen (both explicit deductions and prior wallet credit)
         bus_prepaid_applied = Decimal('0.00')
         today_bus_direct = today_bus_payments.get(s.id, Decimal('0.00'))
@@ -447,9 +456,10 @@ def get_collectors_financial_summary(teachers, target_date=None):
             today_bus_topup = credit_ledger['topup_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
             cash_for_today_bus = max(Decimal('0.00'), today_bus_direct - today_bus_topup)
             prior_avail_bus = max(Decimal('0.00'), wallet_bus - today_bus_topup)
+            avail_for_today_bus = (ded_bus + prior_avail_bus) if is_present_or_pending else ded_bus
             bus_prepaid_applied = min(
                 max(Decimal('0.00'), bus_fee - cash_for_today_bus),
-                ded_bus + prior_avail_bus,
+                avail_for_today_bus,
             )
 
         canteen_prepaid_applied = Decimal('0.00')
@@ -460,15 +470,15 @@ def get_collectors_financial_summary(teachers, target_date=None):
             today_can_topup = credit_ledger['topup_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
             cash_for_today_can = max(Decimal('0.00'), today_can_direct - today_can_topup)
             prior_avail_can = max(Decimal('0.00'), wallet_can - today_can_topup)
+            avail_for_today_can = (ded_can + prior_avail_can) if is_present_or_pending else ded_can
             canteen_prepaid_applied = min(
                 max(Decimal('0.00'), canteen_fee - cash_for_today_can),
-                ded_can + prior_avail_can,
+                avail_for_today_can,
             )
 
         bus_due = max(Decimal('0.00'), bus_fee - today_bus_direct - bus_prepaid_applied) if s.bus_id else Decimal('0.00')
         can_due = max(Decimal('0.00'), canteen_fee - today_can_direct - canteen_prepaid_applied) if s.canteen_enrolled else Decimal('0.00')
         total_due = bus_due + can_due
-        is_present = s.id in clocked_in_student_ids
 
         responsible_tids = []
         if s.bus_id and s.bus_id in bus_to_teacher_ids:
@@ -1554,6 +1564,8 @@ def bus_analytics_view(request, pk):
     total_unpaid_count = 0
     total_expected = Decimal('0.00')
     total_collected = Decimal('0.00')
+    total_direct_intake = Decimal('0.00')
+    total_prepaid_deducted = Decimal('0.00')
 
     for s in students:
         total_expected += daily_fee
@@ -1569,16 +1581,21 @@ def bus_analytics_view(request, pk):
         credit_available = wallet_bus if has_partial_credit else Decimal('0.00')
         bus_credit_days = int((wallet_bus - owed_bus) // daily_fee) if (is_paid and wallet_bus >= owed_bus and daily_fee > Decimal('0.00')) else 0
 
+        total_direct_intake += direct_paid
+        total_prepaid_deducted += ded_bus
+
         if is_paid:
             total_paid_count += 1
-            paid_amount = direct_paid if direct_paid > Decimal('0.00') else daily_fee
-            total_collected += paid_amount
+            paid_amount = direct_paid if direct_paid > Decimal('0.00') else (ded_bus if ded_bus > Decimal('0.00') else daily_fee)
+            today_route_val = min(direct_paid, daily_fee) if direct_paid > Decimal('0.00') else daily_fee
+            total_collected += today_route_val
             balance = Decimal('0.00')
             remainder_due = Decimal('0.00')
         else:
             total_unpaid_count += 1
             covered = settled_bus + wallet_bus
-            total_collected += direct_paid
+            today_route_val = min(daily_fee, settled_bus + wallet_bus)
+            total_collected += today_route_val
             balance = max(Decimal('0.00'), daily_fee - covered)
             paid_amount = direct_paid
             remainder_due = balance
@@ -1661,6 +1678,7 @@ def bus_analytics_view(request, pk):
         total_paid_count += 1
         total_expected += gp.amount
         total_collected += gp.amount
+        total_direct_intake += gp.amount
 
     # 5. Build class breakdown list with per-class statistics
     class_breakdown = []
@@ -1671,7 +1689,7 @@ def bus_analytics_view(request, pk):
         c_unpaid = c_riders - c_paid
         c_pct = round((c_paid / c_riders * 100), 1) if c_riders > 0 else 0
         c_expected = Decimal(c_riders) * daily_fee
-        c_collected = sum(item['amount_paid'] for item in c_students)
+        c_collected = sum(min(item['amount_paid'], daily_fee) if item['is_paid'] else item['amount_paid'] for item in c_students)
         c_outstanding = max(Decimal('0.00'), c_expected - c_collected)
 
         class_breakdown.append({
@@ -1711,6 +1729,8 @@ def bus_analytics_view(request, pk):
         'unpaid_pct': unpaid_pct,
         'total_expected': total_expected,
         'total_collected': total_collected,
+        'total_direct_intake': total_direct_intake,
+        'total_prepaid_deducted': total_prepaid_deducted,
         'total_outstanding': total_outstanding,
     }
 
@@ -2294,12 +2314,29 @@ def payment_list_view(request):
     collectors_partial_count = 0
     collectors_pending_count = 0
 
+    collectors_meta = get_collectors_financial_summary(authorized_teachers, target_audit_date)
+
     for t in authorized_teachers:
         c_coll = cash_by_teacher.get(t.id, Decimal('0.00'))
         c_rem = remittance_by_teacher.get(t.id, Decimal('0.00'))
         cash_in_hand = max(Decimal('0.00'), c_coll - c_rem)
         t_today_total = today_totals_by_teacher.get(t.id, Decimal('0.00'))
         collectors_total_collected += t_today_total
+
+        t_fin = collectors_meta.get(t.id, {})
+        t_expected = t_fin.get('adjusted_target', Decimal('0.00'))
+        t_balance = t_fin.get('present_balance', t_fin.get('balance', Decimal('0.00')))
+        collectors_total_expected += t_expected
+        collectors_total_balance += t_balance
+
+        if t_balance <= Decimal('0.00') and t_expected > Decimal('0.00'):
+            collectors_settled_count += 1
+        elif t_today_total > Decimal('0.00') or t_fin.get('prepaid_deductions', Decimal('0.00')) > Decimal('0.00'):
+            collectors_partial_count += 1
+        elif t_expected > Decimal('0.00'):
+            collectors_pending_count += 1
+        else:
+            collectors_settled_count += 1
 
         authorized_collectors_summary.append({
             'user': t,
@@ -2308,7 +2345,18 @@ def payment_list_view(request):
             'cash_remitted': c_rem,
             'cash_in_hand': cash_in_hand,
             'has_cash_in_hand': cash_in_hand > 0,
+            'expected': t_expected,
+            'balance': t_balance,
+            'prepaid_deductions': t_fin.get('prepaid_deductions', Decimal('0.00')),
         })
+
+    # Prepaid wallet deductions executed today (auto or manual clock-in settlements)
+    today_deductions_qs = CreditTransaction.objects.filter(
+        date=target_audit_date,
+        transaction_type=CreditTransaction.TYPE_DEDUCTION,
+    ).select_related('student', 'recorded_by').order_by('-created_at')
+    today_deductions = list(today_deductions_qs[:50])
+    today_deductions_total = today_deductions_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
     # All staff who have recorded payments for filter dropdown
     recorded_by_ids = FeePayment.objects.exclude(recorded_by=None).values_list('recorded_by_id', flat=True).distinct()
@@ -2378,6 +2426,8 @@ def payment_list_view(request):
         'today_momo_total': today_momo_total,
         'today_bank_total': today_bank_total,
         'remittances_today': remittances_today,
+        'today_deductions': today_deductions,
+        'today_deductions_total': today_deductions_total,
     }
     return render(request, 'attendance/payments.html', context)
 
@@ -2821,6 +2871,15 @@ def collector_audit_view(request, pk):
     except (PageNotAnInteger, EmptyPage):
         audit_page_obj = paginator.page(1)
 
+    # Prepaid wallet deductions executed today for this teacher's roster
+    teacher_deductions = CreditTransaction.objects.filter(
+        date=target_date,
+        transaction_type=CreditTransaction.TYPE_DEDUCTION,
+    ).filter(
+        Q(recorded_by=teacher) | Q(student_id__in=meta.get('baseline_student_ids', set()))
+    ).select_related('student', 'student__bus', 'recorded_by').order_by('-created_at')
+    teacher_deductions_total = teacher_deductions.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
     context = {
         'teacher': teacher,
         'profile': getattr(teacher, 'profile', None),
@@ -2861,6 +2920,8 @@ def collector_audit_view(request, pk):
         'is_paginated': audit_page_obj.has_other_pages(),
         'audit_logs_count': audit_logs_count,
         'filtered_log_total': filtered_log_total,
+        'teacher_deductions': teacher_deductions,
+        'teacher_deductions_total': teacher_deductions_total,
         'currency': get_active_currency_symbol(),
     }
     return render(request, 'attendance/collector_audit.html', context)
@@ -3655,16 +3716,35 @@ def reports_view(request):
         .values_list('student__bus_id', 'total')
     )
 
+    # Bulk aggregate prepaid wallet deductions applied to bus on target_date in 1 query
+    bus_deductions = dict(
+        CreditTransaction.objects.filter(
+            transaction_type=CreditTransaction.TYPE_DEDUCTION,
+            fee_type='BUS',
+            date=target_date,
+            student__bus__isnull=False,
+        )
+        .values('student__bus_id')
+        .annotate(total=Sum('amount'))
+        .values_list('student__bus_id', 'total')
+    )
+
     buses = Bus.objects.filter(is_active=True).order_by('name')
     bus_reports = []
     total_bus_exp = Decimal('0.00')
+    total_bus_direct = Decimal('0.00')
+    total_bus_prepaid = Decimal('0.00')
     total_bus_col = Decimal('0.00')
 
     for b in buses:
         r_count = bus_rider_counts.get(b.id, 0)
         exp = Decimal(r_count) * b.fee
         total_bus_exp += exp
-        col = bus_collections.get(b.id, Decimal('0.00'))
+        direct_col = bus_collections.get(b.id, Decimal('0.00'))
+        prepaid_col = bus_deductions.get(b.id, Decimal('0.00'))
+        col = direct_col + prepaid_col
+        total_bus_direct += direct_col
+        total_bus_prepaid += prepaid_col
         total_bus_col += col
         bus_reports.append({
             'bus': b,
@@ -3672,18 +3752,29 @@ def reports_view(request):
             'rate': b.fee,
             'expected': exp,
             'collected': col,
+            'direct_collected': direct_col,
+            'prepaid_deducted': prepaid_col,
             'balance': max(Decimal('0.00'), exp - col),
             'collection_pct': round((col / exp * 100), 1) if exp > 0 else 0,
         })
 
-    # Canteen fee report for target_date
-    canteen_enrolled_count = Student.objects.filter(canteen_enrolled=True, is_active=True).count()
+    # Canteen fee report for target_date (direct collections + prepaid wallet deductions)
+    canteen_enrolled_qs = list(Student.objects.filter(canteen_enrolled=True, is_active=True).values_list('custom_canteen_fee', flat=True))
+    canteen_enrolled_count = len(canteen_enrolled_qs)
     default_canteen_fee = get_default_canteen_fee()
-    canteen_expected = Decimal(canteen_enrolled_count) * default_canteen_fee
-    canteen_collected = FeePayment.objects.filter(fee_type='CANTEEN', payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    canteen_expected = sum((fee if fee is not None else default_canteen_fee for fee in canteen_enrolled_qs), Decimal('0.00'))
+    canteen_direct = FeePayment.objects.filter(fee_type='CANTEEN', payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    canteen_prepaid = CreditTransaction.objects.filter(
+        transaction_type=CreditTransaction.TYPE_DEDUCTION,
+        fee_type='CANTEEN',
+        date=target_date,
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    canteen_collected = canteen_direct + canteen_prepaid
     canteen_balance = max(Decimal('0.00'), canteen_expected - canteen_collected)
 
     grand_total_exp = total_bus_exp + canteen_expected
+    grand_total_direct = total_bus_direct + canteen_direct
+    grand_total_prepaid = total_bus_prepaid + canteen_prepaid
     grand_total_col = total_bus_col + canteen_collected
     grand_total_bal = max(Decimal('0.00'), grand_total_exp - grand_total_col)
 
@@ -3697,14 +3788,20 @@ def reports_view(request):
         'overall_attendance_pct': round((total_school_present / total_school_students * 100), 1) if total_school_students > 0 else 0,
         'bus_reports': bus_reports,
         'total_bus_exp': total_bus_exp,
+        'total_bus_direct': total_bus_direct,
+        'total_bus_prepaid': total_bus_prepaid,
         'total_bus_col': total_bus_col,
         'total_bus_bal': max(Decimal('0.00'), total_bus_exp - total_bus_col),
         'canteen_enrolled_count': canteen_enrolled_count,
         'canteen_rate': default_canteen_fee,
         'canteen_expected': canteen_expected,
+        'canteen_direct': canteen_direct,
+        'canteen_prepaid': canteen_prepaid,
         'canteen_collected': canteen_collected,
         'canteen_balance': canteen_balance,
         'grand_total_exp': grand_total_exp,
+        'grand_total_direct': grand_total_direct,
+        'grand_total_prepaid': grand_total_prepaid,
         'grand_total_col': grand_total_col,
         'grand_total_bal': grand_total_bal,
         'currency': get_active_currency_symbol(),
@@ -3919,41 +4016,22 @@ def export_debtors_csv(request):
         .annotate(total=Sum('amount'))
         .values_list('student_id', 'total')
     )
-    total_bus_payments = dict(
-        FeePayment.objects.filter(fee_type='BUS', payment_date__lte=target_date)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-    total_canteen_payments = dict(
-        FeePayment.objects.filter(fee_type='CANTEEN', payment_date__lte=target_date)
-        .values('student_id')
-        .annotate(total=Sum('amount'))
-        .values_list('student_id', 'total')
-    )
-    past_attendance_counts = dict(
-        ClockInRecord.objects.filter(date__lt=target_date)
-        .values('student_id')
-        .annotate(c=Count('id'))
-        .values_list('student_id', 'c')
-    )
+    credit_ledger = _get_credit_ledger_maps(target_date)
 
     default_canteen_fee = get_default_canteen_fee()
     students = Student.objects.filter(is_active=True).select_related('bus').order_by('student_class', 'first_name')
     currency = get_active_currency_symbol()
 
     for s in students:
-        past_days = past_attendance_counts.get(s.id, 0)
-
         # Bus fee calculation
         if s.bus:
             bus_req = s.bus.fee
             direct_bus = today_bus_payments.get(s.id, Decimal('0.00'))
-            cum_bus = total_bus_payments.get(s.id, Decimal('0.00'))
-            bus_credit = max(Decimal('0.00'), cum_bus - Decimal(past_days) * bus_req)
-            is_bus_paid = (direct_bus >= bus_req) or (bus_credit >= bus_req)
-            covered_bus = max(direct_bus, bus_credit)
-            bus_bal = Decimal('0.00') if is_bus_paid else max(Decimal('0.00'), bus_req - covered_bus)
+            ded_bus = credit_ledger['deducted_on_date'].get((s.id, 'BUS'), Decimal('0.00'))
+            wallet_bus = _wallet_for_student(s, 'BUS', credit_ledger)
+            settled_bus = direct_bus + ded_bus
+            is_bus_paid = (bus_req <= Decimal('0.00')) or (settled_bus >= bus_req) or ((settled_bus + wallet_bus) >= bus_req)
+            bus_bal = Decimal('0.00') if is_bus_paid else max(Decimal('0.00'), bus_req - settled_bus - wallet_bus)
         else:
             bus_req = Decimal('0.00')
             bus_bal = Decimal('0.00')
@@ -3963,11 +4041,11 @@ def export_debtors_csv(request):
         if s.canteen_enrolled:
             can_req = s.custom_canteen_fee if s.custom_canteen_fee is not None else default_canteen_fee
             direct_can = today_canteen_payments.get(s.id, Decimal('0.00'))
-            cum_can = total_canteen_payments.get(s.id, Decimal('0.00'))
-            can_credit = max(Decimal('0.00'), cum_can - Decimal(past_days) * can_req)
-            is_can_paid = (direct_can >= can_req) or (can_credit >= can_req)
-            covered_can = max(direct_can, can_credit)
-            can_bal = Decimal('0.00') if is_can_paid else max(Decimal('0.00'), can_req - covered_can)
+            ded_can = credit_ledger['deducted_on_date'].get((s.id, 'CANTEEN'), Decimal('0.00'))
+            wallet_can = _wallet_for_student(s, 'CANTEEN', credit_ledger)
+            settled_can = direct_can + ded_can
+            is_can_paid = (can_req <= Decimal('0.00')) or (settled_can >= can_req) or ((settled_can + wallet_can) >= can_req)
+            can_bal = Decimal('0.00') if is_can_paid else max(Decimal('0.00'), can_req - settled_can - wallet_can)
         else:
             can_req = Decimal('0.00')
             can_bal = Decimal('0.00')

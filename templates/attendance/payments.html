@@ -135,6 +135,14 @@
             <span class="stat-badge stat-badge-success" style="font-size: 0.72rem; padding: 0.3rem 0.55rem;">
                 Intake Today: +{{ CURRENCY_SYMBOL }}{{ collectors_total_collected|floatformat:2 }}
             </span>
+            {% if collectors_total_expected > 0 %}
+            <span class="stat-badge stat-badge-info" style="font-size: 0.72rem; padding: 0.3rem 0.55rem;">
+                Expected: {{ CURRENCY_SYMBOL }}{{ collectors_total_expected|floatformat:2 }}
+            </span>
+            <span class="stat-badge {% if collectors_total_balance > 0 %}stat-badge-warning{% else %}stat-badge-success{% endif %}" style="font-size: 0.72rem; padding: 0.3rem 0.55rem;">
+                Arrears: {{ CURRENCY_SYMBOL }}{{ collectors_total_balance|floatformat:2 }}
+            </span>
+            {% endif %}
             {% if selected_collector %}
             <a href="{% url 'payment_list' %}{% if fee_type %}?fee_type={{ fee_type }}{% endif %}" class="btn-secondary" style="font-size: 0.72rem; padding: 0.3rem 0.55rem;" title="Clear collector filter">
                 ✕ Show All Transactions
@@ -479,6 +487,69 @@
         {% if page_obj.has_next %}
             <a href="?page={{ page_obj.next_page_number }}{% if fee_type %}&fee_type={{ fee_type }}{% endif %}{% if student_class %}&class={{ student_class }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}{% if date_preset %}&preset={{ date_preset }}{% endif %}{% if date_str %}&date={{ date_str }}{% endif %}{% if search %}&q={{ search }}{% endif %}" class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">Next →</a>
         {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if today_deductions %}
+<!-- Today's Prepaid Wallet Service Deductions Section -->
+<div class="table-card" style="margin-top: 2rem; margin-bottom: 2rem; border-left: 4px solid #f59e0b;">
+    <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+            <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                💳 Prepaid Wallet Service Deductions ({{ target_audit_date|date:"M d, Y" }})
+            </h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0.15rem 0 0 0;">
+                Multi-day prepaid credits automatically applied today for attendance roll call
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="badge" style="background: #fef3c7; color: #92400e; font-weight: 700; font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+                Total Deducted: {{ CURRENCY_SYMBOL }}{{ today_deductions_total|floatformat:2 }} ({{ today_deductions|length }} settlements)
+            </span>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="data-table" style="font-size: 0.82rem;">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Fee Service</th>
+                    <th style="text-align: right;">Deducted Amount</th>
+                    <th style="text-align: right;">Wallet Balance Remaining</th>
+                    <th>Clock-In Recorded By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in today_deductions %}
+                <tr>
+                    <td style="color: var(--text-muted);">{{ tx.created_at|time:"h:i A" }}</td>
+                    <td>
+                        <div style="font-weight: 600;">{{ tx.student.full_name }}</div>
+                    </td>
+                    <td><span class="class-badge">{{ tx.student.student_class }}</span></td>
+                    <td>
+                        {% if tx.fee_type == 'BUS' %}
+                            <span class="fee-badge fee-badge-paid">🚌 Bus Fare</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-paid">🍽️ Canteen</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right; font-weight: 700; color: #92400e;">
+                        {{ CURRENCY_SYMBOL }}{{ tx.amount|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right; color: var(--text-muted); font-weight: 600;">
+                        {{ CURRENCY_SYMBOL }}{{ tx.balance_after|floatformat:2 }}
+                    </td>
+                    <td style="color: var(--text-muted);">
+                        {% if tx.recorded_by %}{{ tx.recorded_by.get_full_name|default:tx.recorded_by.username }}{% else %}System Attendance{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 {% endif %}

@@ -3910,3 +3910,173 @@ class TeacherSyncAndWalletAuditTests(TestCase):
         res_audit = self.client.get(reverse('collector_audit', kwargs={'pk': self.multi_bus_teacher.pk}))
         self.assertEqual(res_audit.status_code, 200)
         self.assertContains(res_audit, reverse('bus_analytics', kwargs={'pk': self.bus2.pk}))
+
+
+class MultipayReconciliationAndTallyTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.bus = Bus.objects.create(name='Route Alpha', fee=Decimal('10.00'), is_active=True)
+        self.bus_teacher = User.objects.create_user(
+            username='alpha_teacher',
+            password='password123',
+            is_staff=True,
+        )
+        self.bus_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.bus_teacher.profile.can_collect_fees = True
+        self.bus_teacher.profile.assigned_bus = self.bus
+        self.bus_teacher.profile.save()
+
+        self.bursar = User.objects.create_user(
+            username='school_bursar',
+            password='password123',
+            is_staff=True,
+        )
+        self.bursar.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar.profile.save()
+
+        self.principal = User.objects.create_user(
+            username='school_principal',
+            password='password123',
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.principal.profile.role = UserProfile.ROLE_ADMIN
+        self.principal.profile.save()
+
+        self.student = Student.objects.create(
+            first_name='Kojo',
+            last_name='Mensah',
+            student_class='Class 1',
+            bus=self.bus,
+            canteen_enrolled=True,
+            custom_canteen_fee=Decimal('5.00'),
+            is_active=True,
+        )
+
+    def test_multipay_day1_intake_and_day2_deduction_tallies_across_roles(self):
+        day1 = timezone.localdate() - datetime.timedelta(days=1)
+        day2 = timezone.localdate()
+
+        # Day 1: Student pays 5-day advance for bus (50.00 = 10 day 1 + 40 wallet)
+        # and 5-day advance for canteen (25.00 = 5 day 1 + 20 wallet)
+        self.client.force_login(self.bus_teacher)
+        res_pay = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'bus_amount': '50.00',
+                'canteen_amount': '25.00',
+                'payment_method': 'CASH',
+                'payment_date': str(day1),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_pay.status_code, 200)
+
+        # Verify Day 1 wallets
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('40.00'))
+        self.assertEqual(self.student.canteen_credit_wallet, Decimal('20.00'))
+
+        # Check Day 1 tallies
+        sum_day1 = get_collectors_financial_summary(day1)
+        t_meta_day1 = sum_day1[self.bus_teacher.id]
+        self.assertEqual(t_meta_day1['today_collected'], Decimal('75.00'))
+        self.assertEqual(t_meta_day1['advance_prepayments'], Decimal('60.00'))
+        self.assertEqual(t_meta_day1['adjusted_target'], Decimal('75.00'))
+        self.assertEqual(t_meta_day1['balance'], Decimal('0.00'))
+
+        # Principal reports Day 1:
+        self.client.force_login(self.principal)
+        res_rep_day1 = self.client.get(reverse('reports') + f'?date={day1}')
+        self.assertEqual(res_rep_day1.status_code, 200)
+        self.assertEqual(res_rep_day1.context['total_bus_col'], Decimal('50.00'))
+        self.assertEqual(res_rep_day1.context['canteen_collected'], Decimal('25.00'))
+
+        # Day 2: Roll call clock-in occurs on Day 2!
+        self.client.force_login(self.bus_teacher)
+        res_clockin = self.client.post(
+            reverse('api_clock_in_toggle'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'date': str(day2),
+                'status': 'PRESENT',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_clockin.status_code, 200)
+
+        # Verify wallets deducted for Day 2
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('30.00'))
+        self.assertEqual(self.student.canteen_credit_wallet, Decimal('15.00'))
+
+        # 1. Teacher Audit on Day 2:
+        sum_day2 = get_collectors_financial_summary(day2)
+        t_meta_day2 = sum_day2[self.bus_teacher.id]
+        self.assertEqual(t_meta_day2['prepaid_deductions'], Decimal('15.00'))
+        self.assertEqual(t_meta_day2['adjusted_target'], Decimal('0.00'))
+        self.assertEqual(t_meta_day2['balance'], Decimal('0.00'))
+        self.assertEqual(t_meta_day2['present_balance'], Decimal('0.00'))
+
+        # Check teacher collector audit view
+        res_teacher_audit = self.client.get(reverse('collector_audit', kwargs={'pk': self.bus_teacher.pk}) + f'?date={day2}')
+        self.assertEqual(res_teacher_audit.status_code, 200)
+        self.assertEqual(res_teacher_audit.context['teacher_deductions_total'], Decimal('15.00'))
+        self.assertContains(res_teacher_audit, 'Prepaid Wallet Deductions Executed Today')
+
+        # 2. Bursar Payments View on Day 2:
+        self.client.force_login(self.bursar)
+        res_bursar = self.client.get(reverse('payment_list') + f'?date={day2}')
+        self.assertEqual(res_bursar.status_code, 200)
+        self.assertEqual(res_bursar.context['today_deductions_total'], Decimal('15.00'))
+        self.assertEqual(res_bursar.context['collectors_total_expected'], Decimal('0.00'))
+        self.assertEqual(res_bursar.context['collectors_total_balance'], Decimal('0.00'))
+        self.assertContains(res_bursar, 'Prepaid Wallet Service Deductions')
+
+        # 3. Principal Reports View on Day 2:
+        self.client.force_login(self.principal)
+        res_rep_day2 = self.client.get(reverse('reports') + f'?date={day2}')
+        self.assertEqual(res_rep_day2.status_code, 200)
+        self.assertEqual(res_rep_day2.context['total_bus_exp'], Decimal('10.00'))
+        self.assertEqual(res_rep_day2.context['total_bus_col'], Decimal('10.00'))
+        self.assertEqual(res_rep_day2.context['total_bus_prepaid'], Decimal('10.00'))
+        self.assertEqual(res_rep_day2.context['total_bus_bal'], Decimal('0.00'))
+        self.assertEqual(res_rep_day2.context['canteen_expected'], Decimal('5.00'))
+        self.assertEqual(res_rep_day2.context['canteen_collected'], Decimal('5.00'))
+        self.assertEqual(res_rep_day2.context['canteen_prepaid'], Decimal('5.00'))
+        self.assertEqual(res_rep_day2.context['canteen_balance'], Decimal('0.00'))
+        self.assertEqual(res_rep_day2.context['grand_total_bal'], Decimal('0.00'))
+
+        # 4. Bus Analytics View on Day 2 (no double counting):
+        res_bus_an = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus.pk}) + f'?date={day2}')
+        self.assertEqual(res_bus_an.status_code, 200)
+        self.assertEqual(res_bus_an.context['summary']['total_expected'], Decimal('10.00'))
+        self.assertEqual(res_bus_an.context['summary']['total_collected'], Decimal('10.00'))
+        self.assertEqual(res_bus_an.context['summary']['total_outstanding'], Decimal('0.00'))
+        self.assertEqual(res_bus_an.context['summary']['paid_count'], 1)
+        self.assertEqual(res_bus_an.context['summary']['unpaid_count'], 0)
+
+        # 5. Debtors CSV Export on Day 2:
+        res_debtors = self.client.get(reverse('export_debtors_csv') + f'?date={day2}')
+        self.assertEqual(res_debtors.status_code, 200)
+        content = res_debtors.content.decode('utf-8')
+        self.assertNotIn('Kojo Mensah', content)
+
+    def test_reconcile_wallets_management_command(self):
+        from django.core.management import call_command
+        from io import StringIO
+
+        # Introduce a deliberate discrepancy in student wallet
+        self.student.bus_credit_wallet = Decimal('999.00')
+        self.student.save()
+
+        out = StringIO()
+        call_command('reconcile_wallets', stdout=out)
+        output = out.getvalue()
+        self.assertIn('Reconciliation complete', output)
+        self.assertIn('1 wallet balances corrected', output)
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('0.00'))
+

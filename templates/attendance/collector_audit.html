@@ -203,6 +203,61 @@
 </div>
 {% endif %}
 
+{% if teacher_deductions %}
+<!-- Prepaid Wallet Deductions Executed Today -->
+<div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid #f59e0b;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+            <h3 style="font-size: 0.92rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                💳 Prepaid Wallet Deductions Executed Today ({{ target_date|date:"M d, Y" }})
+            </h3>
+            <p style="font-size: 0.74rem; color: var(--text-muted); margin: 0.1rem 0 0 0;">
+                Prepaid credit automatically applied upon clock-in for students on your roster
+            </p>
+        </div>
+        <span class="stat-badge" style="background: #fef3c7; color: #92400e; font-weight: 700; font-size: 0.75rem;">
+            Total Deducted: -{{ currency }}{{ teacher_deductions_total|floatformat:2 }}
+        </span>
+    </div>
+    <div class="table-responsive">
+        <table class="data-table" style="font-size: 0.8rem;">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Student Name</th>
+                    <th>Class</th>
+                    <th>Fee Type</th>
+                    <th style="text-align: right;">Deducted</th>
+                    <th style="text-align: right;">Wallet Remaining</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in teacher_deductions %}
+                <tr>
+                    <td style="color: var(--text-muted);">{{ tx.created_at|time:"h:i A" }}</td>
+                    <td><strong>{{ tx.student.full_name }}</strong></td>
+                    <td><span class="class-badge">{{ tx.student.student_class }}</span></td>
+                    <td>
+                        {% if tx.fee_type == 'BUS' %}
+                            <span class="fee-badge fee-badge-paid">🚌 Bus Fare</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-paid">🍽️ Canteen</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right; font-weight: 700; color: #92400e;">
+                        -{{ currency }}{{ tx.amount|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right; color: var(--text-muted);">
+                        {{ currency }}{{ tx.balance_after|floatformat:2 }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
 <!-- Handover Settlement Slips Issued by Bursar -->
 {% if remittances_today %}
 <div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid #059669;">

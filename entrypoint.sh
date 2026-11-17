@@ -9,6 +9,9 @@ fi
 echo "==> Running database migrations..."
 python manage.py migrate --noinput
 
+echo "==> Reconciling student wallet ledgers..."
+python manage.py reconcile_wallets
+
 echo "==> Initializing demo user accounts..."
 python manage.py setup_demo_accounts
 
