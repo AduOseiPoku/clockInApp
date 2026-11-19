@@ -343,6 +343,20 @@
                                     data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}">
                                 Pay
                             </button>
+                            <button type="button"
+                                    class="btn-secondary"
+                                    style="font-size:0.74rem; padding:0.28rem 0.55rem; margin-left:0.25rem; border-color:rgba(239,68,68,0.4); color:#dc2626;"
+                                    onclick="openMarkUnpaidModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.student.bus_id|default:'' }}', '{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}')"
+                                    title="Mark student unpaid & record on Debtors List">
+                                Unpaid
+                            </button>
+                            {% if item.open_debt_total > 0 %}
+                            <div style="margin-top:0.25rem;">
+                                <span style="font-size:0.7rem; font-weight:700; padding:0.1rem 0.45rem; border-radius:999px; background:{% if item.is_overdue_debt %}#dc2626{% else %}rgba(217,119,6,0.15){% endif %}; color:{% if item.is_overdue_debt %}#fff{% else %}#b45309{% endif %};">
+                                    {% if item.is_overdue_debt %}OVERDUE ({{ item.open_debt_days }}d){% else %}Debt ({{ item.open_debt_days }}d){% endif %}: {{ currency }}{{ item.open_debt_total|floatformat:2 }}
+                                </span>
+                            </div>
+                            {% endif %}
                             {% else %}
                             <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Review Only</span>
                             {% endif %}
@@ -512,4 +526,96 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Mark Unpaid (Debtors List) Modal -->
+<div id="mark-unpaid-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1050; align-items:center; justify-content:center; padding:1rem;">
+    <div style="background:var(--surface-card, #fff); border-radius:14px; max-width:420px; width:100%; padding:1.4rem; box-shadow:0 20px 40px rgba(0,0,0,0.2);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.85rem;">
+            <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-main);">Mark Student Unpaid</h3>
+            <button type="button" onclick="closeMarkUnpaidModal()" style="background:none; border:none; font-size:1.25rem; cursor:pointer; color:var(--text-muted);">&times;</button>
+        </div>
+        <p id="mark-unpaid-subtitle" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;"></p>
+        <form id="mark-unpaid-form" onsubmit="submitMarkUnpaid(event)">
+            <input type="hidden" id="mu-student-id">
+            <input type="hidden" id="mu-date" value="{{ date_str }}">
+            <div class="form-group">
+                <label class="form-label" for="mu-fee-type">Unpaid Fee Type</label>
+                <select id="mu-fee-type" class="form-select">
+                    <option value="BUS">Bus Fee Only</option>
+                    <option value="CANTEEN">Lunch / Canteen Fee Only</option>
+                    <option value="BOTH">Both Bus &amp; Lunch</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="mu-bus-id">Bus Route Ridden (Leave default or select Guest Bus)</label>
+                <select id="mu-bus-id" class="form-select">
+                    <option value="">-- Assigned Bus --</option>
+                    {% for b in buses %}
+                    <option value="{{ b.id }}">{{ b.name }} ({{ currency }}{{ b.fee|floatformat:2 }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="mu-notes">Notes (Optional)</label>
+                <input type="text" id="mu-notes" class="form-input" placeholder="e.g. Parent promised to pay tomorrow">
+            </div>
+            <div id="mu-feedback" style="font-size:0.82rem; margin-bottom:0.75rem; display:none;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button type="button" class="btn-secondary" onclick="closeMarkUnpaidModal()">Cancel</button>
+                <button type="submit" class="btn-primary" style="background:#dc2626; border-color:#dc2626;">Record as Unpaid</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openMarkUnpaidModal(studentId, studentName, assignedBusId, defaultFeeType) {
+    document.getElementById('mu-student-id').value = studentId;
+    document.getElementById('mu-fee-type').value = defaultFeeType || 'BUS';
+    document.getElementById('mu-bus-id').value = assignedBusId || '';
+    document.getElementById('mu-notes').value = '';
+    const fb = document.getElementById('mu-feedback');
+    fb.style.display = 'none';
+    fb.textContent = '';
+    document.getElementById('mark-unpaid-subtitle').innerHTML = 'Recording unpaid fee for <strong>' + studentName + '</strong> on <strong>{{ date_str }}</strong>.';
+    document.getElementById('mark-unpaid-modal').style.display = 'flex';
+}
+function closeMarkUnpaidModal() {
+    document.getElementById('mark-unpaid-modal').style.display = 'none';
+}
+async function submitMarkUnpaid(e) {
+    e.preventDefault();
+    const fb = document.getElementById('mu-feedback');
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    const payload = {
+        student_id: document.getElementById('mu-student-id').value,
+        fee_type: document.getElementById('mu-fee-type').value,
+        bus_id: document.getElementById('mu-bus-id').value || null,
+        date: document.getElementById('mu-date').value,
+        notes: document.getElementById('mu-notes').value
+    };
+    try {
+        const res = await fetch("{% url 'api_mark_unpaid' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.reload();
+        } else {
+            fb.style.display = 'block';
+            fb.style.color = '#dc2626';
+            fb.textContent = data.error || 'Could not record unpaid fee.';
+        }
+    } catch (err) {
+        fb.style.display = 'block';
+        fb.style.color = '#dc2626';
+        fb.textContent = 'Network error. Please try again.';
+    }
+}
+</script>
 {% endblock %}

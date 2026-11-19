@@ -28,7 +28,9 @@ from .models import (
     Bus, Student, FeePayment, ClockInRecord, CreditTransaction, UserProfile, NotificationLog,
     SchoolClass, SchoolSetting, get_default_canteen_fee, TeacherRemittance,
     get_term_date_range, get_current_term_metrics,
-    get_active_academic_period, get_active_currency_symbol, AuditLog
+    get_active_academic_period, get_active_currency_symbol, AuditLog,
+    DebtRecord, DebtPaymentAllocation, OVERDUE_DEBT_DAYS_THRESHOLD,
+    record_unpaid_debt, settle_student_debts, get_open_debt_maps, get_overdue_debtors_summary,
 )
 from .audit import log_activity
 from .forms import (
@@ -828,6 +830,15 @@ def dashboard_view(request):
             'canteen_credit_days': canteen_credit_days,
         })
 
+    # Attach open multi-day debt totals & overdue flags in 1 bulk query
+    if student_items:
+        debt_maps = get_open_debt_maps(student_ids=[item['student'].id for item in student_items])
+        for item in student_items:
+            sid = item['student'].id
+            item['open_debt_total'] = debt_maps['total_by_student'].get(sid, Decimal('0.00'))
+            item['open_debt_days'] = debt_maps['days_by_student'].get(sid, 0)
+            item['is_overdue_debt'] = sid in debt_maps['overdue_student_ids']
+
     # Available classes & buses for filter dropdowns (scoped for classroom / bus teachers)
     if is_bus_teacher_scoped:
         buses = user_profile.get_assigned_buses_list()
@@ -1293,6 +1304,10 @@ def collect_both_fees_api(request):
         except Exception:
             pass
 
+    has_custom_bus = custom_bus_amount is not None and str(custom_bus_amount).strip() != ''
+    has_custom_canteen = custom_canteen_amount is not None and str(custom_canteen_amount).strip() != ''
+    is_explicit_topup = is_adv or has_custom_bus or has_custom_canteen
+
     with transaction.atomic():
         # 1. Bus payment
         bus_created = False
@@ -1303,14 +1318,15 @@ def collect_both_fees_api(request):
                 existing_bus = FeePayment.objects.filter(
                     student=student, fee_type='BUS', payment_date=target_date
                 ).first()
-                if not existing_bus and not student.is_bus_paid_for_date(target_date):
+                already_bus_covered = bool(existing_bus or student.is_bus_paid_for_date(target_date))
+                if is_adv or has_custom_bus or not already_bus_covered:
                     bus_days = days
                     bus_is_adv = is_adv
-                    if custom_bus_amount is not None and str(custom_bus_amount).strip() != '':
+                    if has_custom_bus:
                         bus_amount = Decimal(str(custom_bus_amount))
-                        if assigned_bus.fee > Decimal('0.00') and bus_amount > assigned_bus.fee:
+                        if already_bus_covered or (assigned_bus.fee > Decimal('0.00') and bus_amount > assigned_bus.fee):
                             bus_is_adv = True
-                            bus_days = int(bus_amount // assigned_bus.fee)
+                            bus_days = max(1, int(bus_amount // assigned_bus.fee)) if assigned_bus.fee > Decimal('0.00') else 1
                             bus_note = f"Fee Teacher multi-pay collection: {currency}{bus_amount:.2f} (~{bus_days} days credit)"
                         else:
                             bus_is_adv = False
@@ -1356,14 +1372,15 @@ def collect_both_fees_api(request):
             existing_canteen = FeePayment.objects.filter(
                 student=student, fee_type='CANTEEN', payment_date=target_date
             ).first()
-            if not existing_canteen and not student.is_canteen_paid_for_date(target_date):
+            already_can_covered = bool(existing_canteen or student.is_canteen_paid_for_date(target_date))
+            if is_adv or has_custom_canteen or not already_can_covered:
                 can_days = days
                 can_is_adv = is_adv
-                if custom_canteen_amount is not None and str(custom_canteen_amount).strip() != '':
+                if has_custom_canteen:
                     canteen_amount = Decimal(str(custom_canteen_amount))
-                    if daily_canteen > Decimal('0.00') and canteen_amount > daily_canteen:
+                    if already_can_covered or (daily_canteen > Decimal('0.00') and canteen_amount > daily_canteen):
                         can_is_adv = True
-                        can_days = int(canteen_amount // daily_canteen)
+                        can_days = max(1, int(canteen_amount // daily_canteen)) if daily_canteen > Decimal('0.00') else 1
                         canteen_note = f"Fee Teacher multi-pay lunch collection: {currency}{canteen_amount:.2f} (~{can_days} days credit)"
                     else:
                         can_is_adv = False
@@ -1399,6 +1416,12 @@ def collect_both_fees_api(request):
                     canteen_created = True
                     messages_list.append(f"Lunch fee {currency}{canteen_amount:.2f}")
 
+    if is_explicit_topup and not created_payments:
+        return JsonResponse({
+            'success': False,
+            'error': 'No payment was recorded. Check that the amount is greater than 0 and the student is enrolled in the selected service.'
+        }, status=400)
+
     for p in created_payments:
         log_activity(
             action='PAYMENT_RECORDED',
@@ -1431,6 +1454,124 @@ def collect_both_fees_api(request):
         'canteen_amount': float(canteen_amount) if canteen_created else 0.0,
         'total_amount': float(total_amount),
         'message': msg
+    })
+
+
+@payment_recording_required
+@require_POST
+def mark_unpaid_api(request):
+    """
+    AJAX endpoint allowing teachers (or finance staff) to mark a student unpaid for a specific date.
+    Persists a DebtRecord (Bus and/or Canteen) so multi-day arrears accumulate on the Debtors List.
+    Supports marking guest riders on a different bus (upgrading/charging that bus's fee).
+    """
+    try:
+        data = json.loads(request.body) if request.body else request.POST
+    except Exception:
+        data = request.POST
+
+    student_id = data.get('student_id')
+    if not student_id:
+        return JsonResponse({'success': False, 'error': 'Missing student_id.'}, status=400)
+
+    student = get_object_or_404(Student.objects.select_related('bus', 'school_class'), id=student_id, is_active=True)
+    fee_type = str(data.get('fee_type', 'BUS')).upper()
+    if fee_type not in ('BUS', 'CANTEEN', 'BOTH'):
+        return JsonResponse({'success': False, 'error': 'Invalid fee_type.'}, status=400)
+
+    date_str = data.get('date') or ''
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            target_date = timezone.localdate()
+    else:
+        target_date = timezone.localdate()
+
+    bus_id = data.get('bus_id')
+    bus_obj = None
+    is_temp_bus = False
+    if bus_id:
+        bus_obj = get_object_or_404(Bus, id=bus_id)
+        if not student.bus_id or student.bus_id != bus_obj.id:
+            is_temp_bus = True
+    else:
+        bus_obj = student.bus
+
+    # If teacher has assigned buses and student has no bus (or teacher explicitly marks on their bus)
+    user_profile = getattr(request.user, 'profile', None)
+    if user_profile and user_profile.role == UserProfile.ROLE_TEACHER and not user_profile.is_school_admin:
+        assigned_bus_ids = user_profile.get_assigned_bus_ids()
+        if not bus_id and assigned_bus_ids and student.bus_id not in assigned_bus_ids:
+            # Default to teacher's primary assigned bus if marking a guest rider
+            bus_obj = Bus.objects.filter(id=assigned_bus_ids[0]).first()
+            is_temp_bus = True
+
+    notes = str(data.get('notes', '')).strip()
+    currency = get_active_currency_symbol()
+
+    fee_types_to_mark = ['BUS', 'CANTEEN'] if fee_type == 'BOTH' else [fee_type]
+    recorded_items = []
+    errors = []
+
+    for ft in fee_types_to_mark:
+        try:
+            debt, outcome, delta = record_unpaid_debt(
+                student=student,
+                target_date=target_date,
+                fee_type=ft,
+                recorded_by=request.user,
+                bus=bus_obj if ft == 'BUS' else None,
+                is_temporary_bus=is_temp_bus if ft == 'BUS' else False,
+                notes=notes,
+            )
+            if outcome in ('CREATED', 'UPGRADED'):
+                recorded_items.append((debt, outcome, delta))
+                log_activity(
+                    action='DEBT_RECORDED',
+                    target_model='DebtRecord',
+                    target_id=str(debt.id),
+                    target_repr=f"{student.full_name} ({student.student_class})",
+                    description=(
+                        f"{'Upgraded' if outcome == 'UPGRADED' else 'Recorded'} unpaid {debt.get_fee_type_display()} "
+                        f"for {student.full_name} ({student.student_class}) on {target_date}: "
+                        f"{currency}{debt.amount_owed:.2f}."
+                    ),
+                    changes={
+                        'date': str(target_date),
+                        'fee_type': ft,
+                        'amount_owed': str(debt.amount_owed),
+                        'outcome': outcome,
+                        'delta': str(delta),
+                        'bus': bus_obj.name if (ft == 'BUS' and bus_obj) else None,
+                    },
+                    actor=request.user,
+                )
+        except ValueError as ve:
+            errors.append(str(ve))
+
+    if not recorded_items and errors:
+        return JsonResponse({'success': False, 'error': ' '.join(errors)}, status=400)
+
+    debt_maps = get_open_debt_maps(student_ids=[student.id])
+    total_debt = debt_maps['total_by_student'].get(student.id, Decimal('0.00'))
+    unpaid_days = debt_maps['days_by_student'].get(student.id, 0)
+    is_overdue = student.id in debt_maps['overdue_student_ids']
+
+    if recorded_items:
+        summary_parts = [f"{d.get_fee_type_display()} ({currency}{d.amount_owed:.2f})" for d, _, _ in recorded_items]
+        msg = f"Marked unpaid for {student.full_name} on {target_date}: {', '.join(summary_parts)}. Total debt: {currency}{total_debt:.2f}"
+    else:
+        msg = f"{student.full_name} is already marked unpaid for {target_date}. Total debt: {currency}{total_debt:.2f}"
+
+    return JsonResponse({
+        'success': True,
+        'student_id': student.id,
+        'student_name': student.full_name,
+        'total_debt': float(total_debt),
+        'unpaid_days': unpaid_days,
+        'is_overdue': is_overdue,
+        'message': msg,
     })
 
 
@@ -3492,6 +3633,10 @@ def payment_create_view(request):
                     wallet_note = f" ({currency}{wallet_topup_total:.2f} added to Bulk Wallet)"
 
             messages.success(request, f"✓ Payment of {currency}{total_amount:.2f}{breakdown}{adv_note} for {student.full_name} recorded!{wallet_note} Receipt: {receipt_number}")
+            if payment_date > timezone.localdate():
+                messages.warning(request, f"Note: This payment is future-dated ({payment_date}). Its advance credit will appear on daily rosters starting on {payment_date}.")
+            if canteen_amount > Decimal('0.00') and not student.canteen_enrolled:
+                messages.warning(request, f"Note: {student.full_name} is not marked as enrolled in Canteen, so canteen credit will stay hidden on daily rosters until Canteen is enabled on their profile.")
             if 'save_and_add' in request.POST:
                 params = ['focus_search=1']
                 if selected_bus_obj:
@@ -3987,9 +4132,137 @@ def export_attendance_csv(request):
 
 
 @finance_required
+def debtors_list_view(request):
+    """
+    Centralized Debtors Ledger for Bursar & Admin.
+    Displays all students with >= 1 open DebtRecord (from Day 1), filtered by class, bus,
+    search query, or overdue status (> 3 unpaid days).
+    """
+    class_filter = request.GET.get('class', '').strip()
+    bus_filter = request.GET.get('bus', '').strip()
+    overdue_only = request.GET.get('overdue', '').strip() in ('1', 'true', 'yes')
+    search_q = request.GET.get('q', '').strip().lower()
+
+    debt_maps = get_open_debt_maps(student_class=class_filter or None)
+    records_by_student = debt_maps['records_by_student']
+    total_by_student = debt_maps['total_by_student']
+    days_by_student = debt_maps['days_by_student']
+    overdue_ids = debt_maps['overdue_student_ids']
+
+    debtors = []
+    for sid, items in records_by_student.items():
+        student = items[0].student
+        if search_q and search_q not in student.full_name.lower() and search_q not in items[0].student_class.lower():
+            continue
+        if bus_filter:
+            try:
+                bus_id_int = int(bus_filter)
+                has_bus = (student.bus_id == bus_id_int) or any(r.bus_id == bus_id_int for r in items)
+                if not has_bus:
+                    continue
+            except ValueError:
+                pass
+        is_overdue = sid in overdue_ids
+        if overdue_only and not is_overdue:
+            continue
+
+        debtors.append({
+            'student': student,
+            'student_class': items[0].student_class or student.student_class,
+            'assigned_bus': student.bus,
+            'items': items,
+            'total_owed': total_by_student[sid],
+            'unpaid_days': days_by_student[sid],
+            'is_overdue': is_overdue,
+        })
+
+    # Sort: Overdue (>3 days) first, then highest amount owed, then class & name
+    debtors.sort(key=lambda d: (not d['is_overdue'], -d['total_owed'], d['student_class'], d['student'].full_name))
+
+    total_debt_amount = sum((d['total_owed'] for d in debtors), Decimal('0.00'))
+    overdue_debtors = [d for d in debtors if d['is_overdue']]
+    overdue_amount = sum((d['total_owed'] for d in overdue_debtors), Decimal('0.00'))
+
+    # Class dropdown options (from SchoolClass + active DebtRecords)
+    school_classes = list(SchoolClass.objects.filter(is_active=True).order_by('name').values_list('name', flat=True))
+    debt_classes = list(
+        DebtRecord.objects.filter(status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL])
+        .values_list('student_class', flat=True)
+        .distinct()
+    )
+    all_classes = sorted({c for c in (school_classes + debt_classes) if c})
+
+    context = {
+        'debtors': debtors,
+        'total_debtors': len(debtors),
+        'total_debt_amount': total_debt_amount,
+        'overdue_count': len(overdue_debtors),
+        'overdue_amount': overdue_amount,
+        'overdue_threshold': OVERDUE_DEBT_DAYS_THRESHOLD,
+        'all_classes': all_classes,
+        'buses': Bus.objects.all().order_by('name'),
+        'class_filter': class_filter,
+        'bus_filter': bus_filter,
+        'overdue_only': overdue_only,
+        'search_q': request.GET.get('q', '').strip(),
+        'currency': get_active_currency_symbol(),
+        'payment_methods': FeePayment.PAYMENT_METHODS,
+    }
+    return render(request, 'attendance/debtors_list.html', context)
+
+
+@finance_required
+@require_POST
+def clear_student_debt_view(request, student_id):
+    """
+    Clear full or partial accumulated debt for a student (FIFO across oldest dates).
+    Records FeePayment(s) for today's Bursar/Admin cash drawer and generates a receipt.
+    """
+    student = get_object_or_404(Student.objects.select_related('bus', 'school_class'), id=student_id)
+    raw_amount = request.POST.get('amount', '').strip()
+    payment_method = request.POST.get('payment_method', 'CASH')
+    notes = request.POST.get('notes', '').strip()
+    receipt_number = request.POST.get('receipt_number', '').strip()
+    class_filter = request.POST.get('class_filter', '').strip()
+
+    try:
+        amount = Decimal(raw_amount)
+    except Exception:
+        messages.error(request, "Please enter a valid payment amount.")
+        return redirect('debtors_list')
+
+    try:
+        created_payments, remaining = settle_student_debts(
+            student=student,
+            total_amount=amount,
+            actor=request.user,
+            payment_method=payment_method,
+            notes=notes,
+            receipt_number=receipt_number,
+        )
+        currency = get_active_currency_symbol()
+        if remaining <= Decimal('0.00'):
+            msg = f"✓ Cleared full debt ({currency}{amount:.2f}) for {student.full_name}."
+        else:
+            msg = f"✓ Recorded partial debt payment ({currency}{amount:.2f}) for {student.full_name}. Remaining debt: {currency}{remaining:.2f}."
+        if created_payments:
+            receipt_url = reverse('payment_receipt', kwargs={'pk': created_payments[0].id})
+            msg += f' <a href="{receipt_url}" style="text-decoration:underline;font-weight:600;">View Receipt</a>'
+        messages.success(request, msg)
+    except ValueError as ve:
+        messages.error(request, str(ve))
+
+    redirect_url = reverse('debtors_list')
+    if class_filter:
+        redirect_url += f"?class={class_filter}"
+    return redirect(redirect_url)
+
+
+@finance_required
 def export_debtors_csv(request):
-    """Export list of students with outstanding daily bus or canteen fees to CSV."""
+    """Export list of students with accumulated DebtRecords or outstanding daily fees to CSV."""
     date_str = request.GET.get('date')
+    class_filter = request.GET.get('class', '').strip()
     if date_str:
         try:
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -4002,7 +4275,11 @@ def export_debtors_csv(request):
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="daily_debtors_{target_date}.csv"'
     writer = csv.writer(response)
-    writer.writerow(['Student Name', 'Class', 'Bus Route', 'Bus Fee Required', 'Bus Fee Status', 'Bus Balance', 'Canteen Fee Required', 'Canteen Status', 'Canteen Balance', 'Total Owed Today', 'Date'])
+    writer.writerow([
+        'Student Name', 'Class', 'Bus Route', 'Bus Fee Required', 'Bus Fee Status',
+        'Bus Balance', 'Canteen Fee Required', 'Canteen Status', 'Canteen Balance',
+        'Total Owed Today', 'Accumulated Debt (All Days)', 'Unpaid Days Count', 'Date'
+    ])
 
     today_bus_payments = dict(
         FeePayment.objects.filter(fee_type='BUS', payment_date=target_date)
@@ -4017,9 +4294,12 @@ def export_debtors_csv(request):
         .values_list('student_id', 'total')
     )
     credit_ledger = _get_credit_ledger_maps(target_date)
+    debt_maps = get_open_debt_maps(student_class=class_filter or None)
 
     default_canteen_fee = get_default_canteen_fee()
     students = Student.objects.filter(is_active=True).select_related('bus').order_by('student_class', 'first_name')
+    if class_filter:
+        students = students.filter(student_class=class_filter)
     currency = get_active_currency_symbol()
 
     for s in students:
@@ -4052,8 +4332,10 @@ def export_debtors_csv(request):
             is_can_paid = True
 
         total_owed = bus_bal + can_bal
+        accumulated_debt = debt_maps['total_by_student'].get(s.id, Decimal('0.00'))
+        unpaid_days_cnt = debt_maps['days_by_student'].get(s.id, 0)
 
-        if total_owed > Decimal('0.00'):
+        if total_owed > Decimal('0.00') or accumulated_debt > Decimal('0.00'):
             bus_name = s.bus.name if s.bus else 'Walker / No Bus'
             bus_status = 'No Bus' if not s.bus else ('Paid' if is_bus_paid else f'Owes {currency}{bus_bal:.2f}')
             can_status = 'Opted Out' if not s.canteen_enrolled else ('Paid' if is_can_paid else f'Owes {currency}{can_bal:.2f}')
@@ -4068,6 +4350,8 @@ def export_debtors_csv(request):
                 can_status,
                 f"{currency}{can_bal:.2f}",
                 f"{currency}{total_owed:.2f}",
+                f"{currency}{accumulated_debt:.2f}",
+                unpaid_days_cnt,
                 str(target_date)
             ])
 

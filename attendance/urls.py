@@ -16,6 +16,7 @@ urlpatterns = [
     path('api/payment/collect-both/', views.collect_both_fees_api, name='api_collect_both_fees'),
     path('api/wallet/settle-and-clockin/', views.wallet_settle_and_clockin_api, name='api_wallet_settle_and_clockin'),
     path('api/student/<int:student_id>/payment-details/', views.student_payment_details_api, name='api_student_payment_details'),
+    path('api/debt/mark-unpaid/', views.mark_unpaid_api, name='api_mark_unpaid'),
 
     # Bus Management
     path('buses/', views.bus_list_view, name='bus_list'),
@@ -53,6 +54,8 @@ urlpatterns = [
     path('api/payments/audit-summary/', views.payment_audit_summary_api, name='api_payment_audit_summary'),
 
     # Reports & Reconciliation & CSV Exports
+    path('debtors/', views.debtors_list_view, name='debtors_list'),
+    path('debtors/<int:student_id>/clear/', views.clear_student_debt_view, name='clear_student_debt'),
     path('reports/', views.reports_view, name='reports'),
     path('reports/export/attendance/', views.export_attendance_csv, name='export_attendance_csv'),
     path('reports/export/debtors/', views.export_debtors_csv, name='export_debtors_csv'),

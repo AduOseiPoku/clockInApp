@@ -1,6 +1,7 @@
 import io
 import json
 import datetime
+from datetime import timedelta
 from decimal import Decimal
 from django.test import TestCase, Client
 from django.urls import reverse
@@ -8,7 +9,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from .models import (
     Bus, Student, FeePayment, ClockInRecord, CreditTransaction, UserProfile, NotificationLog, SchoolClass, TeacherRemittance,
-    SchoolSetting, get_term_date_range, calculate_school_weekdays, get_current_term_metrics, AuditLog
+    SchoolSetting, get_term_date_range, calculate_school_weekdays, get_current_term_metrics, AuditLog, DebtRecord
 )
 from .forms import StudentForm, TeacherCreationForm, TeacherUpdateForm
 from .views import get_collectors_financial_summary
@@ -4079,4 +4080,284 @@ class MultipayReconciliationAndTallyTests(TestCase):
 
         self.student.refresh_from_db()
         self.assertEqual(self.student.bus_credit_wallet, Decimal('0.00'))
+
+    def test_collect_both_fees_allows_advance_topup_when_already_paid_today(self):
+        """Explicit multipay (custom amount or days > 1) must still save when today is already covered."""
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+
+        # 1. Pay 1 day via 1-tap first (today is now settled directly)
+        res1 = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({'student_id': self.student.id, 'fee_type': 'BUS', 'date': str(today)}),
+            content_type='application/json',
+        )
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res1.json()['bus_amount'], 10.0)
+
+        # 2. Now parent adds GH₵30 advance via Multi-Pay modal on the same day
+        res2 = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'amount': '30.00',
+                'date': str(today),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.json()
+        self.assertTrue(data2['success'])
+        self.assertTrue(data2['bus_collected'])
+        self.assertEqual(data2['bus_amount'], 30.0)
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('30.00'))
+        self.assertEqual(self.student.get_bus_credit_days(today), 3)
+
+        # 3. Explicit top-up that cannot record anything (e.g. non-enrolled canteen) must return 400
+        self.student.canteen_enrolled = False
+        self.student.save(update_fields=['canteen_enrolled'])
+        res3 = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'CANTEEN',
+                'days': 5,
+                'date': str(today),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res3.status_code, 400)
+        self.assertFalse(res3.json()['success'])
+
+    def test_temporary_bus_advance_payment_credits_excess_to_wallet(self):
+        """A multi-day advance recorded on a temporary/guest bus still credits the excess to bus_credit_wallet."""
+        other_bus = Bus.objects.create(name='Route Beta', fee=Decimal('10.00'), is_active=True)
+        today = timezone.localdate()
+
+        FeePayment.objects.create(
+            student=self.student,
+            bus=other_bus,
+            is_temporary_bus=True,
+            fee_type='BUS',
+            amount=Decimal('40.00'),
+            payment_date=today,
+            payment_method='CASH',
+            is_advance=True,
+            days_covered=4,
+            recorded_by=self.bus_teacher,
+        )
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('30.00'))
+        topup_tx = CreditTransaction.objects.filter(
+            student=self.student, fee_type='BUS', transaction_type=CreditTransaction.TYPE_TOP_UP
+        ).first()
+        self.assertIsNotNone(topup_tx)
+        self.assertEqual(topup_tx.amount, Decimal('30.00'))
+
+
+class DebtorsListAndArrearsTests(TestCase):
+    """Tests for persistent multi-day Debtors List, guest bus surcharge (+2), class filtering, overdue (>3d) alerts, and FIFO clearance."""
+
+    def setUp(self):
+        self.bus_8 = Bus.objects.create(name='East Legon Bus', fee=Decimal('8.00'), is_active=True)
+        self.bus_10 = Bus.objects.create(name='Airport Bus', fee=Decimal('10.00'), is_active=True)
+
+        self.class_1a = SchoolClass.objects.create(name='Class 1A', grade_level='Primary', is_active=True)
+        self.class_2b = SchoolClass.objects.create(name='Class 2B', grade_level='Primary', is_active=True)
+
+        SchoolSetting.set_setting('DEFAULT_CANTEEN_FEE', '7.00')
+
+        self.teacher = User.objects.create_user(username='bus_t', password='pw')
+        self.teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher.profile.can_collect_fees = True
+        self.teacher.profile.assigned_bus = self.bus_8
+        self.teacher.profile.save()
+
+        self.bursar = User.objects.create_user(username='bursar_u', password='pw')
+        self.bursar.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar.profile.save()
+
+        self.admin = User.objects.create_user(username='principal_u', password='pw', is_superuser=True, is_staff=True)
+
+        self.student_1a = Student.objects.create(
+            first_name='Ama',
+            last_name='Kofi',
+            student_class='Class 1A',
+            school_class=self.class_1a,
+            bus=self.bus_8,
+            canteen_enrolled=True,
+        )
+        self.student_2b = Student.objects.create(
+            first_name='Yaw',
+            last_name='Boateng',
+            student_class='Class 2B',
+            school_class=self.class_2b,
+            bus=self.bus_8,
+            canteen_enrolled=True,
+        )
+
+    def test_day_one_debt_appears_immediately_without_overdue_alert(self):
+        """A student appears on the Debtors List after missing even a single payment (Day 1)."""
+        today = timezone.localdate()
+        self.client.force_login(self.teacher)
+        res = self.client.post(
+            reverse('api_mark_unpaid'),
+            data=json.dumps({'student_id': self.student_1a.id, 'fee_type': 'BUS', 'date': str(today)}),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['total_debt'], 8.0)
+        self.assertEqual(res.json()['unpaid_days'], 1)
+        self.assertFalse(res.json()['is_overdue'])
+
+        self.client.force_login(self.bursar)
+        list_res = self.client.get(reverse('debtors_list'))
+        self.assertEqual(list_res.status_code, 200)
+        self.assertEqual(list_res.context['total_debtors'], 1)
+        self.assertEqual(list_res.context['overdue_count'], 0)
+        self.assertContains(list_res, 'Ama Kofi')
+
+    def test_three_days_accumulation_plus_guest_bus_upgrade_equals_47(self):
+        """
+        Mon, Tue, Wed unpaid (Lunch 7 + Bus 8 = 15/day -> 45.00),
+        plus taking a 10-cedi guest bus on one of those days adds +2.00 -> 47.00 total.
+        """
+        today = timezone.localdate()
+        mon = today - timedelta(days=3)
+        tue = today - timedelta(days=2)
+        wed = today - timedelta(days=1)
+
+        self.client.force_login(self.teacher)
+        for d in (mon, tue, wed):
+            res = self.client.post(
+                reverse('api_mark_unpaid'),
+                data=json.dumps({'student_id': self.student_1a.id, 'fee_type': 'BOTH', 'date': str(d)}),
+                content_type='application/json',
+            )
+            self.assertEqual(res.status_code, 200)
+
+        # Verify 45.00 after 3 days, and NOT yet overdue (3 days <= 3 threshold)
+        self.assertEqual(res.json()['total_debt'], 45.0)
+        self.assertEqual(res.json()['unpaid_days'], 3)
+        self.assertFalse(res.json()['is_overdue'])
+
+        # Student joins the 10-cedi guest bus on Wednesday and fails to pay -> +2.00 upgrade
+        res_guest = self.client.post(
+            reverse('api_mark_unpaid'),
+            data=json.dumps({
+                'student_id': self.student_1a.id,
+                'fee_type': 'BUS',
+                'bus_id': self.bus_10.id,
+                'date': str(wed),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_guest.status_code, 200)
+        self.assertEqual(res_guest.json()['total_debt'], 47.0)
+
+        # Bursar clears 20.00 partial payment -> 27.00 remaining, wallet untouched, FeePayment created today
+        self.client.force_login(self.bursar)
+        res_partial = self.client.post(
+            reverse('clear_student_debt', kwargs={'student_id': self.student_1a.id}),
+            data={'amount': '20.00', 'payment_method': 'CASH'},
+        )
+        self.assertEqual(res_partial.status_code, 302)
+        self.student_1a.refresh_from_db()
+        self.assertEqual(self.student_1a.bus_credit_wallet, Decimal('0.00'))
+        self.assertEqual(self.student_1a.canteen_credit_wallet, Decimal('0.00'))
+
+        list_res = self.client.get(reverse('debtors_list'))
+        self.assertEqual(list_res.context['total_debt_amount'], Decimal('27.00'))
+
+        # Bursar clears remaining 27.00 -> debtor cleared completely
+        res_full = self.client.post(
+            reverse('clear_student_debt', kwargs={'student_id': self.student_1a.id}),
+            data={'amount': '27.00', 'payment_method': 'CASH'},
+        )
+        self.assertEqual(res_full.status_code, 302)
+        list_after = self.client.get(reverse('debtors_list'))
+        self.assertEqual(list_after.context['total_debtors'], 0)
+
+        # Deleting one of the debt-clearing FeePayments rolls back the DebtRecord
+        last_payment = FeePayment.objects.filter(student=self.student_1a).order_by('-id').first()
+        deleted_amt = last_payment.amount
+        last_payment.delete()
+        list_rollback = self.client.get(reverse('debtors_list'))
+        self.assertEqual(list_rollback.context['total_debtors'], 1)
+        self.assertEqual(list_rollback.context['total_debt_amount'], deleted_amt)
+
+    def test_class_filter_and_overdue_alert_after_three_days(self):
+        """
+        Debtors List filters by DebtRecord.student_class, and >3 unpaid days (4+ days)
+        triggers the Admin/Bursar overdue alert + AuditLog entry.
+        """
+        today = timezone.localdate()
+        self.client.force_login(self.teacher)
+
+        # 4 unpaid days for student_1a (Class 1A) -> triggers overdue (>3 days)
+        for offset in range(1, 5):
+            d = today - timedelta(days=offset)
+            self.client.post(
+                reverse('api_mark_unpaid'),
+                data=json.dumps({'student_id': self.student_1a.id, 'fee_type': 'BUS', 'date': str(d)}),
+                content_type='application/json',
+            )
+
+        # 2 unpaid days for student_2b (Class 2B) -> NOT overdue
+        for offset in range(1, 3):
+            d = today - timedelta(days=offset)
+            self.client.post(
+                reverse('api_mark_unpaid'),
+                data=json.dumps({'student_id': self.student_2b.id, 'fee_type': 'BUS', 'date': str(d)}),
+                content_type='application/json',
+            )
+
+        self.assertTrue(
+            AuditLog.objects.filter(action='OVERDUE_DEBT_ALERT', target_id=str(self.student_1a.id)).exists()
+        )
+
+        # Verify Class 1A filter & overdue alert on Admin/Bursar view
+        self.client.force_login(self.admin)
+        res_1a = self.client.get(reverse('debtors_list') + '?class=Class+1A')
+        self.assertEqual(res_1a.status_code, 200)
+        self.assertEqual(res_1a.context['total_debtors'], 1)
+        self.assertEqual(res_1a.context['overdue_count'], 1)
+        self.assertContains(res_1a, 'Ama Kofi')
+        self.assertNotContains(res_1a, 'Yaw Boateng')
+
+        # Global alert banner visible on dashboard for Admin/Bursar
+        dash_res = self.client.get(reverse('dashboard'))
+        self.assertContains(dash_res, 'Overdue Debt Alert')
+
+    def test_same_day_quick_payment_automatically_clears_todays_debt(self):
+        """If marked unpaid today and then paid today via quick_payment_api, today's DebtRecord is cleared."""
+        today = timezone.localdate()
+        self.client.force_login(self.teacher)
+        self.client.post(
+            reverse('api_mark_unpaid'),
+            data=json.dumps({'student_id': self.student_1a.id, 'fee_type': 'BUS', 'date': str(today)}),
+            content_type='application/json',
+        )
+        self.assertEqual(DebtRecord.objects.filter(student=self.student_1a, status=DebtRecord.STATUS_UNPAID).count(), 1)
+
+        res_pay = self.client.post(
+            reverse('api_quick_payment'),
+            data=json.dumps({
+                'student_id': self.student_1a.id,
+                'fee_type': 'BUS',
+                'amount': '8.00',
+                'payment_date': str(today),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_pay.status_code, 200)
+        debt = DebtRecord.objects.get(student=self.student_1a, date=today, fee_type='BUS')
+        self.assertEqual(debt.status, DebtRecord.STATUS_PAID)
+        self.assertEqual(debt.remaining_amount, Decimal('0.00'))
+
+
 

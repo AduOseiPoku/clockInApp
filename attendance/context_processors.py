@@ -1,12 +1,13 @@
 from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
-from .models import SchoolSetting, get_default_canteen_fee
+from .models import SchoolSetting, get_default_canteen_fee, get_overdue_debtors_summary, OVERDUE_DEBT_DAYS_THRESHOLD
+
 
 def school_settings(request):
     """
-    Context processor to inject dynamic school settings and today's date into all templates.
-    Batch fetches all settings from cache to avoid multiple sequential database queries per request.
+    Context processor to inject dynamic school settings, today's date,
+    and overdue debtor alert summary (for Admin/Bursar) into all templates.
     """
     all_settings = SchoolSetting.get_all_settings_dict()
     school_name = all_settings.get('SCHOOL_NAME') or getattr(settings, 'SCHOOL_NAME', 'Geosaka Model School')
@@ -21,6 +22,21 @@ def school_settings(request):
     except Exception:
         default_canteen = get_default_canteen_fee()
 
+    overdue_summary = {
+        'total_debtors_count': 0,
+        'total_debt_amount': Decimal('0.00'),
+        'overdue_debtors_count': 0,
+        'overdue_debt_amount': Decimal('0.00'),
+    }
+    user = getattr(request, 'user', None)
+    if user and user.is_authenticated:
+        profile = getattr(user, 'profile', None)
+        if user.is_superuser or (profile and profile.can_view_revenue):
+            try:
+                overdue_summary = get_overdue_debtors_summary()
+            except Exception:
+                pass
+
     return {
         'SCHOOL_NAME': school_name,
         'CURRENCY_SYMBOL': currency_symbol,
@@ -29,4 +45,6 @@ def school_settings(request):
         'TERM_START_DATE': term_start,
         'TERM_END_DATE': term_end,
         'TODAY': timezone.localdate(),
+        'OVERDUE_DEBT_DAYS_THRESHOLD': OVERDUE_DEBT_DAYS_THRESHOLD,
+        'DEBT_ALERT_SUMMARY': overdue_summary,
     }

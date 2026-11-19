@@ -812,6 +812,29 @@ def apply_payment_to_wallet(payment):
         student = Student.objects.select_for_update().get(pk=payment.student_id)
         if payment.fee_type == 'BUS':
             if payment.is_temporary_bus:
+                # 1-day guest rides should not auto-deduct from regular wallet,
+                # but any multi-day excess above the guest fare must still credit the wallet.
+                guest_fee = (payment.bus.fee if payment.bus_id else student.bus_fee_required) or Decimal('0.00')
+                guest_fee = max(Decimal('0.00'), guest_fee)
+                if payment.amount > guest_fee:
+                    excess = payment.amount - guest_fee
+                    current_wallet = max(Decimal('0.00'), student.bus_credit_wallet or Decimal('0.00'))
+                    new_wallet = current_wallet + excess
+                    student.bus_credit_wallet = new_wallet
+                    student.save(update_fields=['bus_credit_wallet'])
+                    if getattr(payment, 'student', None) is not None and payment.student_id == student.id:
+                        payment.student.bus_credit_wallet = new_wallet
+                    CreditTransaction.objects.create(
+                        student=student,
+                        fee_type='BUS',
+                        transaction_type=CreditTransaction.TYPE_TOP_UP,
+                        amount=excess,
+                        balance_after=new_wallet,
+                        date=payment.payment_date,
+                        payment=payment,
+                        recorded_by=payment.recorded_by,
+                        notes=f"Guest bus advance credit from payment {payment.receipt_number or payment.id}",
+                    )
                 return
             daily_fee = student.bus_fee_required
             if daily_fee <= Decimal('0.00') and payment.bus_id:
@@ -896,6 +919,464 @@ def reverse_payment_wallet_effects(payment):
             setattr(student, wallet_field, new_wallet)
             student.save(update_fields=[wallet_field])
         CreditTransaction.objects.filter(payment=payment).delete()
+
+
+OVERDUE_DEBT_DAYS_THRESHOLD = 3
+
+
+class DebtRecord(models.Model):
+    """
+    Persistent unpaid daily fee obligation recorded when a student misses a payment.
+    Tracks exact date, fee type, bus route snapshot, and student class for filtering.
+    Supports partial settlements and same-day guest bus fee upgrades.
+    """
+    STATUS_UNPAID = 'UNPAID'
+    STATUS_PARTIAL = 'PARTIAL'
+    STATUS_PAID = 'PAID'
+    STATUS_WAIVED = 'WAIVED'
+
+    STATUS_CHOICES = [
+        (STATUS_UNPAID, 'Unpaid'),
+        (STATUS_PARTIAL, 'Partially Paid'),
+        (STATUS_PAID, 'Paid / Cleared'),
+        (STATUS_WAIVED, 'Waived'),
+    ]
+
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='debt_records')
+    student_class = models.CharField(max_length=50, db_index=True, help_text="Student's class at the time debt was recorded")
+    school_class = models.ForeignKey(SchoolClass, on_delete=models.SET_NULL, null=True, blank=True, related_name='debt_records')
+    date = models.DateField(default=timezone.localdate, db_index=True)
+    fee_type = models.CharField(max_length=20, choices=FeePayment.FEE_TYPES, db_index=True)
+    bus = models.ForeignKey(Bus, on_delete=models.SET_NULL, null=True, blank=True, related_name='debt_records')
+    is_temporary_bus = models.BooleanField(default=False, help_text="True if unpaid ride was on a non-assigned/guest bus")
+    amount_owed = models.DecimalField(max_digits=10, decimal_places=2)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_UNPAID, db_index=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recorded_debts'
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Debt Record'
+        verbose_name_plural = 'Debt Records'
+        unique_together = ('student', 'date', 'fee_type')
+        ordering = ['date', 'created_at']
+        indexes = [
+            models.Index(fields=['status', 'student_class'], name='debt_status_class_idx'),
+            models.Index(fields=['student', 'status'], name='debt_student_status_idx'),
+            models.Index(fields=['date', 'status'], name='debt_date_status_idx'),
+        ]
+
+    @property
+    def remaining_amount(self):
+        return max(Decimal('0.00'), (self.amount_owed or Decimal('0.00')) - (self.amount_paid or Decimal('0.00')))
+
+    def sync_status(self):
+        if self.status == self.STATUS_WAIVED:
+            return
+        if self.amount_paid >= self.amount_owed:
+            self.status = self.STATUS_PAID
+        elif self.amount_paid > Decimal('0.00'):
+            self.status = self.STATUS_PARTIAL
+        else:
+            self.status = self.STATUS_UNPAID
+
+    def save(self, *args, **kwargs):
+        if self.student_id:
+            if not self.student_class:
+                self.student_class = self.student.student_class
+            if not self.school_class_id and self.student.school_class_id:
+                self.school_class_id = self.student.school_class_id
+        self.sync_status()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.student.full_name} ({self.student_class}) - {self.get_fee_type_display()} {self.date}: {self.remaining_amount:.2f}"
+
+
+class DebtPaymentAllocation(models.Model):
+    """
+    Links a FeePayment to the specific DebtRecord(s) it settled (in full or partially).
+    Enables exact rollback if a FeePayment is deleted.
+    """
+    payment = models.ForeignKey(FeePayment, on_delete=models.CASCADE, related_name='debt_allocations')
+    debt_record = models.ForeignKey(DebtRecord, on_delete=models.CASCADE, related_name='allocations')
+    amount_applied = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Debt Payment Allocation'
+        verbose_name_plural = 'Debt Payment Allocations'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Payment #{self.payment_id} -> Debt #{self.debt_record_id} ({self.amount_applied:.2f})"
+
+
+def _is_fee_already_paid_on_date(student, target_date, fee_type):
+    """Check if a student has already settled a specific fee_type for target_date."""
+    if fee_type == 'BUS':
+        required = student.bus_fee_required
+    else:
+        required = student.canteen_fee_required
+
+    direct_paid = (
+        FeePayment.objects.filter(
+            student=student,
+            fee_type=fee_type,
+            payment_date=target_date,
+        )
+        .exclude(debt_allocations__isnull=False)
+        .aggregate(total=Sum('amount'))['total']
+        or Decimal('0.00')
+    )
+    wallet_deducted = (
+        CreditTransaction.objects.filter(
+            student=student,
+            fee_type=fee_type,
+            transaction_type=CreditTransaction.TYPE_DEDUCTION,
+            date=target_date,
+        ).aggregate(total=Sum('amount'))['total']
+        or Decimal('0.00')
+    )
+    settled = direct_paid + wallet_deducted
+    if required > Decimal('0.00') and settled >= required:
+        return True
+    return False
+
+
+def record_unpaid_debt(student, target_date, fee_type, recorded_by=None, bus=None, is_temporary_bus=False, notes=''):
+    """
+    Record or upgrade an unpaid daily debt for a student.
+    - Blocks recording if the fee is already paid on target_date.
+    - If a same-day BUS debt already exists on a cheaper bus and the student rode a more
+      expensive guest bus, upgrades amount_owed to the higher bus fee (+difference).
+    Returns (debt_record, outcome, delta_amount) where outcome is 'CREATED', 'UPGRADED', or 'EXISTS'.
+    """
+    from .audit import log_activity
+
+    if fee_type not in ('BUS', 'CANTEEN'):
+        raise ValueError("Invalid fee type. Must be BUS or CANTEEN.")
+
+    if _is_fee_already_paid_on_date(student, target_date, fee_type):
+        raise ValueError(f"{student.full_name} has already paid {fee_type.lower()} fee for {target_date}.")
+
+    if fee_type == 'BUS':
+        effective_bus = bus or student.bus
+        if not effective_bus:
+            raise ValueError(f"{student.full_name} is not assigned to a bus and no guest bus was selected.")
+        fee_amount = effective_bus.fee or Decimal('0.00')
+        is_temp = bool(is_temporary_bus or (student.bus_id and effective_bus.id != student.bus_id) or not student.bus_id)
+    else:
+        if not student.canteen_enrolled:
+            raise ValueError(f"{student.full_name} is not enrolled in the school canteen.")
+        effective_bus = None
+        fee_amount = student.canteen_fee_required or Decimal('0.00')
+        is_temp = False
+
+    if fee_amount <= Decimal('0.00'):
+        raise ValueError("Required fee amount must be greater than zero.")
+
+    with transaction.atomic():
+        existing = DebtRecord.objects.select_for_update().filter(
+            student=student,
+            date=target_date,
+            fee_type=fee_type,
+        ).first()
+
+        if existing:
+            if existing.status == DebtRecord.STATUS_PAID:
+                raise ValueError(f"{fee_type.title()} debt for {target_date} has already been settled.")
+            if fee_type == 'BUS' and fee_amount > existing.amount_owed:
+                diff = fee_amount - existing.amount_owed
+                old_bus_name = existing.bus.name if existing.bus else 'Assigned Bus'
+                existing.amount_owed = fee_amount
+                existing.bus = effective_bus
+                existing.is_temporary_bus = is_temp
+                upgrade_note = f"Upgraded from {old_bus_name} to {effective_bus.name} (+{diff:.2f})."
+                existing.notes = f"{existing.notes} | {upgrade_note}".strip(' |')
+                if notes:
+                    existing.notes = f"{existing.notes} | {notes}".strip(' |')
+                existing.save()
+                debt = existing
+                outcome = 'UPGRADED'
+                delta = diff
+            else:
+                return existing, 'EXISTS', Decimal('0.00')
+        else:
+            debt = DebtRecord.objects.create(
+                student=student,
+                student_class=student.student_class,
+                school_class=student.school_class,
+                date=target_date,
+                fee_type=fee_type,
+                bus=effective_bus,
+                is_temporary_bus=is_temp,
+                amount_owed=fee_amount,
+                recorded_by=recorded_by,
+                notes=notes,
+            )
+            outcome = 'CREATED'
+            delta = fee_amount
+
+        open_days = (
+            DebtRecord.objects.filter(
+                student=student,
+                status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
+            )
+            .values('date')
+            .distinct()
+            .count()
+        )
+        if open_days > OVERDUE_DEBT_DAYS_THRESHOLD:
+            today = timezone.localdate()
+            already_alerted = AuditLog.objects.filter(
+                action='OVERDUE_DEBT_ALERT',
+                target_model='Student',
+                target_id=str(student.id),
+                timestamp__date=today,
+            ).exists()
+            if not already_alerted:
+                log_activity(
+                    action='OVERDUE_DEBT_ALERT',
+                    target_model='Student',
+                    target_id=str(student.id),
+                    target_repr=student.full_name,
+                    description=(
+                        f"OVERDUE DEBT ALERT: {student.full_name} ({student.student_class}) "
+                        f"now has {open_days} unpaid days (exceeding {OVERDUE_DEBT_DAYS_THRESHOLD}-day limit)."
+                    ),
+                    changes={'unpaid_days': open_days, 'student_class': student.student_class},
+                    actor=recorded_by,
+                )
+
+    return debt, outcome, delta
+
+
+def reconcile_same_day_debt_on_payment(payment):
+    """
+    If a normal daily FeePayment is recorded on a date where the student has an open DebtRecord
+    for the same fee_type, automatically allocate the payment toward clearing that debt.
+    """
+    if getattr(payment, '_is_debt_settlement', False) or payment.amount <= Decimal('0.00'):
+        return
+    with transaction.atomic():
+        open_debt = DebtRecord.objects.select_for_update().filter(
+            student_id=payment.student_id,
+            date=payment.payment_date,
+            fee_type=payment.fee_type,
+            status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
+        ).first()
+        if not open_debt:
+            return
+        to_apply = min(open_debt.remaining_amount, payment.amount)
+        if to_apply > Decimal('0.00'):
+            open_debt.amount_paid += to_apply
+            open_debt.save()
+            DebtPaymentAllocation.objects.create(
+                payment=payment,
+                debt_record=open_debt,
+                amount_applied=to_apply,
+            )
+
+
+def reverse_debt_allocations(payment):
+    """Reverse DebtPaymentAllocation entries before a FeePayment is deleted."""
+    with transaction.atomic():
+        allocations = list(
+            DebtPaymentAllocation.objects.select_related('debt_record')
+            .filter(payment=payment)
+        )
+        for alloc in allocations:
+            debt = DebtRecord.objects.select_for_update().get(pk=alloc.debt_record_id)
+            debt.amount_paid = max(Decimal('0.00'), debt.amount_paid - alloc.amount_applied)
+            debt.save()
+        DebtPaymentAllocation.objects.filter(payment=payment).delete()
+
+
+def settle_student_debts(student, total_amount, actor=None, payment_method='CASH', notes='', receipt_number=''):
+    """
+    Clear open DebtRecords for a student FIFO (oldest date first), supporting full or partial payment.
+    Creates FeePayment record(s) dated today for Bursar/Admin cash drawer reconciliation
+    without inflating prepaid credit wallets.
+    """
+    import uuid
+    from collections import defaultdict
+    from .audit import log_activity
+
+    total_amount = Decimal(str(total_amount))
+    if total_amount <= Decimal('0.00'):
+        raise ValueError("Payment amount must be greater than zero.")
+
+    with transaction.atomic():
+        open_debts = list(
+            DebtRecord.objects.select_for_update()
+            .filter(
+                student=student,
+                status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
+            )
+            .select_related('bus')
+            .order_by('date', 'fee_type', 'created_at')
+        )
+        total_open = sum((d.remaining_amount for d in open_debts), Decimal('0.00'))
+        if total_open <= Decimal('0.00'):
+            raise ValueError(f"{student.full_name} has no outstanding debt to clear.")
+        if total_amount > total_open:
+            raise ValueError(
+                f"Payment amount ({total_amount:.2f}) exceeds total outstanding debt ({total_open:.2f})."
+            )
+
+        remaining_cash = total_amount
+        applied_items = []  # (debt_record, applied_amount)
+        grouped_totals = defaultdict(Decimal)  # (fee_type, bus_id) -> Decimal
+        cleared_dates = []
+
+        for debt in open_debts:
+            if remaining_cash <= Decimal('0.00'):
+                break
+            rem = debt.remaining_amount
+            if rem <= Decimal('0.00'):
+                continue
+            apply_amt = min(rem, remaining_cash)
+            debt.amount_paid += apply_amt
+            debt.save()
+            applied_items.append((debt, apply_amt))
+            grouped_totals[(debt.fee_type, debt.bus_id)] += apply_amt
+            remaining_cash -= apply_amt
+            cleared_dates.append(f"{debt.date.strftime('%b %d')} ({debt.get_fee_type_display()}: {apply_amt:.2f})")
+
+        shared_receipt = receipt_number or f"DEBT-{timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
+        period = SchoolSetting.get_setting('CURRENT_ACADEMIC_PERIOD') or getattr(settings, 'CURRENT_ACADEMIC_PERIOD', 'Term 1 - 2026')
+        today = timezone.localdate()
+        note_summary = f"Debt clearance: {', '.join(cleared_dates)}"
+        if notes:
+            note_summary = f"{note_summary} | {notes}"
+
+        created_payments = []
+        payment_by_group = {}
+        for (ftype, bus_id), amt in grouped_totals.items():
+            p = FeePayment(
+                student=student,
+                bus_id=bus_id,
+                is_temporary_bus=bool(ftype == 'BUS' and bus_id and bus_id != student.bus_id),
+                fee_type=ftype,
+                amount=amt,
+                payment_date=today,
+                period=period,
+                payment_method=payment_method,
+                receipt_number=shared_receipt,
+                notes=note_summary,
+                recorded_by=actor,
+            )
+            p._skip_wallet_sync = True
+            p._is_debt_settlement = True
+            p.save()
+            created_payments.append(p)
+            payment_by_group[(ftype, bus_id)] = p
+
+        for debt, apply_amt in applied_items:
+            p = payment_by_group[(debt.fee_type, debt.bus_id)]
+            DebtPaymentAllocation.objects.create(
+                payment=p,
+                debt_record=debt,
+                amount_applied=apply_amt,
+            )
+
+        remaining_after = total_open - total_amount
+        log_activity(
+            action='DEBT_CLEARED',
+            target_model='Student',
+            target_id=str(student.id),
+            target_repr=student.full_name,
+            description=(
+                f"Cleared {total_amount:.2f} of debt for {student.full_name} ({student.student_class}). "
+                f"Remaining debt: {remaining_after:.2f}. Receipt: {shared_receipt}"
+            ),
+            changes={
+                'amount_cleared': str(total_amount),
+                'remaining_debt': str(remaining_after),
+                'receipt_number': shared_receipt,
+            },
+            actor=actor,
+        )
+
+    return created_payments, remaining_after
+
+
+def get_open_debt_maps(student_ids=None, student_class=None):
+    """
+    Bulk-fetch open DebtRecords in O(1) queries.
+    Returns dict with:
+      - total_by_student: {student_id: Decimal}
+      - days_by_student: {student_id: int (distinct unpaid dates)}
+      - overdue_student_ids: set of student_ids with distinct unpaid days > OVERDUE_DEBT_DAYS_THRESHOLD
+      - records_by_student: {student_id: [DebtRecord, ...]}
+    """
+    qs = DebtRecord.objects.filter(
+        status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL]
+    ).select_related('bus', 'student', 'recorded_by').order_by('date', 'fee_type')
+
+    if student_ids is not None:
+        qs = qs.filter(student_id__in=student_ids)
+    if student_class:
+        qs = qs.filter(student_class=student_class)
+
+    total_by_student = {}
+    dates_by_student = {}
+    records_by_student = {}
+
+    for rec in qs:
+        sid = rec.student_id
+        rem = rec.remaining_amount
+        if rem <= Decimal('0.00'):
+            continue
+        total_by_student[sid] = total_by_student.get(sid, Decimal('0.00')) + rem
+        if sid not in dates_by_student:
+            dates_by_student[sid] = set()
+        dates_by_student[sid].add(rec.date)
+        records_by_student.setdefault(sid, []).append(rec)
+
+    days_by_student = {sid: len(dates) for sid, dates in dates_by_student.items()}
+    overdue_student_ids = {
+        sid for sid, cnt in days_by_student.items() if cnt > OVERDUE_DEBT_DAYS_THRESHOLD
+    }
+
+    return {
+        'total_by_student': total_by_student,
+        'days_by_student': days_by_student,
+        'overdue_student_ids': overdue_student_ids,
+        'records_by_student': records_by_student,
+    }
+
+
+def get_overdue_debtors_summary():
+    """
+    Lightweight summary of all open debtors and overdue (>3 days) debtors for Admin/Bursar alerts.
+    """
+    debt_maps = get_open_debt_maps()
+    total_by_student = debt_maps['total_by_student']
+    overdue_ids = debt_maps['overdue_student_ids']
+
+    total_debtors_count = len(total_by_student)
+    total_debt_amount = sum(total_by_student.values(), Decimal('0.00'))
+    overdue_debtors_count = len(overdue_ids)
+    overdue_debt_amount = sum(
+        (amt for sid, amt in total_by_student.items() if sid in overdue_ids),
+        Decimal('0.00')
+    )
+    return {
+        'total_debtors_count': total_debtors_count,
+        'total_debt_amount': total_debt_amount,
+        'overdue_debtors_count': overdue_debtors_count,
+        'overdue_debt_amount': overdue_debt_amount,
+    }
 
 
 class UserProfile(models.Model):
@@ -1161,6 +1642,9 @@ class AuditLog(models.Model):
         ('PERMISSION_CHANGE', 'Staff Permission Adjusted'),
         ('SETTINGS_UPDATED', 'School Settings Changed'),
         ('CLOCK_IN', 'Student Attendance Clock-In'),
+        ('DEBT_RECORDED', 'Unpaid Debt Recorded'),
+        ('DEBT_CLEARED', 'Debt Payment Cleared'),
+        ('OVERDUE_DEBT_ALERT', 'Overdue Debt (>3 Days) Alert'),
     ]
 
     actor = models.ForeignKey(

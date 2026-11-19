@@ -2,7 +2,13 @@ from django.contrib.auth.signals import user_logged_in, user_logged_out, user_lo
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from .audit import log_activity
-from .models import FeePayment, apply_payment_to_wallet, reverse_payment_wallet_effects
+from .models import (
+    FeePayment,
+    apply_payment_to_wallet,
+    reverse_payment_wallet_effects,
+    reconcile_same_day_debt_on_payment,
+    reverse_debt_allocations,
+)
 
 @receiver(user_logged_in)
 def log_user_login(sender, request, user, **kwargs):
@@ -59,12 +65,14 @@ def log_user_login_failed(sender, credentials, request, **kwargs):
 
 @receiver(post_save, sender=FeePayment)
 def sync_wallet_on_payment_save(sender, instance, created, **kwargs):
-    """Apply newly created cash/MoMo payments to the student's explicit wallet."""
+    """Apply newly created cash/MoMo payments to the student's explicit wallet and same-day debts."""
     if created:
         apply_payment_to_wallet(instance)
+        reconcile_same_day_debt_on_payment(instance)
 
 
 @receiver(pre_delete, sender=FeePayment)
 def reverse_wallet_on_payment_delete(sender, instance, **kwargs):
-    """Reverse any wallet top-up or deduction effects before a FeePayment is deleted."""
+    """Reverse any wallet or debt settlement effects before a FeePayment is deleted."""
     reverse_payment_wallet_effects(instance)
+    reverse_debt_allocations(instance)

@@ -1,0 +1,244 @@
+{% extends 'base.html' %}
+
+{% block title %}Debtors List | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
+    <div>
+        <h1 style="font-size:1.5rem; font-weight:700; color:var(--text-main); margin:0;">Debtors List &amp; Arrears Ledger</h1>
+        <p style="color:var(--text-muted); font-size:0.875rem; margin-top:0.25rem;">
+            Students appear from their first missed payment. Students with more than {{ overdue_threshold }} unpaid days trigger an overdue alert.
+        </p>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <a href="{% url 'export_debtors_csv' %}{% if class_filter %}?class={{ class_filter|urlencode }}{% endif %}" class="btn-secondary" style="display:inline-flex; align-items:center; gap:0.4rem;">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            Export Debtors CSV
+        </a>
+        <a href="{% url 'payment_list' %}" class="btn-secondary">Back to Payments</a>
+    </div>
+</div>
+
+{% if overdue_count > 0 %}
+<div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-left: 4px solid #ef4444; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+    <div style="display:flex; align-items:center; gap:0.75rem;">
+        <span style="font-size:1.25rem;">⚠️</span>
+        <div>
+            <strong style="color:#b91c1c; display:block; font-size:0.95rem;">
+                Overdue Debt Alert: {{ overdue_count }} student{{ overdue_count|pluralize }} unpaid for more than {{ overdue_threshold }} days
+            </strong>
+            <span style="color:var(--text-muted); font-size:0.83rem;">
+                Total overdue balance: <strong>{{ currency }}{{ overdue_amount|floatformat:2 }}</strong>. Follow up with parents or clear balances as payments arrive.
+            </span>
+        </div>
+    </div>
+    {% if not overdue_only %}
+    <a href="?overdue=1{% if class_filter %}&class={{ class_filter|urlencode }}{% endif %}" class="btn-primary" style="background:#dc2626; border-color:#dc2626; font-size:0.82rem; padding:0.45rem 0.9rem;">
+        Filter Overdue (&gt;{{ overdue_threshold }} Days)
+    </a>
+    {% else %}
+    <a href="{% url 'debtors_list' %}{% if class_filter %}?class={{ class_filter|urlencode }}{% endif %}" class="btn-secondary" style="font-size:0.82rem; padding:0.45rem 0.9rem;">
+        Show All Debtors
+    </a>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- KPI Summary -->
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); font-weight:600;">Active Debtors</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--text-main); margin-top:0.25rem;">{{ total_debtors }}</div>
+    </div>
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); font-weight:600;">Total Debt Owed</div>
+        <div style="font-size:1.6rem; font-weight:700; color:#d97706; margin-top:0.25rem;">{{ currency }}{{ total_debt_amount|floatformat:2 }}</div>
+    </div>
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid rgba(239,68,68,0.3); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#dc2626; font-weight:600;">Overdue (&gt;{{ overdue_threshold }} Days)</div>
+        <div style="font-size:1.6rem; font-weight:700; color:#dc2626; margin-top:0.25rem;">{{ overdue_count }}</div>
+    </div>
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid rgba(239,68,68,0.3); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#dc2626; font-weight:600;">Overdue Amount</div>
+        <div style="font-size:1.6rem; font-weight:700; color:#dc2626; margin-top:0.25rem;">{{ currency }}{{ overdue_amount|floatformat:2 }}</div>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="form-card" style="margin-bottom:1.5rem; padding:1rem 1.25rem;">
+    <form method="GET" action="{% url 'debtors_list' %}" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end;">
+        <div style="flex:1; min-width:180px;">
+            <label class="form-label" style="font-size:0.75rem;">Filter by Class</label>
+            <select name="class" class="form-input" onchange="this.form.submit()">
+                <option value="">All Classes</option>
+                {% for cls_name in all_classes %}
+                <option value="{{ cls_name }}" {% if class_filter == cls_name %}selected{% endif %}>{{ cls_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1; min-width:180px;">
+            <label class="form-label" style="font-size:0.75rem;">Filter by Bus</label>
+            <select name="bus" class="form-input" onchange="this.form.submit()">
+                <option value="">All Buses</option>
+                {% for b in buses %}
+                <option value="{{ b.id }}" {% if bus_filter == b.id|stringformat:"s" %}selected{% endif %}>{{ b.name }} ({{ currency }}{{ b.fee|floatformat:2 }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1.2; min-width:200px;">
+            <label class="form-label" style="font-size:0.75rem;">Search Student</label>
+            <input type="text" name="q" value="{{ search_q }}" class="form-input" placeholder="Student name or class...">
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem; padding-bottom:0.2rem;">
+            <label style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.85rem; cursor:pointer;">
+                <input type="checkbox" name="overdue" value="1" {% if overdue_only %}checked{% endif %} onchange="this.form.submit()">
+                <span>Overdue only (&gt;{{ overdue_threshold }} days)</span>
+            </label>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+            <button type="submit" class="btn-primary">Apply</button>
+            <a href="{% url 'debtors_list' %}" class="btn-secondary">Reset</a>
+        </div>
+    </form>
+</div>
+
+<!-- Debtors Table -->
+<div class="table-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; overflow:hidden;">
+    {% if debtors %}
+    <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
+            <thead>
+                <tr style="background:var(--surface-muted, rgba(0,0,0,0.03)); border-bottom:1px solid var(--border-color); text-align:left;">
+                    <th style="padding:0.85rem 1rem;">Student &amp; Class</th>
+                    <th style="padding:0.85rem 1rem;">Unpaid Days</th>
+                    <th style="padding:0.85rem 1rem;">Itemized Missed Payments</th>
+                    <th style="padding:0.85rem 1rem;">Total Owed</th>
+                    <th style="padding:0.85rem 1rem; text-align:right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in debtors %}
+                <tr style="border-bottom:1px solid var(--border-color); {% if d.is_overdue %}background: rgba(239, 68, 68, 0.03);{% endif %}">
+                    <td style="padding:0.9rem 1rem; vertical-align:top;">
+                        <div style="font-weight:600; color:var(--text-main);">{{ d.student.full_name }}</div>
+                        <div style="display:flex; gap:0.4rem; flex-wrap:wrap; margin-top:0.25rem;">
+                            <span style="font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:rgba(59,130,246,0.1); color:#2563eb; font-weight:600;">
+                                {{ d.student_class }}
+                            </span>
+                            {% if d.assigned_bus %}
+                            <span style="font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:rgba(107,114,128,0.1); color:var(--text-muted);">
+                                {{ d.assigned_bus.name }} ({{ currency }}{{ d.assigned_bus.fee|floatformat:2 }})
+                            </span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td style="padding:0.9rem 1rem; vertical-align:top;">
+                        <div style="font-weight:700; color:{% if d.is_overdue %}#dc2626{% else %}var(--text-main){% endif %};">
+                            {{ d.unpaid_days }} day{{ d.unpaid_days|pluralize }}
+                        </div>
+                        {% if d.is_overdue %}
+                        <span style="display:inline-block; margin-top:0.25rem; font-size:0.7rem; font-weight:700; padding:0.15rem 0.5rem; border-radius:999px; background:#dc2626; color:#fff;">
+                            OVERDUE (&gt;{{ overdue_threshold }}d)
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td style="padding:0.9rem 1rem; vertical-align:top;">
+                        <div style="display:flex; flex-direction:column; gap:0.35rem;">
+                            {% for item in d.items %}
+                            <div style="font-size:0.8rem; color:var(--text-main); display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                                <span style="font-weight:600; color:var(--text-muted);">{{ item.date|date:"D, M j" }}</span>
+                                <span>•</span>
+                                <span>{{ item.get_fee_type_display }}</span>
+                                {% if item.bus %}
+                                <span style="color:var(--text-muted);">({{ item.bus.name }}{% if item.is_temporary_bus %} <strong>[Guest Bus]</strong>{% endif %})</span>
+                                {% endif %}
+                                <span>— <strong>{{ currency }}{{ item.remaining_amount|floatformat:2 }}</strong></span>
+                                {% if item.amount_paid > 0 %}
+                                <span style="font-size:0.72rem; color:#059669;">(Paid {{ currency }}{{ item.amount_paid|floatformat:2 }} of {{ currency }}{{ item.amount_owed|floatformat:2 }})</span>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td style="padding:0.9rem 1rem; vertical-align:top;">
+                        <div style="font-size:1.05rem; font-weight:700; color:{% if d.is_overdue %}#dc2626{% else %}#d97706{% endif %};">
+                            {{ currency }}{{ d.total_owed|floatformat:2 }}
+                        </div>
+                    </td>
+                    <td style="padding:0.9rem 1rem; vertical-align:top; text-align:right;">
+                        <button type="button"
+                            class="btn-primary"
+                            style="padding:0.45rem 0.9rem; font-size:0.82rem;"
+                            onclick="openClearDebtModal('{{ d.student.id }}', '{{ d.student.full_name|escapejs }}', '{{ d.student_class|escapejs }}', '{{ d.total_owed|floatformat:2 }}')">
+                            Clear Debt
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="padding:3rem 1.5rem; text-align:center; color:var(--text-muted);">
+        <div style="font-size:2rem; margin-bottom:0.5rem;">🎉</div>
+        <div style="font-weight:600; color:var(--text-main);">No outstanding debtors match your filter</div>
+        <p style="font-size:0.85rem; margin-top:0.25rem;">All recorded unpaid fees for this selection have been settled.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Clear Debt Modal -->
+<div id="clear-debt-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center; padding:1rem;">
+    <div style="background:var(--surface-card, #fff); border-radius:14px; max-width:440px; width:100%; padding:1.5rem; box-shadow:0 20px 40px rgba(0,0,0,0.2);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+            <h3 style="margin:0; font-size:1.1rem; font-weight:700; color:var(--text-main);">Clear Student Debt</h3>
+            <button type="button" onclick="closeClearDebtModal()" style="background:none; border:none; font-size:1.25rem; cursor:pointer; color:var(--text-muted);">&times;</button>
+        </div>
+        <p id="clear-debt-subtitle" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;"></p>
+        <form id="clear-debt-form" method="POST" action="">
+            {% csrf_token %}
+            <input type="hidden" name="class_filter" value="{{ class_filter }}">
+            <div class="form-group">
+                <label class="form-label" for="clear-debt-amount">Amount Paid ({{ currency }})</label>
+                <input type="number" step="0.01" min="0.01" name="amount" id="clear-debt-amount" class="form-input" required>
+                <small style="color:var(--text-muted); font-size:0.75rem;">Enter the full balance or a partial amount; oldest days are cleared first.</small>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="clear-debt-method">Payment Method</label>
+                <select name="payment_method" id="clear-debt-method" class="form-input">
+                    {% for val, label in payment_methods %}
+                    <option value="{{ val }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="clear-debt-notes">Notes (Optional)</label>
+                <input type="text" name="notes" id="clear-debt-notes" class="form-input" placeholder="e.g. Parent paid at bursar office">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.25rem;">
+                <button type="button" class="btn-secondary" onclick="closeClearDebtModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Confirm &amp; Clear Debt</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openClearDebtModal(studentId, studentName, studentClass, totalOwed) {
+    const modal = document.getElementById('clear-debt-modal');
+    const form = document.getElementById('clear-debt-form');
+    const amountInput = document.getElementById('clear-debt-amount');
+    const subtitle = document.getElementById('clear-debt-subtitle');
+
+    form.action = "{% url 'clear_student_debt' 0 %}".replace('/0/', '/' + studentId + '/');
+    amountInput.value = totalOwed;
+    amountInput.max = totalOwed;
+    subtitle.innerHTML = 'Clearing debt for <strong>' + studentName + '</strong> (' + studentClass + '). Total owed: <strong>{{ currency }}' + totalOwed + '</strong>.';
+    modal.style.display = 'flex';
+}
+
+function closeClearDebtModal() {
+    document.getElementById('clear-debt-modal').style.display = 'none';
+}
+</script>
+{% endblock %}

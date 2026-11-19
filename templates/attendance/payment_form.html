@@ -815,12 +815,50 @@
 
             <div class="payment-actions-bar">
                 <a href="{% if user.profile and user.profile.can_view_revenue %}{% url 'payment_list' %}{% elif user.profile and user.profile.can_view_my_collections %}{% url 'my_collections' %}{% else %}{% url 'dashboard' %}{% endif %}" class="btn-secondary">Cancel</a>
+                <button type="button" id="btn-mark-unpaid-record" class="btn-secondary" style="display: none; border-color: rgba(220, 38, 38, 0.45); color: #dc2626; font-weight: 600;">
+                    ⚠ Mark Unpaid
+                </button>
                 <button type="submit" id="btn-save-and-add" name="save_and_add" value="1" class="btn-secondary" style="border-color: var(--primary); color: var(--primary); font-weight: 600;">
                     + Save & Record Another
                 </button>
                 <button type="submit" id="btn-submit-payment" class="btn-primary">
                     Save
                 </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Mark Student Unpaid (& Clock In) Modal -->
+<div id="record-page-unpaid-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1050; align-items:center; justify-content:center; padding:1rem;">
+    <div style="background:var(--surface-card, #ffffff); border:1px solid var(--border); border-radius:var(--radius-md, 12px); max-width:420px; width:100%; padding:1.25rem; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 0.35rem 0; font-size:1.05rem; font-weight:700; color:var(--text-main);">Mark Student Unpaid</h3>
+        <p id="rp-unpaid-subtitle" style="font-size:0.84rem; color:var(--text-muted); margin:0 0 1rem 0;"></p>
+        <form id="rp-unpaid-form">
+            <div style="margin-bottom:0.85rem;">
+                <label for="rp-unpaid-fee-type" style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.3rem;">Fee(s) Unpaid</label>
+                <select id="rp-unpaid-fee-type" class="filter-select" style="width:100%;">
+                    <option value="BUS">Bus Fee</option>
+                    <option value="CANTEEN">Canteen Fee</option>
+                    <option value="BOTH">Both Bus &amp; Canteen</option>
+                </select>
+            </div>
+            {% if not user.profile or user.profile.role != 'ACCOUNTANT' %}
+            <div style="margin-bottom:0.85rem;">
+                <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.84rem; font-weight:600; cursor:pointer; color:var(--text-main);">
+                    <input type="checkbox" id="rp-unpaid-clockin" checked style="width:16px; height:16px; accent-color:var(--primary);">
+                    Also tick student Present (Clock In)
+                </label>
+            </div>
+            {% endif %}
+            <div style="margin-bottom:0.85rem;">
+                <label for="rp-unpaid-notes" style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.3rem;">Note (optional)</label>
+                <input type="text" id="rp-unpaid-notes" class="filter-select" style="width:100%;" placeholder="e.g. Parent promised to pay tomorrow">
+            </div>
+            <div id="rp-unpaid-feedback" style="display:none; font-size:0.8rem; margin-bottom:0.75rem; color:#dc2626;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button type="button" id="btn-rp-unpaid-cancel" class="btn-secondary">Cancel</button>
+                <button type="submit" id="btn-rp-unpaid-submit" class="btn-primary" style="background:#dc2626; border-color:#dc2626;">Record as Unpaid</button>
             </div>
         </form>
     </div>
@@ -1637,6 +1675,8 @@ document.addEventListener('DOMContentLoaded', () => {
         btnCanteenFull.textContent = 'Pay Full';
 
         quickFillAll.style.display = 'none';
+        const btnMarkUnpaid = document.getElementById('btn-mark-unpaid-record');
+        if (btnMarkUnpaid) btnMarkUnpaid.style.display = 'none';
         calculateTotal();
     }
 
@@ -1721,6 +1761,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         calculateTotal();
         renderBulkCoveredPanel(student);
+        updateMarkUnpaidButton(student);
     }
 
     function updateStudentDetails() {
@@ -2124,6 +2165,152 @@ document.addEventListener('DOMContentLoaded', () => {
                 manualMethodHidden.value = chosen;
                 manualMethodPills.forEach(p => p.classList.toggle('active', p.dataset.method === chosen));
             });
+        });
+    }
+
+    // Mark Unpaid (& Clock In) workflow on Record Fee page
+    const btnMarkUnpaidRecord = document.getElementById('btn-mark-unpaid-record');
+    const rpUnpaidModal = document.getElementById('record-page-unpaid-modal');
+    const rpUnpaidForm = document.getElementById('rp-unpaid-form');
+    const rpUnpaidFeeType = document.getElementById('rp-unpaid-fee-type');
+    const rpUnpaidClockin = document.getElementById('rp-unpaid-clockin');
+    const rpUnpaidNotes = document.getElementById('rp-unpaid-notes');
+    const rpUnpaidSubtitle = document.getElementById('rp-unpaid-subtitle');
+    const rpUnpaidFeedback = document.getElementById('rp-unpaid-feedback');
+    const btnRpUnpaidCancel = document.getElementById('btn-rp-unpaid-cancel');
+    const btnRpUnpaidSubmit = document.getElementById('btn-rp-unpaid-submit');
+
+    function getUnpaidFeeChoice(student) {
+        if (!student) return null;
+        const busUnpaid = Boolean((student.bus_id || (busSelect && busSelect.value)) && !student.is_bus_paid);
+        const canUnpaid = Boolean(student.canteen_enrolled && !student.is_canteen_paid);
+        if (busUnpaid && canUnpaid) return 'BOTH';
+        if (busUnpaid) return 'BUS';
+        if (canUnpaid) return 'CANTEEN';
+        return null;
+    }
+
+    function updateMarkUnpaidButton(student) {
+        if (!btnMarkUnpaidRecord) return;
+        const unpaidChoice = getUnpaidFeeChoice(student);
+        if (student && unpaidChoice) {
+            btnMarkUnpaidRecord.style.display = 'inline-flex';
+        } else {
+            btnMarkUnpaidRecord.style.display = 'none';
+        }
+    }
+
+    if (btnMarkUnpaidRecord && rpUnpaidModal) {
+        btnMarkUnpaidRecord.addEventListener('click', () => {
+            if (!currentStudent) return;
+            const paymentDateInput = document.getElementById('id_payment_date');
+            const targetDate = (paymentDateInput && paymentDateInput.value) ? paymentDateInput.value : '';
+            const defaultType = getUnpaidFeeChoice(currentStudent) || 'BUS';
+            if (rpUnpaidFeeType) rpUnpaidFeeType.value = defaultType;
+            if (rpUnpaidNotes) rpUnpaidNotes.value = '';
+            if (rpUnpaidClockin) rpUnpaidClockin.checked = !currentStudent.is_clocked_in;
+            if (rpUnpaidFeedback) {
+                rpUnpaidFeedback.style.display = 'none';
+                rpUnpaidFeedback.textContent = '';
+            }
+            if (rpUnpaidSubtitle) {
+                rpUnpaidSubtitle.innerHTML = `Recording unpaid fee for <strong>${currentStudent.name}</strong>${targetDate ? ` on <strong>${targetDate}</strong>` : ''}.`;
+            }
+            rpUnpaidModal.style.display = 'flex';
+        });
+    }
+
+    if (btnRpUnpaidCancel && rpUnpaidModal) {
+        btnRpUnpaidCancel.addEventListener('click', () => {
+            rpUnpaidModal.style.display = 'none';
+        });
+    }
+
+    if (rpUnpaidForm && rpUnpaidModal) {
+        rpUnpaidForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentStudent) return;
+            const paymentDateInput = document.getElementById('id_payment_date');
+            const targetDate = (paymentDateInput && paymentDateInput.value) ? paymentDateInput.value : '';
+            const selectedBusVal = busSelect ? busSelect.value : (currentStudent.bus_id || '');
+            const originalText = btnRpUnpaidSubmit ? btnRpUnpaidSubmit.textContent : 'Record as Unpaid';
+            if (btnRpUnpaidSubmit) {
+                btnRpUnpaidSubmit.disabled = true;
+                btnRpUnpaidSubmit.textContent = 'Recording...';
+            }
+            if (rpUnpaidFeedback) {
+                rpUnpaidFeedback.style.display = 'none';
+                rpUnpaidFeedback.textContent = '';
+            }
+
+            try {
+                const unpaidRes = await fetch("{% url 'api_mark_unpaid' %}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken(),
+                    },
+                    body: JSON.stringify({
+                        student_id: currentStudent.id,
+                        fee_type: rpUnpaidFeeType ? rpUnpaidFeeType.value : 'BUS',
+                        bus_id: selectedBusVal || null,
+                        date: targetDate,
+                        notes: rpUnpaidNotes ? rpUnpaidNotes.value : '',
+                    }),
+                });
+                const unpaidData = await unpaidRes.json();
+                if (!unpaidData.success) {
+                    if (rpUnpaidFeedback) {
+                        rpUnpaidFeedback.style.display = 'block';
+                        rpUnpaidFeedback.textContent = unpaidData.error || 'Could not record unpaid fee.';
+                    }
+                    return;
+                }
+
+                let finalMsg = unpaidData.message || `Marked ${currentStudent.name} as unpaid.`;
+                if (rpUnpaidClockin && rpUnpaidClockin.checked && !currentStudent.is_clocked_in) {
+                    const ciRes = await fetch("{% url 'api_clock_in_toggle' %}", {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCsrfToken(),
+                        },
+                        body: JSON.stringify({
+                            student_id: currentStudent.id,
+                            date: targetDate,
+                            action: 'clock_in',
+                        }),
+                    });
+                    const ciData = await ciRes.json();
+                    if (ciData.success) {
+                        finalMsg = `${finalMsg} & Clocked In.`;
+                    }
+                }
+
+                // Invalidate cached student state so re-selecting reloads fresh debt/clock-in status
+                currentStudent.loaded_date = '';
+                rpUnpaidModal.style.display = 'none';
+                if (typeof showToast === 'function') {
+                    showToast(finalMsg, 'success');
+                }
+                if (studentSelect) studentSelect.value = '';
+                clearStudentCards();
+                if (quickSearchInput) {
+                    quickSearchInput.value = '';
+                    if (btnClearSearch) btnClearSearch.style.display = 'none';
+                    quickSearchInput.focus();
+                }
+            } catch (err) {
+                if (rpUnpaidFeedback) {
+                    rpUnpaidFeedback.style.display = 'block';
+                    rpUnpaidFeedback.textContent = 'Network error. Please try again.';
+                }
+            } finally {
+                if (btnRpUnpaidSubmit) {
+                    btnRpUnpaidSubmit.disabled = false;
+                    btnRpUnpaidSubmit.textContent = originalText;
+                }
+            }
         });
     }
 
