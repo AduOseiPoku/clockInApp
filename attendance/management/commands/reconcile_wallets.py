@@ -2,10 +2,12 @@ import datetime
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import Sum, F
 from django.conf import settings
 from django.utils import timezone
 from attendance.models import (
-    Student, FeePayment, ClockInRecord, CreditTransaction, SchoolSetting, get_default_canteen_fee
+    Student, FeePayment, ClockInRecord, CreditTransaction, DebtPaymentAllocation,
+    SchoolSetting, get_default_canteen_fee
 )
 
 
@@ -45,7 +47,7 @@ class Command(BaseCommand):
         total_students = len(students_list)
         student_ids = [s.id for s in students_list]
 
-        # 1. Preload all non-temporary fee payments grouped by (student_id, fee_type)
+        # 1. Preload all fee payments grouped by (student_id, fee_type)
         all_payments = (
             FeePayment.objects.filter(student_id__in=student_ids)
             .select_related('bus')
@@ -53,10 +55,21 @@ class Command(BaseCommand):
         )
         payments_map = {}
         for p in all_payments:
-            if p.fee_type == 'BUS' and p.is_temporary_bus:
+            if (p.notes or '').startswith('Debt clearance:'):
                 continue
             key = (p.student_id, p.fee_type)
             payments_map.setdefault(key, {}).setdefault(p.payment_date, []).append(p)
+
+        # Preload prior-date debt allocations per payment so debt clearance isn't double-counted as wallet top-up
+        prior_debt_alloc_by_payment = dict(
+            DebtPaymentAllocation.objects.filter(
+                payment__student_id__in=student_ids,
+                debt_record__date__lt=F('payment__payment_date'),
+            )
+            .values('payment_id')
+            .annotate(total=Sum('amount_applied'))
+            .values_list('payment_id', 'total')
+        )
 
         # 2. Preload all clock-in records where student was present
         all_clockins = (
@@ -117,34 +130,62 @@ class Command(BaseCommand):
 
                         # Process direct payments on date d
                         for p in day_payments:
+                            prior_alloc = prior_debt_alloc_by_payment.get(p.id, Decimal('0.00'))
+                            if fee_type == 'BUS' and p.is_temporary_bus:
+                                guest_fee = (p.bus.fee if p.bus_id and p.bus else daily_fee) or Decimal('0.00')
+                                guest_fee = max(Decimal('0.00'), guest_fee)
+                                if p.amount > guest_fee:
+                                    excess = max(Decimal('0.00'), p.amount - guest_fee - prior_alloc)
+                                    if excess > Decimal('0.00'):
+                                        running_wallet += excess
+                                        topup_key = (student.id, fee_type, d, CreditTransaction.TYPE_TOP_UP)
+                                        existing_topups = existing_tx_map.get(topup_key, [])
+                                        matching_topup = next((tx for tx in existing_topups if tx.payment_id == p.id), None)
+                                        if not matching_topup and not dry_run:
+                                            tx = CreditTransaction.objects.create(
+                                                student=student,
+                                                fee_type=fee_type,
+                                                transaction_type=CreditTransaction.TYPE_TOP_UP,
+                                                amount=excess,
+                                                balance_after=running_wallet,
+                                                date=d,
+                                                payment=p,
+                                                recorded_by=p.recorded_by,
+                                                notes=f"Reconciled guest bus credit from payment {p.receipt_number or p.id}",
+                                            )
+                                            existing_tx_map.setdefault(topup_key, []).append(tx)
+                                            topups_created_count += 1
+                                continue
+
                             p_fee = daily_fee
                             if p_fee <= Decimal('0.00') and fee_type == 'BUS' and p.bus_id and p.bus:
                                 p_fee = p.bus.fee
                             owed_before = max(Decimal('0.00'), p_fee - direct_cash_on_day - deducted_on_day)
 
                             if p.amount > owed_before:
-                                excess = p.amount - owed_before
-                                running_wallet += excess
+                                excess = max(Decimal('0.00'), p.amount - owed_before - prior_alloc)
                                 direct_cash_on_day += p.amount
+                                if excess > Decimal('0.00'):
+                                    running_wallet += excess
 
-                                # Verify TOP_UP transaction exists
-                                topup_key = (student.id, fee_type, d, CreditTransaction.TYPE_TOP_UP)
-                                existing_topups = existing_tx_map.get(topup_key, [])
-                                matching_topup = next((tx for tx in existing_topups if tx.payment_id == p.id), None)
-                                if not matching_topup and not dry_run:
-                                    tx = CreditTransaction.objects.create(
-                                        student=student,
-                                        fee_type=fee_type,
-                                        transaction_type=CreditTransaction.TYPE_TOP_UP,
-                                        amount=excess,
-                                        balance_after=running_wallet,
-                                        date=d,
-                                        payment=p,
-                                        recorded_by=p.recorded_by,
-                                        notes=f"Reconciled bulk credit from payment {p.receipt_number or p.id}",
-                                    )
-                                    existing_tx_map.setdefault(topup_key, []).append(tx)
-                                    topups_created_count += 1
+                                    # Verify TOP_UP transaction exists
+                                    topup_key = (student.id, fee_type, d, CreditTransaction.TYPE_TOP_UP)
+                                    existing_topups = existing_tx_map.get(topup_key, [])
+                                    matching_topup = next((tx for tx in existing_topups if tx.payment_id == p.id), None)
+                                    if not matching_topup and not dry_run:
+                                        tx = CreditTransaction.objects.create(
+                                            student=student,
+                                            fee_type=fee_type,
+                                            transaction_type=CreditTransaction.TYPE_TOP_UP,
+                                            amount=excess,
+                                            balance_after=running_wallet,
+                                            date=d,
+                                            payment=p,
+                                            recorded_by=p.recorded_by,
+                                            notes=f"Reconciled bulk credit from payment {p.receipt_number or p.id}",
+                                        )
+                                        existing_tx_map.setdefault(topup_key, []).append(tx)
+                                        topups_created_count += 1
 
                             elif p.amount < owed_before and running_wallet > Decimal('0.00'):
                                 owed_after_cash = owed_before - p.amount

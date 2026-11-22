@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Debtors List | {{ SCHOOL_NAME }}{% endblock %}
+{% block title %}Debtors List{% endblock %}
 
 {% block content %}
 <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
@@ -11,7 +11,7 @@
         </p>
     </div>
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-        <a href="{% url 'export_debtors_csv' %}{% if class_filter %}?class={{ class_filter|urlencode }}{% endif %}" class="btn-secondary" style="display:inline-flex; align-items:center; gap:0.4rem;">
+        <a href="{% url 'export_debtors_csv' %}?active_debts=1{% if class_filter %}&class={{ class_filter|urlencode }}{% endif %}" class="btn-secondary" style="display:inline-flex; align-items:center; gap:0.4rem;">
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
             Export Debtors CSV
         </a>
@@ -45,7 +45,7 @@
 {% endif %}
 
 <!-- KPI Summary -->
-<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+<div class="kpi-grid-4" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
     <div class="stat-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; padding:1rem 1.25rem;">
         <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); font-weight:600;">Active Debtors</div>
         <div style="font-size:1.6rem; font-weight:700; color:var(--text-main); margin-top:0.25rem;">{{ total_debtors }}</div>
@@ -65,7 +65,7 @@
 </div>
 
 <!-- Filter Bar -->
-<div class="form-card" style="margin-bottom:1.5rem; padding:1rem 1.25rem;">
+<div class="form-card" style="max-width: 100%; width: 100%; margin-bottom:1.5rem; padding:1rem 1.25rem;">
     <form method="GET" action="{% url 'debtors_list' %}" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end;">
         <div style="flex:1; min-width:180px;">
             <label class="form-label" style="font-size:0.75rem;">Filter by Class</label>
@@ -102,8 +102,8 @@
     </form>
 </div>
 
-<!-- Debtors Table -->
-<div class="table-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; overflow:hidden;">
+<!-- Debtors Table (Desktop View) -->
+<div class="table-card desktop-only" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; overflow:hidden;">
     {% if debtors %}
     <div style="overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
@@ -183,6 +183,53 @@
         <div style="font-size:2rem; margin-bottom:0.5rem;">🎉</div>
         <div style="font-weight:600; color:var(--text-main);">No outstanding debtors match your filter</div>
         <p style="font-size:0.85rem; margin-top:0.25rem;">All recorded unpaid fees for this selection have been settled.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Debtors Stacked Cards (Mobile View) -->
+<div class="mobile-only" style="flex-direction: column; gap: 0.75rem;">
+    {% if debtors %}
+        {% for d in debtors %}
+        <div class="student-card-item" style="background:var(--surface-card); border:1px solid {% if d.is_overdue %}rgba(239,68,68,0.45){% else %}var(--border){% endif %}; border-left:4px solid {% if d.is_overdue %}#dc2626{% else %}#d97706{% endif %}; border-radius:12px; padding:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.65rem;">
+                <div>
+                    <div style="font-weight:700; font-size:0.98rem; color:var(--text-main);">{{ d.student.full_name }}</div>
+                    <div style="display:flex; gap:0.35rem; flex-wrap:wrap; margin-top:0.25rem;">
+                        <span style="font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; background:rgba(59,130,246,0.1); color:#2563eb; font-weight:600;">{{ d.student_class }}</span>
+                        {% if d.assigned_bus %}
+                        <span style="font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--surface-subtle); color:var(--text-muted);">{{ d.assigned_bus.name }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div style="text-align:right; flex-shrink:0;">
+                    <div style="font-size:1.15rem; font-weight:800; color:{% if d.is_overdue %}#dc2626{% else %}#d97706{% endif %};">{{ currency }}{{ d.total_owed|floatformat:2 }}</div>
+                    <div style="font-size:0.72rem; font-weight:700; color:{% if d.is_overdue %}#dc2626{% else %}var(--text-muted){% endif %};">
+                        {{ d.unpaid_days }} day{{ d.unpaid_days|pluralize }}{% if d.is_overdue %} &middot; OVERDUE{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:0.3rem; padding:0.55rem 0.7rem; background:var(--surface-subtle); border-radius:8px; margin-bottom:0.75rem; font-size:0.78rem;">
+                {% for item in d.items %}
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                    <span style="color:var(--text-muted);"><strong>{{ item.date|date:"D, M j" }}</strong> &middot; {{ item.get_fee_type_display }}</span>
+                    <strong style="color:var(--text-main);">{{ currency }}{{ item.remaining_amount|floatformat:2 }}</strong>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button"
+                class="btn-primary"
+                style="width:100%; min-height:46px; font-size:0.9rem; font-weight:700;"
+                onclick="openClearDebtModal('{{ d.student.id }}', '{{ d.student.full_name|escapejs }}', '{{ d.student_class|escapejs }}', '{{ d.total_owed|floatformat:2 }}')">
+                Clear Debt ({{ currency }}{{ d.total_owed|floatformat:2 }})
+            </button>
+        </div>
+        {% endfor %}
+    {% else %}
+    <div style="background:var(--surface-card); border:1px solid var(--border); border-radius:12px; padding:2.5rem 1.25rem; text-align:center; color:var(--text-muted);">
+        <div style="font-size:1.75rem; margin-bottom:0.4rem;">🎉</div>
+        <div style="font-weight:600; color:var(--text-main);">No outstanding debtors match your filter</div>
+        <p style="font-size:0.82rem; margin-top:0.25rem;">All recorded unpaid fees for this selection have been settled.</p>
     </div>
     {% endif %}
 </div>

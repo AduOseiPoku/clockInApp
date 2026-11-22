@@ -85,7 +85,7 @@
         </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+    <div class="kpi-grid-4" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
         <!-- 1. Physical Cash in Drawer -->
         <div style="background: hsla(150, 80%, 45%, 0.06); border: 1px solid hsla(150, 80%, 40%, 0.25); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
             <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: #047857; letter-spacing: 0.04em;">💵 Physical Cash in Drawer</div>
@@ -186,19 +186,19 @@
         {% endfor %}
     </div>
 
-    {% if remittances_today %}
     <div style="margin-top: 1.15rem; padding-top: 0.95rem; border-top: 1px dashed var(--border);">
         <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-            <span>📋 Today's Verified Handover Settlements ({{ remittances_today|length }})</span>
-            <span style="color: var(--primary); font-weight: 700;">Total Remitted: {{ CURRENCY_SYMBOL }}{{ total_remitted_today|floatformat:2 }}</span>
+            <span>📋 {% if remittances_today %}Today's Verified Handover Settlements ({{ remittances_today|length }}){% else %}Recent Cash Handover History ({{ recent_remittances|length }}){% endif %}</span>
+            <span style="color: var(--primary); font-weight: 700;">Remitted Today: {{ CURRENCY_SYMBOL }}{{ total_remitted_today|floatformat:2 }}</span>
         </div>
+        {% if remittances_today or recent_remittances %}
         <div style="display: flex; flex-direction: column; gap: 0.45rem;">
-            {% for rem in remittances_today %}
+            {% for rem in remittances_today|default:recent_remittances %}
             <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.45rem 0.85rem; font-size: 0.78rem; flex-wrap: wrap; gap: 0.5rem;">
                 <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
                     <span style="font-family: monospace; font-weight: 700; color: var(--primary);">{{ rem.reference_code }}</span>
                     <span><strong>{{ rem.teacher.get_full_name|default:rem.teacher.username }}</strong> handed over <strong>+{{ CURRENCY_SYMBOL }}{{ rem.amount|floatformat:2 }}</strong></span>
-                    <span style="color: var(--text-muted);">received by {{ rem.received_by.get_full_name|default:rem.received_by.username }} at {{ rem.created_at|date:"h:i A" }}</span>
+                    <span style="color: var(--text-muted);">received by {{ rem.received_by.get_full_name|default:rem.received_by.username }} on {{ rem.date|date:"M d, Y" }} at {{ rem.created_at|date:"h:i A" }}</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                     <a href="{% url 'teacher_remittance_receipt' rem.id %}" class="btn-secondary" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; text-decoration: none;">
@@ -208,8 +208,12 @@
             </div>
             {% endfor %}
         </div>
+        {% else %}
+        <div style="font-size: 0.78rem; color: var(--text-muted); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.85rem;">
+            No teacher cash handovers have been recorded yet. Use <strong>Accept Cash Handover</strong> or click <strong>Settle</strong> beside any teacher holding cash to issue a verified handover slip.
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 {% endif %}
 
@@ -226,7 +230,7 @@
 
     <!-- Quick Date Filter Presets -->
     <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
-        <a href="{% url 'payment_list' %}{% if fee_type %}?fee_type={{ fee_type }}{% endif %}{% if selected_collector %}&collector={{ selected_collector }}{% endif %}" 
+        <a href="{% url 'payment_list' %}{% if fee_type or selected_collector %}?{% if fee_type %}fee_type={{ fee_type }}{% endif %}{% if fee_type and selected_collector %}&{% endif %}{% if selected_collector %}collector={{ selected_collector }}{% endif %}{% endif %}" 
            class="btn-secondary filter-preset-btn {% if not date_preset and not date_str %}active{% endif %}">
            All Time
         </a>
@@ -242,7 +246,7 @@
            class="btn-secondary filter-preset-btn {% if date_preset == 'week' %}active{% endif %}">
            Last 7 Days
         </a>
-        <a href="{% url 'payment_export_csv' %}?{% if request.GET %}{{ request.GET.urlencode }}{% else %}preset={{ date_preset|default:'today' }}{% endif %}" 
+        <a href="{% url 'payment_export_csv' %}{% if request.GET %}?{{ request.GET.urlencode }}{% elif date_preset %}?preset={{ date_preset }}{% endif %}" 
            class="btn-secondary filter-preset-btn" 
            style="color: var(--primary); font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem;"
            title="Export matching payments to CSV spreadsheet">
@@ -685,8 +689,9 @@
                 <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">
                     Physical Cash Counted & Handed Over ({{ CURRENCY_SYMBOL }})
                 </label>
-                <input type="number" step="0.01" min="0.01" id="handoverAmountInput" name="amount" required placeholder="0.00" 
+                <input type="number" step="0.01" min="0.01" id="handoverAmountInput" name="amount" required placeholder="0.00" oninput="updateHandoverVarianceWarning()"
                        style="width: 100%; padding: 0.65rem; font-size: 1.15rem; font-weight: 700; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-card); color: var(--text-main);">
+                <div id="handoverVarianceWarning" style="display: none; margin-top: 0.4rem; font-size: 0.76rem; padding: 0.4rem 0.6rem; border-radius: var(--radius-xs); background: #fef3c7; color: #92400e; border: 1px solid #fcd34d;"></div>
             </div>
 
             <div style="margin-bottom: 1.25rem;">
@@ -770,6 +775,27 @@ function closeHandoverModal() {
     document.getElementById('handoverModal').style.display = 'none';
 }
 
+function updateHandoverVarianceWarning() {
+    const warn = document.getElementById('handoverVarianceWarning');
+    const amountInput = document.getElementById('handoverAmountInput');
+    const unremittedEl = document.getElementById('handoverUnremittedDisplay');
+    if (!warn || !amountInput || !unremittedEl) return;
+    const entered = parseFloat(amountInput.value || '0');
+    const expected = parseFloat(unremittedEl.textContent || '0');
+    if (!entered || expected <= 0 || Math.abs(entered - expected) < 0.005) {
+        warn.style.display = 'none';
+        return;
+    }
+    const diff = entered - expected;
+    const cur = '{{ CURRENCY_SYMBOL }}';
+    if (diff > 0) {
+        warn.textContent = `⚠ Exceeds recorded unremitted cash by ${cur}${diff.toFixed(2)}. Add a remark explaining the surplus.`;
+    } else {
+        warn.textContent = `⚠ Partial handover: ${cur}${Math.abs(diff).toFixed(2)} will remain unremitted in teacher's hand.`;
+    }
+    warn.style.display = 'block';
+}
+
 function onHandoverTeacherChange(selectElem) {
     const selectedOption = selectElem.options[selectElem.selectedIndex];
     if (selectedOption && selectedOption.value) {
@@ -783,6 +809,24 @@ function onHandoverTeacherChange(selectElem) {
         document.getElementById('handoverUnremittedDisplay').textContent = '0.00';
         document.getElementById('handoverAmountInput').value = '';
     }
+    updateHandoverVarianceWarning();
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+    const settleTeacherId = params.get('settle_teacher');
+    if (settleTeacherId) {
+        const select = document.getElementById('handoverTeacherSelect');
+        if (select) {
+            const opt = select.querySelector(`option[value="${settleTeacherId}"]`);
+            if (opt) {
+                const name = opt.text.split('(')[0].trim();
+                const cash = opt.getAttribute('data-cash') || '0.00';
+                openHandoverModal(settleTeacherId, name, cash);
+                updateHandoverVarianceWarning();
+            }
+        }
+    }
+});
 </script>
 {% endblock %}

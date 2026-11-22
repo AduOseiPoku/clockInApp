@@ -98,7 +98,7 @@
         <span>▼</span>
     </button>
 
-    <div id="mobile-student-filters" class="filter-group {% if class_filter or bus_filter %}show-mobile{% endif %}">
+    <div id="mobile-student-filters" class="filter-group {% if search %}show-mobile{% endif %}">
         {% if is_class_teacher_scoped %}
             <div class="filter-pill-locked" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.48rem 0.85rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); font-weight: 600; font-size: 0.84rem; color: var(--primary);">
                 <span>🏫</span>

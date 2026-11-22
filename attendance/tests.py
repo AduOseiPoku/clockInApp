@@ -4158,6 +4158,116 @@ class MultipayReconciliationAndTallyTests(TestCase):
         self.assertIsNotNone(topup_tx)
         self.assertEqual(topup_tx.amount, Decimal('30.00'))
 
+        # Running reconcile_wallets must preserve the temporary-bus advance wallet credit
+        from django.core.management import call_command
+        call_command('reconcile_wallets')
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('30.00'))
+
+    def test_multipay_clears_prior_open_debts_fifo_before_wallet_topup(self):
+        """A multi-day payment clears prior open DebtRecords FIFO before crediting remaining excess to wallet."""
+        from django.core.management import call_command
+        today = timezone.localdate()
+        d1 = today - datetime.timedelta(days=2)
+        d2 = today - datetime.timedelta(days=1)
+
+        DebtRecord.objects.create(
+            student=self.student, date=d1, fee_type='BUS', bus=self.bus, amount_owed=Decimal('10.00')
+        )
+        DebtRecord.objects.create(
+            student=self.student, date=d2, fee_type='BUS', bus=self.bus, amount_owed=Decimal('10.00')
+        )
+
+        # Pay 50.00 on today (10.00 today + 20.00 clears d1 & d2 + 20.00 to wallet)
+        FeePayment.objects.create(
+            student=self.student,
+            bus=self.bus,
+            fee_type='BUS',
+            amount=Decimal('50.00'),
+            payment_date=today,
+            payment_method='CASH',
+            is_advance=True,
+            days_covered=5,
+            recorded_by=self.bus_teacher,
+        )
+
+        self.assertEqual(DebtRecord.objects.filter(student=self.student, status=DebtRecord.STATUS_PAID).count(), 2)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('20.00'))
+
+        # Reconcile command must also preserve 20.00 (not 40.00)
+        call_command('reconcile_wallets')
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('20.00'))
+
+    def test_collect_both_fees_walker_and_invalid_amount_and_quick_pay_momo(self):
+        """Walker BOTH puts 100% into canteen, invalid amount returns 400, quick_payment normalizes MOMO & marks is_advance."""
+        today = timezone.localdate()
+        self.client.force_login(self.principal)
+
+        walker = Student.objects.create(
+            first_name='Ama', last_name='Walker', student_class='Class 1',
+            bus=None, canteen_enrolled=True, custom_canteen_fee=Decimal('5.00'), is_active=True
+        )
+        res_walker = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({'student_id': walker.id, 'fee_type': 'BOTH', 'amount': '20.00', 'date': str(today)}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_walker.status_code, 200)
+        self.assertEqual(res_walker.json()['canteen_amount'], 20.0)
+        walker.refresh_from_db()
+        self.assertEqual(walker.canteen_credit_wallet, Decimal('15.00'))
+
+        res_bad = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({'student_id': walker.id, 'fee_type': 'BOTH', 'amount': 'abc', 'date': str(today)}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_bad.status_code, 400)
+        self.assertFalse(res_bad.json()['success'])
+
+        # quick_payment_api normalizes MOMO and marks 1-day topup as is_advance=True when today is already settled
+        self.client.force_login(self.bus_teacher)
+        FeePayment.objects.create(
+            student=self.student, bus=self.bus, fee_type='BUS',
+            amount=Decimal('10.00'), payment_date=today, payment_method='CASH', recorded_by=self.bus_teacher
+        )
+        res_qp = self.client.post(
+            reverse('api_quick_payment'),
+            data=json.dumps({
+                'student_id': self.student.id, 'fee_type': 'BUS',
+                'amount': '10.00', 'payment_method': 'MOMO', 'payment_date': str(today)
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_qp.status_code, 200)
+        p_momo = FeePayment.objects.filter(student=self.student, payment_method='MOBILE_MONEY').first()
+        self.assertIsNotNone(p_momo)
+        self.assertTrue(p_momo.is_advance)
+
+    def test_mark_unpaid_atomic_also_clock_in(self):
+        """mark_unpaid_api with also_clock_in=True atomically creates DebtRecord and ClockInRecord."""
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+
+        res = self.client.post(
+            reverse('api_mark_unpaid'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'BUS',
+                'date': str(today),
+                'also_clock_in': True,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['clocked_in'])
+        self.assertTrue(DebtRecord.objects.filter(student=self.student, date=today, fee_type='BUS').exists())
+        self.assertTrue(ClockInRecord.objects.filter(student=self.student, date=today, status='PRESENT').exists())
+
 
 class DebtorsListAndArrearsTests(TestCase):
     """Tests for persistent multi-day Debtors List, guest bus surcharge (+2), class filtering, overdue (>3d) alerts, and FIFO clearance."""

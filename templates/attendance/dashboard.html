@@ -107,7 +107,7 @@
         </div>
         <div id="stat-clocked-count" class="stat-value">{{ stats.clocked_in_count }} / {{ stats.total_students }}</div>
         <div class="stat-footer">
-            <span id="stat-clocked-pct" class="stat-badge stat-badge-success">{{ stats.clocked_in_pct }}% Present</span>
+            <span id="stat-clocked-pct" class="stat-badge {% if stats.clocked_in_pct > 0 %}stat-badge-success{% else %}stat-badge-info{% endif %}">{{ stats.clocked_in_pct }}% Present</span>
             <span>Arrival target: 100%</span>
         </div>
     </div>
@@ -175,7 +175,7 @@
     </button>
 
     <!-- Filters -->
-    <div id="mobile-filter-group" class="filter-group {% if class_filter or bus_filter or fee_filter or clockin_filter %}show-mobile{% endif %}">
+    <div id="mobile-filter-group" class="filter-group {% if search_query or fee_filter or clockin_filter %}show-mobile{% endif %}">
         {% if not is_attendance_only_teacher %}
         <!-- Class Filter -->
         {% if is_class_teacher_scoped %}
@@ -195,9 +195,9 @@
         <!-- Dynamic Bus Filter -->
         <select name="bus" class="filter-select" onchange="this.form.submit()">
             {% if is_bus_teacher_scoped %}
-                <option value="">🚌 My Assigned Routes</option>
+                <option value="my_buses" {% if bus_filter == 'my_buses' or not bus_filter %}selected{% endif %}>🚌 My Assigned Routes</option>
             {% else %}
-                <option value="">All Buses</option>
+                <option value="all" {% if bus_filter == 'all' or not bus_filter %}selected{% endif %}>All Buses</option>
             {% endif %}
             {% if teacher_assigned_buses and teacher_assigned_buses|length > 1 %}
                 <option value="my_buses" {% if bus_filter == 'my_buses' %}selected{% endif %}>
@@ -326,9 +326,11 @@
                         </td>
 
                         <!-- Quick Pay Action -->
-                        <td style="text-align: right;">
+                        <td style="text-align: right; white-space: nowrap;">
                             {% if user.profile and user.profile.can_record_payments %}
-                            <button type="button" class="btn-quick-pay" 
+                            <div style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                            <button type="button" class="btn-secondary btn-quick-pay" 
+                                    style="font-size:0.74rem; padding:0.28rem 0.6rem; border-color:rgba(16,185,129,0.45); color:#059669; font-weight:600;"
                                     data-student-id="{{ item.student.id }}" 
                                     data-student-name="{{ item.student.full_name }}"
                                     data-has-bus="{% if item.student.bus %}true{% else %}false{% endif %}"
@@ -345,11 +347,12 @@
                             </button>
                             <button type="button"
                                     class="btn-secondary"
-                                    style="font-size:0.74rem; padding:0.28rem 0.55rem; margin-left:0.25rem; border-color:rgba(239,68,68,0.4); color:#dc2626;"
+                                    style="font-size:0.74rem; padding:0.28rem 0.55rem; border-color:rgba(239,68,68,0.4); color:#dc2626;"
                                     onclick="openMarkUnpaidModal('{{ item.student.id }}', '{{ item.student.full_name|escapejs }}', '{{ item.student.bus_id|default:'' }}', '{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}')"
                                     title="Mark student unpaid & record on Debtors List">
                                 Unpaid
                             </button>
+                            </div>
                             {% if item.open_debt_total > 0 %}
                             <div style="margin-top:0.25rem;">
                                 <span style="font-size:0.7rem; font-weight:700; padding:0.1rem 0.45rem; border-radius:999px; background:{% if item.is_overdue_debt %}#dc2626{% else %}rgba(217,119,6,0.15){% endif %}; color:{% if item.is_overdue_debt %}#fff{% else %}#b45309{% endif %};">

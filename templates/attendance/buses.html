@@ -45,7 +45,7 @@
         </div>
         <div class="stat-value">{{ currency }}{{ total_fleet_collected|floatformat:2 }}</div>
         <div class="stat-footer">
-            <span class="stat-badge stat-badge-success">{{ period }}</span>
+            <span class="stat-badge stat-badge-success">Today ({{ TODAY|date:"M d, Y" }})</span>
         </div>
     </div>
 </div>
@@ -142,8 +142,8 @@
                         {{ item.bus.route_description|default:"No route details" }}
                     </div>
                 </div>
-                <div style="text-align:right;">
-                    <a href="{% url 'bus_analytics' item.bus.id %}" class="class-badge" style="font-size:0.72rem; padding:0.15rem 0.45rem; text-decoration:none;">
+                <div style="text-align:right; flex-shrink:0;">
+                    <a href="{% url 'bus_analytics' item.bus.id %}" class="class-badge" style="font-size:0.72rem; padding:0.2rem 0.5rem; text-decoration:none; white-space:nowrap;">
                         📊 {{ item.student_count }} Riders
                     </a>
                 </div>
@@ -160,8 +160,10 @@
                 </div>
             </div>
 
-            <div style="font-size:0.78rem; color:var(--text-muted); background:var(--surface); padding:0.4rem 0.6rem; border-radius:4px; border:1px solid var(--border-subtle);">
-                👤 <strong>{{ item.bus.driver_name|default:"Unassigned Driver" }}</strong> &bull; {{ item.bus.driver_phone|default:"No Phone" }} {% if item.bus.plate_number %} &bull; <code>{{ item.bus.plate_number }}</code>{% endif %}
+            <div style="font-size:0.78rem; color:var(--text-muted); background:var(--surface); padding:0.4rem 0.6rem; border-radius:4px; border:1px solid var(--border-subtle); display:flex; flex-wrap:wrap; gap:0.35rem; align-items:center;">
+                <span>👤 <strong>{{ item.bus.driver_name|default:"Unassigned Driver" }}</strong></span>
+                <span>&bull; {{ item.bus.driver_phone|default:"No Phone" }}</span>
+                {% if item.bus.plate_number %}<code style="white-space:nowrap;">{{ item.bus.plate_number }}</code>{% endif %}
             </div>
 
             <!-- Unified Mobile Action Row -->

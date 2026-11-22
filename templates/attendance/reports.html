@@ -129,7 +129,7 @@
     <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-main);">
         Daily Bus Fee Collections by Route ({{ target_date|date:"M d, Y" }})
     </h3>
-    <div class="table-card">
+    <div class="table-card desktop-only">
         <div class="table-responsive">
             <table class="data-table">
                 <thead>
@@ -202,6 +202,34 @@
             </table>
         </div>
     </div>
+
+    <!-- Mobile Bus Route Reconciliation Cards -->
+    <div class="mobile-only" style="flex-direction: column; gap: 0.6rem;">
+        {% for br in bus_reports %}
+        <div style="background: var(--surface-card); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.45rem;">
+                <div>
+                    <strong style="font-size: 0.92rem; color: var(--text-main);">{{ br.bus.name }}</strong>
+                    <div style="font-size: 0.74rem; color: var(--text-muted);">{{ br.riders_count }} riders &middot; {{ currency }}{{ br.rate|floatformat:2 }}/day</div>
+                </div>
+                <span class="stat-badge {% if br.collection_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}" style="white-space: nowrap;">
+                    {{ br.collection_pct }}%
+                </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; padding-top: 0.45rem; border-top: 1px solid var(--border-subtle); font-size: 0.76rem;">
+                <div><span style="color: var(--text-muted); display: block; font-size: 0.68rem;">Expected</span><strong>{{ currency }}{{ br.expected|floatformat:2 }}</strong></div>
+                <div><span style="color: var(--text-muted); display: block; font-size: 0.68rem;">Collected</span><strong style="color: var(--success-text);">{{ currency }}{{ br.collected|floatformat:2 }}</strong></div>
+                <div style="text-align: right;"><span style="color: var(--text-muted); display: block; font-size: 0.68rem;">Outstanding</span><strong style="color: {% if br.balance > 0 %}var(--danger-text){% else %}var(--success-text){% endif %};">{{ currency }}{{ br.balance|floatformat:2 }}</strong></div>
+            </div>
+        </div>
+        {% empty %}
+        <div style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No buses configured.</div>
+        {% endfor %}
+        <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.85rem; font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.4rem;">
+            <strong>Fleet Total</strong>
+            <span>Collected: <strong style="color: var(--success-text);">{{ currency }}{{ total_bus_col|floatformat:2 }}</strong> / {{ currency }}{{ total_bus_exp|floatformat:2 }}</span>
+        </div>
+    </div>
 </div>
 
 <!-- 3. Canteen Fee Reconciliation -->
@@ -210,9 +238,11 @@
         <h3 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-main);">
             Daily Canteen Fee Reconciliation ({{ target_date|date:"M d, Y" }})
         </h3>
+        {% if user.profile.is_principal %}
         <a href="{% url 'school_settings' %}" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.65rem;">
             ⚙️ Change Daily Rate ({{ currency }}{{ canteen_rate|floatformat:2 }}/day)
         </a>
+        {% endif %}
     </div>
     <div class="table-card">
         <div class="table-responsive">
@@ -299,8 +329,22 @@
                     </tr>
                 </tbody>
                 <tfoot>
+                    {% if debt_clearances_today > 0 %}
+                    <tr style="background: rgba(245, 158, 11, 0.08); font-size: 0.85rem;">
+                        <td><strong>Prior-Day Debt Clearances (Collected Today)</strong></td>
+                        <td style="text-align: right; color: var(--text-muted);">—</td>
+                        <td style="text-align: right; color: #b45309; font-weight: 700;">+{{ currency }}{{ debt_clearances_today|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--text-muted);">—</td>
+                        <td style="text-align: right; color: var(--text-muted);">Arrears Recovery</td>
+                    </tr>
+                    {% endif %}
                     <tr style="background: var(--surface-subtle); font-weight: 700; font-size: 0.95rem;">
-                        <td>Grand Total</td>
+                        <td>
+                            <div>Grand Total (Daily Service)</div>
+                            {% if debt_clearances_today > 0 %}
+                            <div style="font-size: 0.72rem; font-weight: 500; color: var(--text-muted);">Total Cash Received Today (Direct + Debt Clearances): {{ currency }}{{ total_cash_received_today|floatformat:2 }}</div>
+                            {% endif %}
+                        </td>
                         <td style="text-align: right;">{{ currency }}{{ grand_total_exp|floatformat:2 }}</td>
                         <td style="text-align: right; color: var(--success-text);">
                             <div>{{ currency }}{{ grand_total_col|floatformat:2 }}</div>

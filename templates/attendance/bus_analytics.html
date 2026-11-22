@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ bus.name }} - Payment Analytics | {{ SCHOOL_NAME }}{% endblock %}
+{% block title %}{{ bus.name }} - Payment Analytics{% endblock %}
 
 {% block content %}
 <!-- Page Header -->
@@ -106,17 +106,17 @@
         <div class="stat-value" style="color: var(--success);">
             {{ summary.paid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
         </div>
-        <div class="stat-footer">
-            <span class="stat-badge stat-badge-success">{{ summary.paid_pct }}% Paid</span>
-            <span>Fee settled for {{ target_date }}</span>
+        <div class="stat-footer" style="flex-wrap: wrap; gap: 0.35rem;">
+            <span class="stat-badge stat-badge-success" style="white-space: nowrap;">{{ summary.paid_pct }}% Paid</span>
+            <span style="white-space: nowrap;">Fee settled for {{ target_date }}</span>
         </div>
     </div>
 
     <!-- Unpaid Riders / Defaulters (Clickable Quick Filter) -->
     <div class="stat-card" id="unpaid-stat-card" onclick="triggerUnpaidFilter()" style="cursor: pointer; position: relative; transition: transform 0.15s ease, box-shadow 0.15s ease;" title="Click to show unpaid students immediately">
-        <div class="stat-header">
-            <span class="stat-title">Unpaid Riders</span>
-            <span style="font-size: 0.7rem; background: hsla(var(--danger-hsl), 0.15); color: var(--danger-text); padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem;">
+        <div class="stat-header" style="flex-wrap: wrap; gap: 0.35rem;">
+            <span class="stat-title" style="white-space: nowrap;">Unpaid Riders</span>
+            <span style="font-size: 0.7rem; background: hsla(var(--danger-hsl), 0.15); color: var(--danger-text); padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap;">
                 ⚡ Show Unpaid
             </span>
         </div>
@@ -129,11 +129,11 @@
                 {{ summary.unpaid_count }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 400;">/ {{ summary.total_riders }}</span>
             </div>
         {% endif %}
-        <div class="stat-footer">
-            <span class="stat-badge {% if summary.unpaid_count > 0 %}stat-badge-danger{% else %}stat-badge-success{% endif %}">
+        <div class="stat-footer" style="flex-wrap: wrap; gap: 0.35rem;">
+            <span class="stat-badge {% if summary.unpaid_count > 0 %}stat-badge-danger{% else %}stat-badge-success{% endif %}" style="white-space: nowrap;">
                 {{ summary.unpaid_pct }}% Owing
             </span>
-            <span>Arrears: {{ currency }}{{ summary.total_outstanding|floatformat:2 }}</span>
+            <span style="white-space: nowrap;">Arrears: {{ currency }}{{ summary.total_outstanding|floatformat:2 }}</span>
         </div>
     </div>
 

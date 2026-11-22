@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ title }} | {{ SCHOOL_NAME }}{% endblock %}
+{% block title %}{{ title }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -703,11 +703,18 @@
                 <!-- Clean Multi-Pay Prepayment Bar -->
                 <div class="multipay-card" style="background: var(--surface-card, #ffffff); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 0.95rem; margin-bottom: 1rem;">
                     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
-                        <label for="input-custom-multipay" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main); margin: 0;">
-                            Multi-Day Lump Sum
-                        </label>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <label for="input-custom-multipay" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main); margin: 0;">
+                                Multi-Day Lump Sum
+                            </label>
+                            <div id="multipay-target-group" style="display: inline-flex; gap: 0.3rem; flex-wrap: wrap;">
+                                <button type="button" class="btn-secondary multipay-target-pill active" data-target="BOTH" style="font-size: 0.76rem; padding: 0.35rem 0.65rem; min-height: 36px;">Both</button>
+                                <button type="button" class="btn-secondary multipay-target-pill" data-target="BUS" style="font-size: 0.76rem; padding: 0.35rem 0.65rem; min-height: 36px;">Bus Only</button>
+                                <button type="button" class="btn-secondary multipay-target-pill" data-target="CANTEEN" style="font-size: 0.76rem; padding: 0.35rem 0.65rem; min-height: 36px;">Canteen Only</button>
+                            </div>
+                        </div>
                         <div style="display: flex; align-items: center; gap: 0.4rem; flex: 1; max-width: 260px; justify-content: flex-end;">
-                            <input type="number" id="input-custom-multipay" step="0.50" min="0" placeholder="0.00" class="form-input" style="font-weight: 600; font-size: 0.9rem; min-height: 36px; padding: 0.35rem 0.6rem;">
+                            <input type="number" id="input-custom-multipay" step="0.01" min="0" placeholder="0.00" class="form-input" style="font-weight: 600; font-size: 0.9rem; min-height: 36px; padding: 0.35rem 0.6rem;">
                             <button type="button" id="btn-apply-multipay" class="btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; font-weight: 600; min-height: 36px; white-space: nowrap;">
                                 Apply
                             </button>
@@ -1761,6 +1768,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         calculateTotal();
         renderBulkCoveredPanel(student);
+        syncMultipayTargetForStudent(student);
         updateMarkUnpaidButton(student);
     }
 
@@ -1985,10 +1993,56 @@ document.addEventListener('DOMContentLoaded', () => {
         quickSearchInput.focus();
     }
 
+    let selectedMultipayTarget = 'BOTH';
+    const multipayTargetPills = document.querySelectorAll('.multipay-target-pill');
+
+    function setMultipayTarget(target) {
+        selectedMultipayTarget = target || 'BOTH';
+        multipayTargetPills.forEach(btn => {
+            const active = btn.dataset.target === selectedMultipayTarget;
+            btn.classList.toggle('active', active);
+            btn.style.borderColor = active ? 'var(--primary)' : 'var(--border)';
+            btn.style.background = active ? 'hsla(var(--primary-hsl, 221, 83%, 53%), 0.12)' : '';
+            btn.style.color = active ? 'var(--primary)' : '';
+            btn.style.fontWeight = active ? '700' : '500';
+        });
+        const amt = parseFloat(inputCustomMultipay ? inputCustomMultipay.value : 0) || 0;
+        if (amt > 0) renderMultipayPreview(amt, false);
+    }
+
+    function syncMultipayTargetForStudent(student) {
+        const selectedBusId = busSelect ? busSelect.value : '';
+        const hasBus = Boolean((selectedBusId && busesById[selectedBusId]) || (student && student.bus_id));
+        const hasCan = Boolean(student && student.canteen_enrolled);
+        multipayTargetPills.forEach(btn => {
+            const t = btn.dataset.target;
+            if (t === 'BUS') btn.style.display = hasBus ? 'inline-flex' : 'none';
+            else if (t === 'CANTEEN') btn.style.display = hasCan ? 'inline-flex' : 'none';
+            else btn.style.display = (hasBus && hasCan) ? 'inline-flex' : 'none';
+        });
+        if (hasBus && !hasCan) {
+            setMultipayTarget('BUS');
+        } else if (!hasBus && hasCan) {
+            setMultipayTarget('CANTEEN');
+        } else if (hasBus && hasCan) {
+            if (student && !student.is_bus_paid && student.is_canteen_paid) setMultipayTarget('BUS');
+            else if (student && student.is_bus_paid && !student.is_canteen_paid) setMultipayTarget('CANTEEN');
+            else setMultipayTarget('BOTH');
+        } else {
+            setMultipayTarget('BOTH');
+        }
+    }
+
+    multipayTargetPills.forEach(btn => {
+        btn.addEventListener('click', () => setMultipayTarget(btn.dataset.target));
+    });
+
     function getDailyRates() {
         const selectedBusId = busSelect ? busSelect.value : '';
-        const busFee = (selectedBusId && busesById[selectedBusId]) ? parseFloat(busesById[selectedBusId].fee) : 0;
-        const canteenFee = (currentStudent && currentStudent.canteen_enrolled && currentStudent.canteen_fee) ? parseFloat(currentStudent.canteen_fee) : 0;
+        const rawBusFee = (selectedBusId && busesById[selectedBusId]) ? parseFloat(busesById[selectedBusId].fee) : 0;
+        const rawCanteenFee = (currentStudent && currentStudent.canteen_enrolled && currentStudent.canteen_fee) ? parseFloat(currentStudent.canteen_fee) : 0;
+        const busFee = selectedMultipayTarget === 'CANTEEN' ? 0 : rawBusFee;
+        const canteenFee = selectedMultipayTarget === 'BUS' ? 0 : rawCanteenFee;
         return { busFee, canteenFee, totalDaily: busFee + canteenFee };
     }
 
@@ -2206,7 +2260,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const paymentDateInput = document.getElementById('id_payment_date');
             const targetDate = (paymentDateInput && paymentDateInput.value) ? paymentDateInput.value : '';
             const defaultType = getUnpaidFeeChoice(currentStudent) || 'BUS';
-            if (rpUnpaidFeeType) rpUnpaidFeeType.value = defaultType;
+            if (rpUnpaidFeeType) {
+                const busUnpaid = Boolean((currentStudent.bus_id || (busSelect && busSelect.value)) && !currentStudent.is_bus_paid);
+                const canUnpaid = Boolean(currentStudent.canteen_enrolled && !currentStudent.is_canteen_paid);
+                Array.from(rpUnpaidFeeType.options).forEach(opt => {
+                    if (opt.value === 'BUS') { opt.hidden = !busUnpaid; opt.disabled = !busUnpaid; }
+                    else if (opt.value === 'CANTEEN') { opt.hidden = !canUnpaid; opt.disabled = !canUnpaid; }
+                    else if (opt.value === 'BOTH') { opt.hidden = !(busUnpaid && canUnpaid); opt.disabled = !(busUnpaid && canUnpaid); }
+                });
+                rpUnpaidFeeType.value = defaultType;
+            }
             if (rpUnpaidNotes) rpUnpaidNotes.value = '';
             if (rpUnpaidClockin) rpUnpaidClockin.checked = !currentStudent.is_clocked_in;
             if (rpUnpaidFeedback) {
@@ -2256,6 +2319,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         bus_id: selectedBusVal || null,
                         date: targetDate,
                         notes: rpUnpaidNotes ? rpUnpaidNotes.value : '',
+                        also_clock_in: Boolean(rpUnpaidClockin && rpUnpaidClockin.checked && !currentStudent.is_clocked_in),
                     }),
                 });
                 const unpaidData = await unpaidRes.json();
@@ -2268,23 +2332,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 let finalMsg = unpaidData.message || `Marked ${currentStudent.name} as unpaid.`;
-                if (rpUnpaidClockin && rpUnpaidClockin.checked && !currentStudent.is_clocked_in) {
-                    const ciRes = await fetch("{% url 'api_clock_in_toggle' %}", {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': getCsrfToken(),
-                        },
-                        body: JSON.stringify({
-                            student_id: currentStudent.id,
-                            date: targetDate,
-                            action: 'clock_in',
-                        }),
-                    });
-                    const ciData = await ciRes.json();
-                    if (ciData.success) {
-                        finalMsg = `${finalMsg} & Clocked In.`;
-                    }
+                if (unpaidData.clocked_in) {
+                    finalMsg = `${finalMsg} & Clocked In.`;
                 }
 
                 // Invalidate cached student state so re-selecting reloads fresh debt/clock-in status
@@ -2310,6 +2359,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     btnRpUnpaidSubmit.disabled = false;
                     btnRpUnpaidSubmit.textContent = originalText;
                 }
+            }
+        });
+    }
+
+    const paymentDateInputGlobal = document.getElementById('id_payment_date');
+    if (paymentDateInputGlobal) {
+        paymentDateInputGlobal.addEventListener('change', () => {
+            if (currentStudent) {
+                currentStudent.loaded_date = '';
+                updateStudentDetails();
             }
         });
     }

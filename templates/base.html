@@ -9,7 +9,7 @@
     <title>{% block title %}Clock-In & Fee Tracker{% endblock %} | {{ SCHOOL_NAME }}</title>
 
     <!-- Minimalist Design System -->
-    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=1.5">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=1.9">
     {% block extra_css %}{% endblock %}
 </head>
 
@@ -304,7 +304,7 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
                                 </svg>
                             </button>
-                        {% else %}
+                        {% elif request.resolver_match.url_name != 'login' %}
                             <a href="{% url 'login' %}" class="btn-secondary">
                                 Sign In
                             </a>
@@ -414,7 +414,7 @@
                 <!-- Single Amount Field -->
                 <div id="modal-single-amount-group" class="form-group">
                     <label class="form-label" for="modal-amount">Amount ({{ CURRENCY_SYMBOL }})</label>
-                    <input type="number" step="0.50" min="0.01" id="modal-amount" class="form-input" placeholder="0.00">
+                    <input type="number" step="0.01" min="0.01" id="modal-amount" class="form-input" placeholder="0.00">
                 </div>
 
                 <!-- Dual Amount Fields (Displayed when BOTH is selected) -->
@@ -424,13 +424,13 @@
                         <div class="form-group" style="margin-bottom: 0;">
                             <label class="form-label" for="modal-bus-amount" style="font-size: 0.78rem;">Bus
                                 Amount</label>
-                            <input type="number" step="0.50" min="0" id="modal-bus-amount" class="form-input"
+                            <input type="number" step="0.01" min="0" id="modal-bus-amount" class="form-input"
                                 placeholder="0.00">
                         </div>
                         <div class="form-group" style="margin-bottom: 0;">
                             <label class="form-label" for="modal-canteen-amount" style="font-size: 0.78rem;">Canteen
                                 Amount</label>
-                            <input type="number" step="0.50" min="0" id="modal-canteen-amount" class="form-input"
+                            <input type="number" step="0.01" min="0" id="modal-canteen-amount" class="form-input"
                                 placeholder="0.00">
                         </div>
                     </div>

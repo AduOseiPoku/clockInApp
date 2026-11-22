@@ -15,7 +15,7 @@ class BusForm(forms.ModelForm):
         fields = ['name', 'fee', 'route_description', 'driver_name', 'driver_phone', 'plate_number', 'is_active']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': "e.g. 'Tema Bus', 'Madina Bus'"}),
-            'fee': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.50', 'min': '0'}),
+            'fee': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01', 'min': '0'}),
             'route_description': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'e.g. Comm 1 to Comm 25, via Highway'}),
             'driver_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Driver full name'}),
             'driver_phone': forms.TextInput(attrs={'class': 'form-input', 'placeholder': '+233 24 000 0000'}),
@@ -139,14 +139,14 @@ class FeePaymentForm(forms.Form):
         min_value=Decimal('0.00'),
         decimal_places=2,
         initial=Decimal('0.00'),
-        widget=forms.NumberInput(attrs={'class': 'form-input', 'step': '0.50', 'id': 'id_bus_amount', 'placeholder': '0.00'})
+        widget=forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01', 'id': 'id_bus_amount', 'placeholder': '0.00'})
     )
     canteen_amount = forms.DecimalField(
         required=False,
         min_value=Decimal('0.00'),
         decimal_places=2,
         initial=Decimal('0.00'),
-        widget=forms.NumberInput(attrs={'class': 'form-input', 'step': '0.50', 'id': 'id_canteen_amount', 'placeholder': '0.00'})
+        widget=forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01', 'id': 'id_canteen_amount', 'placeholder': '0.00'})
     )
 
     # Optional / hidden fields for automated defaults and backward compatibility
@@ -215,7 +215,7 @@ class SchoolSettingsForm(forms.Form):
         required=True,
         widget=forms.NumberInput(attrs={
             'class': 'form-input',
-            'step': '0.50',
+            'step': '0.01',
             'id': 'id_default_canteen_fee',
             'placeholder': '10.00'
         }),

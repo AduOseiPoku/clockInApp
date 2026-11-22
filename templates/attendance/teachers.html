@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Teachers & Staff | {{ SCHOOL_NAME }}{% endblock %}
+{% block title %}Teachers & Staff{% endblock %}
 
 {% block content %}
 <style>
@@ -722,14 +722,14 @@
                 </strong>
             </div>
             <div>
-                <button type="button" class="btn-table-action" id="btn-mobile-toggle-{{ t.id }}" style="color: var(--primary); font-weight: 600; font-size: 0.78rem; pointer-events: none;">
+                <button type="button" class="btn-secondary" id="btn-mobile-toggle-{{ t.id }}" style="color: var(--primary); font-weight: 600; font-size: 0.8rem; min-height: 38px; padding: 0.35rem 0.75rem; pointer-events: none;">
                     Details ▾
                 </button>
             </div>
         </div>
 
         <!-- Mobile Expandable Accordion Panel -->
-        <div id="mobile-details-{{ t.id }}" style="display: none; margin-top: 0.65rem; background: hsla(var(--primary-hsl), 0.025); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius-sm); padding: 0.75rem; animation: teacherFadeIn 0.2s ease;">
+        <div id="mobile-details-{{ t.id }}" style="display: none; margin-top: 0.65rem; background: var(--surface-card, #ffffff); color: var(--text-main); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: var(--radius-sm); padding: 0.85rem;">
             
             <!-- Mobile Header Bar: Username, Status & Fee Access -->
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; padding-bottom: 0.55rem; border-bottom: 1px solid var(--border);">

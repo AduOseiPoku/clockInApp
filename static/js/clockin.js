@@ -59,6 +59,7 @@ function updateLiveStats(stats) {
     }
     if (clockedPctElem && stats.clocked_in_pct !== undefined) {
         clockedPctElem.textContent = `${stats.clocked_in_pct}% Present`;
+        clockedPctElem.className = `stat-badge ${stats.clocked_in_pct > 0 ? 'stat-badge-success' : 'stat-badge-info'}`;
     }
     if (busCountElem && stats.bus_paid_count !== undefined) {
         busCountElem.innerHTML = `${stats.bus_paid_count} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ ${stats.bus_students_count}</span>`;

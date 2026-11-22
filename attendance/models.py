@@ -318,18 +318,40 @@ class Student(models.Model):
         return get_default_canteen_fee()
 
     def get_daily_bus_paid(self, target_date=None):
-        """Total bus payments recorded on target_date."""
+        """Total bus payments covering target_date (excludes allocations to other days' debts)."""
         if target_date is None:
             target_date = timezone.localdate()
-        result = self.payments.filter(fee_type='BUS', payment_date=target_date).aggregate(total=Sum('amount'))['total']
-        return result or Decimal('0.00')
+        total = self.payments.filter(fee_type='BUS', payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        if total > Decimal('0.00'):
+            other_day_debt = (
+                DebtPaymentAllocation.objects.filter(
+                    payment__student=self,
+                    payment__fee_type='BUS',
+                    payment__payment_date=target_date,
+                )
+                .exclude(debt_record__date=target_date)
+                .aggregate(total=Sum('amount_applied'))['total'] or Decimal('0.00')
+            )
+            total = max(Decimal('0.00'), total - other_day_debt)
+        return total
 
     def get_daily_canteen_paid(self, target_date=None):
-        """Total canteen payments recorded on target_date."""
+        """Total canteen payments covering target_date (excludes allocations to other days' debts)."""
         if target_date is None:
             target_date = timezone.localdate()
-        result = self.payments.filter(fee_type='CANTEEN', payment_date=target_date).aggregate(total=Sum('amount'))['total']
-        return result or Decimal('0.00')
+        total = self.payments.filter(fee_type='CANTEEN', payment_date=target_date).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        if total > Decimal('0.00'):
+            other_day_debt = (
+                DebtPaymentAllocation.objects.filter(
+                    payment__student=self,
+                    payment__fee_type='CANTEEN',
+                    payment__payment_date=target_date,
+                )
+                .exclude(debt_record__date=target_date)
+                .aggregate(total=Sum('amount_applied'))['total'] or Decimal('0.00')
+            )
+            total = max(Decimal('0.00'), total - other_day_debt)
+        return total
 
     def get_deducted_amount_for_date(self, fee_type, target_date=None):
         """Net prepaid wallet credit explicitly deducted for target_date."""
@@ -798,10 +820,63 @@ class CreditTransaction(models.Model):
         return f"{self.student.full_name} [{self.fee_type}] {self.transaction_type} {self.amount:.2f} -> Bal: {self.balance_after:.2f}"
 
 
+def _credit_wallet_after_prior_debts(student, payment, excess, wallet_field, topup_notes):
+    """
+    Settle any prior open DebtRecords (FIFO, date < payment.payment_date) from excess
+    before crediting the remaining excess to the student's prepaid wallet.
+    """
+    if excess <= Decimal('0.00'):
+        return
+
+    if not getattr(payment, '_is_debt_settlement', False):
+        prior_debts = list(
+            DebtRecord.objects.select_for_update()
+            .filter(
+                student=student,
+                fee_type=payment.fee_type,
+                date__lt=payment.payment_date,
+                status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
+            )
+            .order_by('date', 'created_at')
+        )
+        for pd in prior_debts:
+            if excess <= Decimal('0.00'):
+                break
+            to_apply = min(pd.remaining_amount, excess)
+            if to_apply > Decimal('0.00'):
+                pd.amount_paid += to_apply
+                pd.save()
+                DebtPaymentAllocation.objects.create(
+                    payment=payment,
+                    debt_record=pd,
+                    amount_applied=to_apply,
+                )
+                excess -= to_apply
+
+    if excess > Decimal('0.00'):
+        current_wallet = max(Decimal('0.00'), getattr(student, wallet_field) or Decimal('0.00'))
+        new_wallet = current_wallet + excess
+        setattr(student, wallet_field, new_wallet)
+        student.save(update_fields=[wallet_field])
+        if getattr(payment, 'student', None) is not None and payment.student_id == student.id:
+            setattr(payment.student, wallet_field, new_wallet)
+        CreditTransaction.objects.create(
+            student=student,
+            fee_type=payment.fee_type,
+            transaction_type=CreditTransaction.TYPE_TOP_UP,
+            amount=excess,
+            balance_after=new_wallet,
+            date=payment.payment_date,
+            payment=payment,
+            recorded_by=payment.recorded_by,
+            notes=topup_notes,
+        )
+
+
 def apply_payment_to_wallet(payment):
     """
     Sync a newly created FeePayment with the student's prepaid credit wallet:
-    - Excess above today's remaining fee is credited into the wallet (TOP_UP).
+    - Excess above today's remaining fee settles prior open debts FIFO, then credits the wallet (TOP_UP).
     - If payment is a partial cash remainder top-up (< daily_fee) while wallet credit > 0,
       applies wallet credit toward completing today's fee (DEDUCTION).
     """
@@ -813,27 +888,17 @@ def apply_payment_to_wallet(payment):
         if payment.fee_type == 'BUS':
             if payment.is_temporary_bus:
                 # 1-day guest rides should not auto-deduct from regular wallet,
-                # but any multi-day excess above the guest fare must still credit the wallet.
+                # but any multi-day excess above the guest fare settles prior debts / credits the wallet.
                 guest_fee = (payment.bus.fee if payment.bus_id else student.bus_fee_required) or Decimal('0.00')
                 guest_fee = max(Decimal('0.00'), guest_fee)
                 if payment.amount > guest_fee:
                     excess = payment.amount - guest_fee
-                    current_wallet = max(Decimal('0.00'), student.bus_credit_wallet or Decimal('0.00'))
-                    new_wallet = current_wallet + excess
-                    student.bus_credit_wallet = new_wallet
-                    student.save(update_fields=['bus_credit_wallet'])
-                    if getattr(payment, 'student', None) is not None and payment.student_id == student.id:
-                        payment.student.bus_credit_wallet = new_wallet
-                    CreditTransaction.objects.create(
-                        student=student,
-                        fee_type='BUS',
-                        transaction_type=CreditTransaction.TYPE_TOP_UP,
-                        amount=excess,
-                        balance_after=new_wallet,
-                        date=payment.payment_date,
-                        payment=payment,
-                        recorded_by=payment.recorded_by,
-                        notes=f"Guest bus advance credit from payment {payment.receipt_number or payment.id}",
+                    _credit_wallet_after_prior_debts(
+                        student,
+                        payment,
+                        excess,
+                        'bus_credit_wallet',
+                        f"Guest bus advance credit from payment {payment.receipt_number or payment.id}",
                     )
                 return
             daily_fee = student.bus_fee_required
@@ -861,21 +926,12 @@ def apply_payment_to_wallet(payment):
 
         if payment.amount > owed_before:
             excess = payment.amount - owed_before
-            new_wallet = current_wallet + excess
-            setattr(student, wallet_field, new_wallet)
-            student.save(update_fields=[wallet_field])
-            if getattr(payment, 'student', None) is not None and payment.student_id == student.id:
-                setattr(payment.student, wallet_field, new_wallet)
-            CreditTransaction.objects.create(
-                student=student,
-                fee_type=payment.fee_type,
-                transaction_type=CreditTransaction.TYPE_TOP_UP,
-                amount=excess,
-                balance_after=new_wallet,
-                date=payment.payment_date,
-                payment=payment,
-                recorded_by=payment.recorded_by,
-                notes=f"Bulk/advance credit from payment {payment.receipt_number or payment.id}",
+            _credit_wallet_after_prior_debts(
+                student,
+                payment,
+                excess,
+                wallet_field,
+                f"Bulk/advance credit from payment {payment.receipt_number or payment.id}",
             )
         elif payment.amount < owed_before and current_wallet > Decimal('0.00'):
             owed_after_cash = owed_before - payment.amount
@@ -1222,7 +1278,6 @@ def settle_student_debts(student, total_amount, actor=None, payment_method='CASH
                 student=student,
                 status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
             )
-            .select_related('bus')
             .order_by('date', 'fee_type', 'created_at')
         )
         total_open = sum((d.remaining_amount for d in open_debts), Decimal('0.00'))
