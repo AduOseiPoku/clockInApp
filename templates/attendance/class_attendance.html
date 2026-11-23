@@ -1,0 +1,156 @@
+{% extends 'base.html' %}
+
+{% block title %}Class-by-Class Attendance | {{ SCHOOL_NAME }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
+    <div>
+        <h1 style="font-size:1.5rem; font-weight:700; color:var(--text-main); margin:0;">Class-by-Class Attendance</h1>
+        <p style="color:var(--text-muted); font-size:0.875rem; margin-top:0.25rem;">
+            Clocked-in vs. not-clocked-in student roster per class for <strong>{{ target_date|date:"l, M j, Y" }}</strong>.
+        </p>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        {% if is_principal %}
+        <a href="{% url 'export_attendance_csv' %}?date={{ date_str }}" class="btn-secondary" style="display:inline-flex; align-items:center; gap:0.4rem;">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            Export CSV
+        </a>
+        {% endif %}
+        <a href="{% url 'dashboard' %}?date={{ date_str }}" class="btn-secondary">Back to Dashboard</a>
+    </div>
+</div>
+
+<!-- KPI Summary -->
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); font-weight:600;">Total Students</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--text-main); margin-top:0.25rem;">{{ total_students }}</div>
+    </div>
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid rgba(16,185,129,0.3); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#059669; font-weight:600;">Clocked In</div>
+        <div style="font-size:1.6rem; font-weight:700; color:#059669; margin-top:0.25rem;">{{ total_present }}</div>
+    </div>
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid rgba(239,68,68,0.3); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#dc2626; font-weight:600;">Not Clocked In</div>
+        <div style="font-size:1.6rem; font-weight:700; color:#dc2626; margin-top:0.25rem;">{{ total_absent }}</div>
+    </div>
+    <div class="stat-card" style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; padding:1rem 1.25rem;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); font-weight:600;">Attendance Rate</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--primary); margin-top:0.25rem;">{{ overall_pct }}%</div>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="form-card" style="margin-bottom:1.5rem; padding:1rem 1.25rem;">
+    <form method="GET" action="{% url 'class_attendance_breakdown' %}" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end;">
+        <div style="flex:0 1 170px;">
+            <label class="form-label" style="font-size:0.75rem;">Date</label>
+            <input type="date" name="date" value="{{ date_str }}" class="form-input" onchange="this.form.submit()">
+        </div>
+        <div style="flex:1; min-width:170px;">
+            <label class="form-label" style="font-size:0.75rem;">Class</label>
+            <select name="class" class="form-input" onchange="this.form.submit()">
+                <option value="">All Classes</option>
+                {% for cls in available_classes %}
+                <option value="{{ cls }}" {% if class_filter == cls %}selected{% endif %}>{{ cls }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1; min-width:180px;">
+            <label class="form-label" style="font-size:0.75rem;">Status Filter</label>
+            <select name="status" class="form-input" onchange="this.form.submit()">
+                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All (Clocked In &amp; Not Clocked In)</option>
+                <option value="clocked_in" {% if status_filter == 'clocked_in' %}selected{% endif %}>Clocked In Only</option>
+                <option value="not_clocked_in" {% if status_filter == 'not_clocked_in' %}selected{% endif %}>Not Clocked In Only</option>
+            </select>
+        </div>
+        <div style="flex:1.2; min-width:200px;">
+            <label class="form-label" style="font-size:0.75rem;">Search Student</label>
+            <input type="text" name="q" value="{{ search_q }}" class="form-input" placeholder="Student name...">
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+            <button type="submit" class="btn-primary">Apply</button>
+            <a href="{% url 'class_attendance_breakdown' %}" class="btn-secondary">Reset</a>
+        </div>
+    </form>
+</div>
+
+<!-- Class-by-Class Breakdown Cards -->
+{% if class_groups %}
+<div style="display:flex; flex-direction:column; gap:1.25rem;">
+    {% for grp in class_groups %}
+    <div style="background:var(--surface-card); border:1px solid var(--border-color); border-radius:12px; overflow:hidden;">
+        <!-- Class Header -->
+        <div style="padding:0.9rem 1.25rem; background:var(--surface-muted, rgba(0,0,0,0.025)); border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+            <div style="display:flex; align-items:center; gap:0.65rem;">
+                <h2 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-main);">{{ grp.class_name }}</h2>
+                <span style="font-size:0.75rem; font-weight:600; padding:0.15rem 0.55rem; border-radius:999px; background:rgba(59,130,246,0.1); color:#2563eb;">
+                    {{ grp.total_count }} enrolled
+                </span>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; font-size:0.8rem;">
+                <span style="padding:0.2rem 0.6rem; border-radius:999px; background:rgba(16,185,129,0.12); color:#059669; font-weight:600;">
+                    ✓ {{ grp.present_count }} Clocked In
+                </span>
+                <span style="padding:0.2rem 0.6rem; border-radius:999px; background:rgba(239,68,68,0.12); color:#dc2626; font-weight:600;">
+                    ⏳ {{ grp.absent_count }} Not Clocked In
+                </span>
+                <span style="font-weight:700; color:var(--text-main);">{{ grp.pct }}%</span>
+            </div>
+        </div>
+
+        <!-- Two-Column Student Lists -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));">
+            {% if status_filter != 'not_clocked_in' %}
+            <div style="padding:1rem 1.25rem; border-right:1px solid var(--border-color);">
+                <div style="font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#059669; margin-bottom:0.65rem;">
+                    Clocked In ({{ grp.present_count }})
+                </div>
+                {% if grp.clocked_in %}
+                <ul style="list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:0.45rem;">
+                    {% for item in grp.clocked_in %}
+                    <li style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; border-radius:8px; background:rgba(16,185,129,0.06); font-size:0.84rem;">
+                        <span style="font-weight:600; color:var(--text-main);">{{ item.student.full_name }}</span>
+                        <span style="font-size:0.75rem; color:#059669; font-weight:600;">
+                            {{ item.clock_in_time|time:"h:i A" }}
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p style="font-size:0.82rem; color:var(--text-muted); margin:0;">No students clocked in yet.</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if status_filter != 'clocked_in' %}
+            <div style="padding:1rem 1.25rem;">
+                <div style="font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#dc2626; margin-bottom:0.65rem;">
+                    Not Clocked In ({{ grp.absent_count }})
+                </div>
+                {% if grp.not_clocked_in %}
+                <ul style="list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:0.45rem;">
+                    {% for item in grp.not_clocked_in %}
+                    <li style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; border-radius:8px; background:rgba(239,68,68,0.06); font-size:0.84rem;">
+                        <span style="font-weight:600; color:var(--text-main);">{{ item.student.full_name }}</span>
+                        <span style="font-size:0.74rem; color:#dc2626; font-weight:600;">Not Clocked In</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p style="font-size:0.82rem; color:#059669; margin:0; font-weight:600;">All students in {{ grp.class_name }} are clocked in!</p>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="form-card" style="text-align:center; padding:3rem 1.5rem; color:var(--text-muted);">
+    <div style="font-weight:600; color:var(--text-main);">No matching classes or students found</div>
+    <p style="font-size:0.85rem; margin-top:0.25rem;">Try clearing your search or status filter.</p>
+</div>
+{% endif %}
+{% endblock %}

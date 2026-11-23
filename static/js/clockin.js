@@ -288,6 +288,10 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 if (modalAmountInput) modalAmountInput.value = (busBal > 0 ? busBal : busReq).toFixed(2);
             }
+        } else if (ft === 'MANAGEMENT') {
+            const mgmtReq = currentModalStudent.mgmtReq || 0;
+            const mgmtBal = currentModalStudent.mgmtBal || 0;
+            if (modalAmountInput) modalAmountInput.value = (mgmtBal > 0 ? mgmtBal : mgmtReq).toFixed(2);
         } else {
             // CANTEEN
             if (mode === '1day') {
@@ -329,9 +333,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const canteenPaid = payBtn.dataset.canteenPaid === 'true';
             const canteenReq = parseFloat(payBtn.dataset.canteenReq || 0);
             const canteenBal = parseFloat(payBtn.dataset.canteenBal || 0);
+            const paysMgmt = payBtn.dataset.paysMgmt === 'true';
+            const mgmtPaid = payBtn.dataset.mgmtPaid === 'true';
+            const mgmtReq = parseFloat(payBtn.dataset.mgmtReq || 0);
+            const mgmtBal = parseFloat(payBtn.dataset.mgmtBal || 0);
 
             let feeType = payBtn.dataset.feeType || 'BUS';
-            if (hasBus && !busPaid && hasCanteen && !canteenPaid) {
+            if (paysMgmt) {
+                feeType = 'MANAGEMENT';
+            } else if (hasBus && !busPaid && hasCanteen && !canteenPaid) {
                 feeType = 'BOTH';
             } else if (hasBus && !busPaid) {
                 feeType = 'BUS';
@@ -350,13 +360,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 canteenPaid,
                 canteenReq,
                 canteenBal,
+                paysMgmt,
+                mgmtPaid,
+                mgmtReq,
+                mgmtBal,
             };
 
             if (modalStudentName) modalStudentName.textContent = sName;
             if (modalStudentSub) {
                 const parts = [];
-                if (hasBus) parts.push(`🚌 Bus: ${curr}${busReq.toFixed(2)}/day (${busPaid ? 'Paid' : 'Owes ' + curr + busBal.toFixed(2)})`);
-                if (hasCanteen) parts.push(`🍽️ Lunch: ${curr}${canteenReq.toFixed(2)}/day (${canteenPaid ? 'Paid' : 'Owes ' + curr + canteenBal.toFixed(2)})`);
+                if (paysMgmt) {
+                    parts.push(`📋 Management Fee: ${curr}${mgmtReq.toFixed(2)} (${mgmtPaid ? 'Paid' : 'Due ' + curr + mgmtBal.toFixed(2)})`);
+                } else {
+                    if (hasBus) parts.push(`🚌 Bus: ${curr}${busReq.toFixed(2)}/day (${busPaid ? 'Paid' : 'Owes ' + curr + busBal.toFixed(2)})`);
+                    if (hasCanteen) parts.push(`🍽️ Lunch: ${curr}${canteenReq.toFixed(2)}/day (${canteenPaid ? 'Paid' : 'Owes ' + curr + canteenBal.toFixed(2)})`);
+                }
                 modalStudentSub.textContent = parts.join(' • ');
             }
             if (modalStudentIdInput) modalStudentIdInput.value = sId;
@@ -426,30 +444,53 @@ document.addEventListener('DOMContentLoaded', () => {
                     const mobileCanteen = document.getElementById(`mobile-canteen-fee-${studentId}`);
                     const curr = document.body.dataset.currency || 'GH₵';
 
-                    if (resData.bus_status) {
-                        const bStat = resData.bus_status;
-                        let badgeHtml;
-                        if (bStat.is_paid) {
-                            const creditNotice = bStat.credit_days > 0 ? ` <small style="font-size:0.68rem;opacity:0.85;">(${bStat.credit_days}d credit)</small>` : '';
-                            badgeHtml = `<span class="fee-badge fee-badge-paid">Paid (${curr}${bStat.required.toFixed(2)})${creditNotice}</span>`;
-                        } else {
-                            badgeHtml = `<span class="fee-badge fee-badge-unpaid">Owes ${curr}${bStat.balance.toFixed(2)}</span>`;
+                    if (resData.management_status && resData.management_status.pays_management_fee) {
+                        const mStat = resData.management_status;
+                        if (busCell) {
+                            busCell.innerHTML = `<span class="fee-badge" style="background:hsla(38,92%,50%,0.12);color:#b45309;border:1px solid hsla(38,92%,50%,0.25);">📋 Mgmt Fee Plan</span>`;
                         }
-                        if (busCell) busCell.innerHTML = badgeHtml;
-                        if (mobileBus) mobileBus.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Bus:</span> ${badgeHtml}`;
-                    }
+                        if (mobileBus) {
+                            mobileBus.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Plan:</span> <span class="fee-badge" style="font-size:0.7rem;background:hsla(38,92%,50%,0.12);color:#b45309;border:1px solid hsla(38,92%,50%,0.25);">📋 Mgmt Fee</span>`;
+                        }
+                        const mgmtBadge = mStat.is_paid
+                            ? `<span class="fee-badge fee-badge-paid">Mgmt Paid (${curr}${mStat.required.toFixed(2)})</span>`
+                            : `<span class="fee-badge fee-badge-unpaid">Mgmt Owes ${curr}${mStat.balance.toFixed(2)}</span>`;
+                        const mobileMgmtBadge = mStat.is_paid
+                            ? `<span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid (${curr}${mStat.required.toFixed(2)})</span>`
+                            : `<span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes ${curr}${mStat.balance.toFixed(2)}</span>`;
+                        if (canteenCell) canteenCell.innerHTML = mgmtBadge;
+                        if (mobileCanteen) mobileCanteen.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Mgmt:</span> ${mobileMgmtBadge}`;
 
-                    if (resData.canteen_status) {
-                        const cStat = resData.canteen_status;
-                        let badgeHtml;
-                        if (cStat.is_paid) {
-                            const creditNotice = cStat.credit_days > 0 ? ` <small style="font-size:0.68rem;opacity:0.85;">(${cStat.credit_days}d credit)</small>` : '';
-                            badgeHtml = `<span class="fee-badge fee-badge-paid">Paid (${curr}${cStat.required.toFixed(2)})${creditNotice}</span>`;
-                        } else {
-                            badgeHtml = `<span class="fee-badge fee-badge-unpaid">Owes ${curr}${cStat.balance.toFixed(2)}</span>`;
+                        document.querySelectorAll(`.btn-quick-pay[data-student-id="${studentId}"]`).forEach(btn => {
+                            btn.dataset.mgmtPaid = mStat.is_paid ? 'true' : 'false';
+                            btn.dataset.mgmtBal = mStat.balance.toFixed(2);
+                        });
+                    } else {
+                        if (resData.bus_status) {
+                            const bStat = resData.bus_status;
+                            let badgeHtml;
+                            if (bStat.is_paid) {
+                                const creditNotice = bStat.credit_days > 0 ? ` <small style="font-size:0.68rem;opacity:0.85;">(${bStat.credit_days}d credit)</small>` : '';
+                                badgeHtml = `<span class="fee-badge fee-badge-paid">Paid (${curr}${bStat.required.toFixed(2)})${creditNotice}</span>`;
+                            } else {
+                                badgeHtml = `<span class="fee-badge fee-badge-unpaid">Owes ${curr}${bStat.balance.toFixed(2)}</span>`;
+                            }
+                            if (busCell) busCell.innerHTML = badgeHtml;
+                            if (mobileBus) mobileBus.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Bus:</span> ${badgeHtml}`;
                         }
-                        if (canteenCell) canteenCell.innerHTML = badgeHtml;
-                        if (mobileCanteen) mobileCanteen.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Canteen:</span> ${badgeHtml}`;
+
+                        if (resData.canteen_status) {
+                            const cStat = resData.canteen_status;
+                            let badgeHtml;
+                            if (cStat.is_paid) {
+                                const creditNotice = cStat.credit_days > 0 ? ` <small style="font-size:0.68rem;opacity:0.85;">(${cStat.credit_days}d credit)</small>` : '';
+                                badgeHtml = `<span class="fee-badge fee-badge-paid">Paid (${curr}${cStat.required.toFixed(2)})${creditNotice}</span>`;
+                            } else {
+                                badgeHtml = `<span class="fee-badge fee-badge-unpaid">Owes ${curr}${cStat.balance.toFixed(2)}</span>`;
+                            }
+                            if (canteenCell) canteenCell.innerHTML = badgeHtml;
+                            if (mobileCanteen) mobileCanteen.innerHTML = `<span style="font-weight:600; color:var(--text-muted);">Canteen:</span> ${badgeHtml}`;
+                        }
                     }
 
                     if (resData.stats) updateLiveStats(resData.stats);

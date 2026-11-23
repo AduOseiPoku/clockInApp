@@ -4268,6 +4268,16 @@ class MultipayReconciliationAndTallyTests(TestCase):
         self.assertTrue(DebtRecord.objects.filter(student=self.student, date=today, fee_type='BUS').exists())
         self.assertTrue(ClockInRecord.objects.filter(student=self.student, date=today, status='PRESENT').exists())
 
+    def test_csv_exports_include_utf8_bom_for_cedi_symbol(self):
+        """All CSV exports emit a UTF-8 BOM so GH₵ renders cleanly in Excel."""
+        self.client.force_login(self.principal)
+        for url_name in ('export_debtors_csv', 'payment_export_csv', 'export_attendance_csv', 'student_template_download'):
+            res = self.client.get(reverse(url_name))
+            self.assertEqual(res.status_code, 200, url_name)
+            self.assertTrue(res.content.startswith(b'\xef\xbb\xbf'), f"{url_name} missing UTF-8 BOM")
+        debtors_res = self.client.get(reverse('export_debtors_csv'))
+        self.assertIn('GH₵', debtors_res.content.decode('utf-8-sig'))
+
 
 class DebtorsListAndArrearsTests(TestCase):
     """Tests for persistent multi-day Debtors List, guest bus surcharge (+2), class filtering, overdue (>3d) alerts, and FIFO clearance."""
@@ -4468,6 +4478,199 @@ class DebtorsListAndArrearsTests(TestCase):
         debt = DebtRecord.objects.get(student=self.student_1a, date=today, fee_type='BUS')
         self.assertEqual(debt.status, DebtRecord.STATUS_PAID)
         self.assertEqual(debt.remaining_amount, Decimal('0.00'))
+
+
+class ClassAttendanceBreakdownTests(TestCase):
+    """Tests for Class-by-Class Clocked-In vs Not-Clocked-In breakdown and Bursar exclusion."""
+
+    def setUp(self):
+        self.admin = User.objects.create_superuser('principal_att', 'p@test.com', 'pw')
+        self.bursar = User.objects.create_user('bursar_att', 'b@test.com', 'pw')
+        self.bursar.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar.profile.save()
+
+        self.teacher_1a = User.objects.create_user('teacher_1a', 't@test.com', 'pw')
+        self.teacher_1a.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_1a.profile.assigned_class = 'Class 1A'
+        self.teacher_1a.profile.save()
+
+        self.s1 = Student.objects.create(first_name='Kofi', last_name='Mensah', student_class='Class 1A')
+        self.s2 = Student.objects.create(first_name='Abena', last_name='Osei', student_class='Class 1A')
+        self.s3 = Student.objects.create(first_name='Esi', last_name='Appiah', student_class='Class 2B')
+
+        today = timezone.localdate()
+        ClockInRecord.objects.create(student=self.s1, date=today, status='PRESENT', recorded_by=self.teacher_1a)
+
+    def test_admin_sees_all_classes_clocked_in_and_not_clocked_in(self):
+        self.client.force_login(self.admin)
+        res = self.client.get(reverse('class_attendance_breakdown'))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.context['total_students'], 3)
+        self.assertEqual(res.context['total_present'], 1)
+        self.assertEqual(res.context['total_absent'], 2)
+        self.assertEqual(res.context['classes_count'], 2)
+
+        groups = {g['class_name']: g for g in res.context['class_groups']}
+        self.assertEqual([i['student'].id for i in groups['Class 1A']['clocked_in']], [self.s1.id])
+        self.assertEqual([i['student'].id for i in groups['Class 1A']['not_clocked_in']], [self.s2.id])
+        self.assertEqual([i['student'].id for i in groups['Class 2B']['not_clocked_in']], [self.s3.id])
+
+        # Filter by status=not_clocked_in & class=Class 1A
+        res_filtered = self.client.get(reverse('class_attendance_breakdown') + '?class=Class+1A&status=not_clocked_in')
+        self.assertEqual(res_filtered.status_code, 200)
+        self.assertEqual(len(res_filtered.context['class_groups']), 1)
+        self.assertContains(res_filtered, 'Abena Osei')
+
+    def test_teacher_is_scoped_to_assigned_class(self):
+        self.client.force_login(self.teacher_1a)
+        res = self.client.get(reverse('class_attendance_breakdown'))
+        self.assertEqual(res.status_code, 200)
+        groups = [g['class_name'] for g in res.context['class_groups']]
+        self.assertEqual(groups, ['Class 1A'])
+        self.assertNotContains(res, 'Esi Appiah')
+
+    def test_bursar_is_blocked_from_class_attendance_breakdown(self):
+        self.client.force_login(self.bursar)
+        res = self.client.get(reverse('class_attendance_breakdown'))
+        self.assertEqual(res.status_code, 302)
+        self.assertRedirects(res, reverse('payment_list'))
+
+        # Bursar sidebar also must not show Class Attendance link
+        pay_res = self.client.get(reverse('payment_list'))
+        self.assertNotContains(pay_res, reverse('class_attendance_breakdown'))
+
+
+class ManagementFeeSystemTests(TestCase):
+    """Tests for Management Fee student enrollment, teacher clock-in, dashboard totals, and permissions."""
+
+    def setUp(self):
+        self.client = Client()
+        self.admin_user = User.objects.create_superuser('mgmt_admin', 'admin@mgmt.test', 'pass123')
+        self.admin_user.profile.role = UserProfile.ROLE_ADMIN
+        self.admin_user.profile.save()
+
+        self.teacher_user = User.objects.create_user('mgmt_teacher', 'teacher@mgmt.test', 'pass123')
+        self.teacher_user.profile.role = UserProfile.ROLE_TEACHER
+        self.teacher_user.profile.assigned_class = 'Class 1A'
+        self.teacher_user.profile.can_collect_fees = False
+        self.teacher_user.profile.save()
+
+        self.bursar_user = User.objects.create_user('mgmt_bursar', 'bursar@mgmt.test', 'pass123')
+        self.bursar_user.profile.role = UserProfile.ROLE_ACCOUNTANT
+        self.bursar_user.profile.save()
+
+        SchoolClass.objects.create(name='Class 1A')
+        self.bus = Bus.objects.create(name='East Bus', fee=Decimal('40.00'))
+        SchoolSetting.set_setting('DEFAULT_MANAGEMENT_FEE', '150.00', 'Default management fee')
+
+        self.student = Student.objects.create(
+            first_name='Yaw',
+            last_name='Boakye',
+            student_class='Class 1A',
+            bus=self.bus,
+            canteen_enrolled=True,
+        )
+
+    def test_admin_can_enable_management_fee_and_clears_bus_canteen(self):
+        """Admin modifying student to pays_management_fee=True automatically clears bus and canteen."""
+        self.client.force_login(self.admin_user)
+        url = reverse('student_update', args=[self.student.pk])
+        res = self.client.post(url, {
+            'first_name': 'Yaw',
+            'last_name': 'Boakye',
+            'student_class': 'Class 1A',
+            'bus': self.bus.pk,
+            'canteen_enrolled': 'on',
+            'pays_management_fee': 'on',
+            'custom_management_fee': '',
+            'is_active': 'on',
+        }, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertTrue(self.student.pays_management_fee)
+        self.assertIsNone(self.student.bus)
+        self.assertFalse(self.student.canteen_enrolled)
+        self.assertEqual(self.student.bus_fee_required, Decimal('0.00'))
+        self.assertEqual(self.student.canteen_fee_required, Decimal('0.00'))
+        self.assertEqual(self.student.management_fee_required, Decimal('150.00'))
+
+    def test_teacher_cannot_modify_management_fee_field_in_form(self):
+        """StudentForm strips pays_management_fee and custom_management_fee for non-admin teachers."""
+        form = StudentForm(instance=self.student, user_obj=self.teacher_user)
+        self.assertNotIn('pays_management_fee', form.fields)
+        self.assertNotIn('custom_management_fee', form.fields)
+
+    def test_teacher_can_clock_in_student_owing_management_fee(self):
+        """Teachers can clock in a student who owes Management Fee without blockage, while revenue stays masked."""
+        self.student.pays_management_fee = True
+        self.student.save()
+        self.assertFalse(self.student.is_management_fee_paid())
+
+        self.client.force_login(self.teacher_user)
+        dash_res = self.client.get(reverse('dashboard'))
+        self.assertEqual(dash_res.status_code, 200)
+        self.assertContains(dash_res, 'Yaw Boakye')
+        self.assertNotContains(dash_res, "Today's Revenue")
+
+        clockin_res = self.client.post(
+            reverse('api_clock_in_toggle'),
+            data=json.dumps({'student_id': self.student.id, 'action': 'clock_in'}),
+            content_type='application/json'
+        )
+        self.assertEqual(clockin_res.status_code, 200)
+        self.assertTrue(clockin_res.json()['success'])
+        self.assertTrue(clockin_res.json()['is_clocked_in'])
+
+        # Authorized fee-collecting teacher sees Management Fee badges instead of bus/lunch alerts
+        self.teacher_user.profile.can_collect_fees = True
+        self.teacher_user.profile.save()
+        dash_fee_res = self.client.get(reverse('dashboard'))
+        self.assertEqual(dash_fee_res.status_code, 200)
+        self.assertContains(dash_fee_res, 'Mgmt Fee Plan')
+        self.assertContains(dash_fee_res, 'Mgmt Owes')
+
+    def test_management_fee_payment_syncs_with_dashboard_totals_ledger_and_reports(self):
+        """Recording a Management Fee payment adds to dashboard daily totals, ledger, and reports."""
+        self.student.pays_management_fee = True
+        self.student.save()
+
+        self.client.force_login(self.admin_user)
+        pay_res = self.client.post(
+            reverse('api_quick_payment'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'MANAGEMENT',
+                'amount': '150.00',
+                'payment_method': 'CASH',
+                'receipt_number': 'REC-MGMT-100',
+            }),
+            content_type='application/json'
+        )
+        self.assertEqual(pay_res.status_code, 200)
+        data = pay_res.json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['management_status']['is_paid'])
+        self.assertEqual(Decimal(str(data['stats']['daily_management_collected'])), Decimal('150.00'))
+        self.assertEqual(Decimal(str(data['stats']['daily_total_collected'])), Decimal('150.00'))
+
+        # Dashboard reflects updated revenue & paid badge
+        dash_res = self.client.get(reverse('dashboard'))
+        self.assertEqual(dash_res.status_code, 200)
+        self.assertContains(dash_res, '150.00')
+        self.assertContains(dash_res, 'Mgmt Paid')
+
+        # Bursar sees Management Fee in ledger & reports
+        self.client.force_login(self.bursar_user)
+        ledger_res = self.client.get(reverse('payment_list') + '?fee_type=MANAGEMENT')
+        self.assertEqual(ledger_res.status_code, 200)
+        self.assertContains(ledger_res, 'REC-MGMT-100')
+        self.assertContains(ledger_res, 'Management Fee')
+
+        report_res = self.client.get(reverse('reports'))
+        self.assertEqual(report_res.status_code, 200)
+        self.assertEqual(report_res.context['management_collected'], Decimal('150.00'))
+        self.assertEqual(report_res.context['grand_total_col'], Decimal('150.00'))
+
 
 
 

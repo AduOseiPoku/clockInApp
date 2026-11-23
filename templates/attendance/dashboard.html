@@ -82,7 +82,7 @@
         </div>
         <div id="stat-daily-revenue" class="stat-value" style="color:var(--primary);">{{ currency }}{{ stats.daily_total_collected|floatformat:2 }}</div>
         <div class="stat-footer">
-            <span>{{ stats.total_students }} active students</span>
+            <span>Bus: {{ currency }}{{ stats.daily_bus_collected|floatformat:0 }} &bull; Lunch: {{ currency }}{{ stats.daily_canteen_collected|floatformat:0 }}{% if stats.daily_management_collected > 0 %} &bull; Mgmt: {{ currency }}{{ stats.daily_management_collected|floatformat:0 }}{% endif %}</span>
             <span class="stat-badge stat-badge-info">Daily Total</span>
         </div>
     </div>
@@ -219,6 +219,7 @@
             <option value="">All Fees</option>
             <option value="unpaid_bus" {% if fee_filter == 'unpaid_bus' %}selected{% endif %}>Owing Bus Fare</option>
             <option value="unpaid_canteen" {% if fee_filter == 'unpaid_canteen' %}selected{% endif %}>Owing Lunch Fee</option>
+            <option value="unpaid_management" {% if fee_filter == 'unpaid_management' %}selected{% endif %}>Owing Management Fee</option>
             <option value="fully_paid" {% if fee_filter == 'fully_paid' %}selected{% endif %}>Fully Settled</option>
         </select>
         {% endif %}
@@ -289,7 +290,9 @@
 
                         <!-- Bus Fee Status -->
                         <td id="bus-fee-cell-{{ item.student.id }}">
-                            {% if not item.student.bus %}
+                            {% if item.pays_management_fee %}
+                                <span class="fee-badge" style="background:hsla(38,92%,50%,0.12);color:#b45309;border:1px solid hsla(38,92%,50%,0.25);">📋 Mgmt Fee Plan</span>
+                            {% elif not item.student.bus %}
                                 <span class="fee-badge fee-badge-none">No Bus</span>
                             {% elif item.is_bus_paid %}
                                 <span class="fee-badge fee-badge-paid">Paid ({{ currency }}{{ item.bus_req|floatformat:2 }}){% if item.bus_credit_days > 0 %} <small style="font-size:0.68rem;opacity:0.85;">({{ item.bus_credit_days }}d credit)</small>{% endif %}</span>
@@ -300,7 +303,13 @@
 
                         <!-- Canteen Fee Status -->
                         <td id="canteen-fee-cell-{{ item.student.id }}">
-                            {% if not item.student.canteen_enrolled %}
+                            {% if item.pays_management_fee %}
+                                {% if item.is_mgmt_paid %}
+                                    <span class="fee-badge fee-badge-paid">Mgmt Paid ({{ currency }}{{ item.mgmt_req|floatformat:2 }})</span>
+                                {% else %}
+                                    <span class="fee-badge fee-badge-unpaid">Mgmt Owes {{ currency }}{{ item.mgmt_balance|floatformat:2 }}</span>
+                                {% endif %}
+                            {% elif not item.student.canteen_enrolled %}
                                 <span class="fee-badge fee-badge-none">Opted Out</span>
                             {% elif item.is_canteen_paid %}
                                 <span class="fee-badge fee-badge-paid">Paid ({{ currency }}{{ item.canteen_req|floatformat:2 }}){% if item.canteen_credit_days > 0 %} <small style="font-size:0.68rem;opacity:0.85;">({{ item.canteen_credit_days }}d credit)</small>{% endif %}</span>
@@ -341,8 +350,12 @@
                                     data-canteen-paid="{% if item.is_canteen_paid %}true{% else %}false{% endif %}"
                                     data-canteen-req="{{ item.canteen_req }}"
                                     data-canteen-bal="{{ item.canteen_balance }}"
-                                    data-fee-type="{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
-                                    data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}">
+                                    data-pays-mgmt="{% if item.pays_management_fee %}true{% else %}false{% endif %}"
+                                    data-mgmt-paid="{% if item.is_mgmt_paid %}true{% else %}false{% endif %}"
+                                    data-mgmt-req="{{ item.mgmt_req }}"
+                                    data-mgmt-bal="{{ item.mgmt_balance }}"
+                                    data-fee-type="{% if item.pays_management_fee %}MANAGEMENT{% elif item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
+                                    data-default-amount="{% if item.pays_management_fee %}{{ item.mgmt_balance }}{% elif item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}">
                                 Pay
                             </button>
                             <button type="button"
@@ -433,23 +446,37 @@
             <!-- Fees Summary Badges -->
             <div class="student-card-fees">
                 <div id="mobile-bus-fee-{{ item.student.id }}">
-                    <span style="font-weight:600; color:var(--text-muted);">Bus:</span>
-                    {% if not item.student.bus %}
-                        <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">None</span>
-                    {% elif item.is_bus_paid %}
-                        <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.bus_req|floatformat:2 }}){% if item.bus_credit_days > 0 %} <small>({{ item.bus_credit_days }}d)</small>{% endif %}</span>
+                    {% if item.pays_management_fee %}
+                        <span style="font-weight:600; color:var(--text-muted);">Plan:</span>
+                        <span class="fee-badge" style="font-size:0.7rem;background:hsla(38,92%,50%,0.12);color:#b45309;border:1px solid hsla(38,92%,50%,0.25);">📋 Mgmt Fee</span>
                     {% else %}
-                        <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.bus_balance|floatformat:2 }}</span>
+                        <span style="font-weight:600; color:var(--text-muted);">Bus:</span>
+                        {% if not item.student.bus %}
+                            <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">None</span>
+                        {% elif item.is_bus_paid %}
+                            <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.bus_req|floatformat:2 }}){% if item.bus_credit_days > 0 %} <small>({{ item.bus_credit_days }}d)</small>{% endif %}</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.bus_balance|floatformat:2 }}</span>
+                        {% endif %}
                     {% endif %}
                 </div>
                 <div id="mobile-canteen-fee-{{ item.student.id }}">
-                    <span style="font-weight:600; color:var(--text-muted);">Canteen:</span>
-                    {% if not item.student.canteen_enrolled %}
-                        <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">Opt Out</span>
-                    {% elif item.is_canteen_paid %}
-                        <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.canteen_req|floatformat:2 }}){% if item.canteen_credit_days > 0 %} <small>({{ item.canteen_credit_days }}d)</small>{% endif %}</span>
+                    {% if item.pays_management_fee %}
+                        <span style="font-weight:600; color:var(--text-muted);">Mgmt:</span>
+                        {% if item.is_mgmt_paid %}
+                            <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.mgmt_req|floatformat:2 }})</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.mgmt_balance|floatformat:2 }}</span>
+                        {% endif %}
                     {% else %}
-                        <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.canteen_balance|floatformat:2 }}</span>
+                        <span style="font-weight:600; color:var(--text-muted);">Canteen:</span>
+                        {% if not item.student.canteen_enrolled %}
+                            <span class="fee-badge fee-badge-none" style="font-size:0.7rem;">Opt Out</span>
+                        {% elif item.is_canteen_paid %}
+                            <span class="fee-badge fee-badge-paid" style="font-size:0.7rem;">Paid ({{ currency }}{{ item.canteen_req|floatformat:2 }}){% if item.canteen_credit_days > 0 %} <small>({{ item.canteen_credit_days }}d)</small>{% endif %}</span>
+                        {% else %}
+                            <span class="fee-badge fee-badge-unpaid" style="font-size:0.7rem;">Owes {{ currency }}{{ item.canteen_balance|floatformat:2 }}</span>
+                        {% endif %}
                     {% endif %}
                 </div>
             </div>
@@ -484,8 +511,12 @@
                         data-canteen-paid="{% if item.is_canteen_paid %}true{% else %}false{% endif %}"
                         data-canteen-req="{{ item.canteen_req }}"
                         data-canteen-bal="{{ item.canteen_balance }}"
-                        data-fee-type="{% if item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
-                        data-default-amount="{% if item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}"
+                        data-pays-mgmt="{% if item.pays_management_fee %}true{% else %}false{% endif %}"
+                        data-mgmt-paid="{% if item.is_mgmt_paid %}true{% else %}false{% endif %}"
+                        data-mgmt-req="{{ item.mgmt_req }}"
+                        data-mgmt-bal="{{ item.mgmt_balance }}"
+                        data-fee-type="{% if item.pays_management_fee %}MANAGEMENT{% elif item.student.bus and not item.is_bus_paid and item.student.canteen_enrolled and not item.is_canteen_paid %}BOTH{% elif item.student.bus and not item.is_bus_paid %}BUS{% else %}CANTEEN{% endif %}"
+                        data-default-amount="{% if item.pays_management_fee %}{{ item.mgmt_balance }}{% elif item.student.bus and not item.is_bus_paid %}{{ item.bus_balance }}{% else %}{{ item.canteen_balance }}{% endif %}"
                         title="Record Payment">
                     💳 Pay
                 </button>

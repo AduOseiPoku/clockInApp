@@ -418,6 +418,21 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="form-group" style="margin-top: 1.15rem; margin-bottom: 0;">
+                    <label class="form-label" for="{{ form.default_management_fee.id_for_label }}" style="font-weight: 600;">
+                        Default Management Fee ({{ CURRENCY_SYMBOL }})
+                    </label>
+                    {{ form.default_management_fee }}
+                    <small class="form-hint" style="margin-top: 0.35rem; display: block;">
+                        {{ form.default_management_fee.help_text }} ({{ enrolled_management_count }} enrolled student{{ enrolled_management_count|pluralize }})
+                    </small>
+                    {% if form.default_management_fee.errors %}
+                        <div style="color: var(--danger-text); font-size: 0.82rem; margin-top: 0.25rem;">
+                            {{ form.default_management_fee.errors }}
+                        </div>
+                    {% endif %}
+                </div>
             </div>
 
             <!-- Section 2: School Branding & Ledger Info -->

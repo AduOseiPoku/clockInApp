@@ -270,6 +270,7 @@
             <option value="">All Fee Types</option>
             <option value="BUS" {% if fee_type == 'BUS' %}selected{% endif %}>Bus Fee</option>
             <option value="CANTEEN" {% if fee_type == 'CANTEEN' %}selected{% endif %}>Canteen Fee</option>
+            <option value="MANAGEMENT" {% if fee_type == 'MANAGEMENT' %}selected{% endif %}>Management Fee</option>
         </select>
 
         <select name="class" class="filter-select" onchange="this.form.submit()">
@@ -349,6 +350,8 @@
                                     🚌 One-Off Trip
                                 </span>
                                 {% endif %}
+                            {% elif p.fee_type == 'MANAGEMENT' %}
+                                <span class="fee-badge" style="background:hsla(38,92%,50%,0.12);color:#b45309;border:1px solid hsla(38,92%,50%,0.25);">Management Fee</span>
                             {% else %}
                                 <span class="fee-badge fee-badge-paid">Canteen Fee</span>
                             {% endif %}

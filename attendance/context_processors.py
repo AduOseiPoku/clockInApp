@@ -22,6 +22,12 @@ def school_settings(request):
     except Exception:
         default_canteen = get_default_canteen_fee()
 
+    raw_mgmt = all_settings.get('DEFAULT_MANAGEMENT_FEE')
+    try:
+        default_management = Decimal(str(raw_mgmt)) if raw_mgmt is not None else Decimal('0.00')
+    except Exception:
+        default_management = Decimal('0.00')
+
     overdue_summary = {
         'total_debtors_count': 0,
         'total_debt_amount': Decimal('0.00'),
@@ -42,6 +48,7 @@ def school_settings(request):
         'CURRENCY_SYMBOL': currency_symbol,
         'CURRENT_ACADEMIC_PERIOD': period,
         'DEFAULT_CANTEEN_FEE': default_canteen,
+        'DEFAULT_MANAGEMENT_FEE': default_management,
         'TERM_START_DATE': term_start,
         'TERM_END_DATE': term_end,
         'TODAY': timezone.localdate(),

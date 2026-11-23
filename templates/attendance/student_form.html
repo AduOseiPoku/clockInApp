@@ -73,6 +73,37 @@
         </div>
         {% endif %}
 
+        {% if form.pays_management_fee %}
+        <div class="form-group" style="background: hsla(38, 92%, 50%, 0.06); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid hsla(38, 92%, 50%, 0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
+                <span style="font-weight: 700; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 0.4rem;">
+                    <span>📋</span> Management Fee Plan (No Bus / No Lunch)
+                </span>
+                <span style="font-size: 0.72rem; background: hsla(38, 92%, 50%, 0.16); color: #b45309; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600;">
+                    Admin Only
+                </span>
+            </div>
+            <label style="display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0; cursor: pointer;">
+                {{ form.pays_management_fee }}
+                <div>
+                    <span style="font-weight: 600; font-size: 0.88rem; color: var(--text-main); display: block;">
+                        Student Pays Management Fee Only
+                    </span>
+                    <small class="form-hint" style="margin-top: 0.15rem; display: block;">
+                        Check this if the student neither rides the school bus nor takes school lunch, and pays the Management Fee instead. Checking this automatically clears Bus and Lunch enrollment.
+                    </small>
+                </div>
+            </label>
+            <div id="custom-mgmt-fee-wrap" style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: 1px dashed hsla(38, 92%, 50%, 0.3); display: none;">
+                <label class="form-label" for="id_custom_management_fee" style="font-size: 0.82rem; font-weight: 600;">
+                    Custom Management Fee ({{ CURRENCY_SYMBOL }}) — Optional
+                </label>
+                {{ form.custom_management_fee }}
+                <small class="form-hint">School default is {{ CURRENCY_SYMBOL }}{{ DEFAULT_MANAGEMENT_FEE|floatformat:2 }}. Leave blank to use the school default.</small>
+            </div>
+        </div>
+        {% endif %}
+
 
         <div class="form-group">
             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
@@ -90,4 +121,28 @@
         </div>
     </form>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const mgmtCheck = document.getElementById('id_pays_management_fee');
+    const customWrap = document.getElementById('custom-mgmt-fee-wrap');
+    const busSelect = document.getElementById('id_bus');
+    const canteenCheck = document.getElementById('id_canteen_enrolled');
+
+    function syncMgmtFields() {
+        if (!mgmtCheck) return;
+        const active = mgmtCheck.checked;
+        if (customWrap) customWrap.style.display = active ? 'block' : 'none';
+        if (active) {
+            if (busSelect) busSelect.value = '';
+            if (canteenCheck) canteenCheck.checked = false;
+        }
+    }
+
+    if (mgmtCheck) {
+        mgmtCheck.addEventListener('change', syncMgmtFields);
+        syncMgmtFields();
+    }
+});
+</script>
 {% endblock %}

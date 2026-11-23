@@ -148,6 +148,17 @@ def get_default_canteen_fee():
     return getattr(settings, 'DEFAULT_CANTEEN_FEE', Decimal('10.00'))
 
 
+def get_default_management_fee():
+    """Returns active default school management fee (Decimal)."""
+    val = SchoolSetting.get_setting('DEFAULT_MANAGEMENT_FEE')
+    if val is not None:
+        try:
+            return Decimal(str(val))
+        except Exception:
+            pass
+    return getattr(settings, 'DEFAULT_MANAGEMENT_FEE', Decimal('0.00'))
+
+
 def get_active_academic_period():
     """
     Returns the active academic term (e.g., 'Term 1 - 2026').
@@ -257,6 +268,18 @@ class Student(models.Model):
     bus = models.ForeignKey(Bus, on_delete=models.SET_NULL, null=True, blank=True, related_name='students')
     canteen_enrolled = models.BooleanField(default=True, help_text="Whether student takes school lunch/canteen")
     custom_canteen_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Override standard canteen fee")
+    pays_management_fee = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Whether student pays school management fee instead of bus and canteen fees"
+    )
+    custom_management_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Optional custom management fee override for this student"
+    )
     bus_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Available prepaid bus credit wallet balance")
     canteen_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Available prepaid canteen credit wallet balance")
     is_active = models.BooleanField(default=True)
@@ -272,6 +295,9 @@ class Student(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
+        if self.pays_management_fee:
+            self.bus = None
+            self.canteen_enrolled = False
         if self.student_class:
             cls_obj = SchoolClass.objects.filter(name=self.student_class).first()
             if not cls_obj:
@@ -305,17 +331,52 @@ class Student(models.Model):
 
     @property
     def bus_fee_required(self):
+        if self.pays_management_fee:
+            return Decimal('0.00')
         if self.bus:
             return self.bus.fee
         return Decimal('0.00')
 
     @property
     def canteen_fee_required(self):
-        if not self.canteen_enrolled:
+        if self.pays_management_fee or not self.canteen_enrolled:
             return Decimal('0.00')
         if self.custom_canteen_fee is not None:
             return self.custom_canteen_fee
         return get_default_canteen_fee()
+
+    @property
+    def management_fee_required(self):
+        if not self.pays_management_fee:
+            return Decimal('0.00')
+        if self.custom_management_fee is not None:
+            return self.custom_management_fee
+        return get_default_management_fee()
+
+    def get_management_fee_paid(self, period=None):
+        """Total management fee payments recorded for this student in the active period."""
+        if not self.pays_management_fee:
+            return Decimal('0.00')
+        if period is None:
+            period = get_active_academic_period()
+        return (
+            self.payments.filter(fee_type='MANAGEMENT', period=period)
+            .aggregate(total=Sum('amount'))['total']
+            or Decimal('0.00')
+        )
+
+    def get_management_fee_balance(self, period=None):
+        """Remaining management fee balance owed for the active period."""
+        if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
+            return Decimal('0.00')
+        paid = self.get_management_fee_paid(period=period)
+        return max(Decimal('0.00'), self.management_fee_required - paid)
+
+    def is_management_fee_paid(self, period=None):
+        """True if student does not owe management fee or has settled it for the active period."""
+        if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
+            return True
+        return self.get_management_fee_paid(period=period) >= self.management_fee_required
 
     def get_daily_bus_paid(self, target_date=None):
         """Total bus payments covering target_date (excludes allocations to other days' debts)."""
@@ -703,6 +764,7 @@ class FeePayment(models.Model):
     FEE_TYPES = [
         ('BUS', 'Bus Fee'),
         ('CANTEEN', 'Canteen Fee'),
+        ('MANAGEMENT', 'Management Fee'),
     ]
 
     PAYMENT_METHODS = [
@@ -793,6 +855,7 @@ class CreditTransaction(models.Model):
     FEE_TYPES = [
         ('BUS', 'Bus Fee'),
         ('CANTEEN', 'Canteen Fee'),
+        ('MANAGEMENT', 'Management Fee'),
     ]
 
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='credit_transactions')

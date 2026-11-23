@@ -9,6 +9,7 @@ urlpatterns = [
 
     # Dashboard & Teacher Clock-In
     path('', views.dashboard_view, name='dashboard'),
+    path('attendance/by-class/', views.class_attendance_breakdown_view, name='class_attendance_breakdown'),
     
     # AJAX APIs for instant clock-in & quick payment
     path('api/clock-in/toggle/', views.toggle_clock_in_api, name='api_clock_in_toggle'),

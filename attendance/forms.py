@@ -38,13 +38,21 @@ class SchoolClassForm(forms.ModelForm):
 class StudentForm(forms.ModelForm):
     class Meta:
         model = Student
-        fields = ['first_name', 'last_name', 'student_class', 'bus', 'canteen_enrolled', 'is_active']
+        fields = [
+            'first_name', 'last_name', 'student_class', 'bus', 'canteen_enrolled',
+            'pays_management_fee', 'custom_management_fee', 'is_active'
+        ]
         widgets = {
             'first_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name', 'autofocus': 'autofocus'}),
             'last_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Last Name'}),
             'student_class': forms.Select(attrs={'class': 'form-select'}),
             'bus': forms.Select(attrs={'class': 'form-select'}),
-            'canteen_enrolled': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+            'canteen_enrolled': forms.CheckboxInput(attrs={'class': 'form-checkbox', 'id': 'id_canteen_enrolled'}),
+            'pays_management_fee': forms.CheckboxInput(attrs={'class': 'form-checkbox', 'id': 'id_pays_management_fee'}),
+            'custom_management_fee': forms.NumberInput(attrs={
+                'class': 'form-input', 'step': '0.50', 'min': '0.00',
+                'id': 'id_custom_management_fee', 'placeholder': 'Leave blank for school default'
+            }),
             'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
         }
 
@@ -65,10 +73,12 @@ class StudentForm(forms.ModelForm):
 
         self.fields['student_class'].widget.choices = class_choices
 
-        # Restrict lunch enrollment toggle strictly to Principals / School Administrators
+        # Restrict lunch enrollment and management fee toggles strictly to Principals / School Administrators
         is_teacher = bool(user_obj and hasattr(user_obj, 'profile') and not user_obj.profile.is_school_admin)
-        if is_teacher and 'canteen_enrolled' in self.fields:
-            del self.fields['canteen_enrolled']
+        if is_teacher:
+            for restricted_field in ('canteen_enrolled', 'pays_management_fee', 'custom_management_fee'):
+                if restricted_field in self.fields:
+                    del self.fields[restricted_field]
 
         if 'instance' not in kwargs or not kwargs['instance'] or kwargs['instance'].pk is None:
             if 'canteen_enrolled' in self.fields:
@@ -95,6 +105,11 @@ class StudentForm(forms.ModelForm):
         first_name = (cleaned_data.get('first_name') or '').strip()
         last_name = (cleaned_data.get('last_name') or '').strip()
         student_class = cleaned_data.get('student_class') or ''
+
+        # Management fee students do not pay bus or canteen fees
+        if cleaned_data.get('pays_management_fee'):
+            cleaned_data['bus'] = None
+            cleaned_data['canteen_enrolled'] = False
 
         # Duplicate detection check
         if first_name and last_name and student_class:
@@ -148,6 +163,13 @@ class FeePaymentForm(forms.Form):
         initial=Decimal('0.00'),
         widget=forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01', 'id': 'id_canteen_amount', 'placeholder': '0.00'})
     )
+    management_amount = forms.DecimalField(
+        required=False,
+        min_value=Decimal('0.00'),
+        decimal_places=2,
+        initial=Decimal('0.00'),
+        widget=forms.NumberInput(attrs={'class': 'form-input', 'step': '0.01', 'id': 'id_management_amount', 'placeholder': '0.00'})
+    )
 
     # Optional / hidden fields for automated defaults and backward compatibility
     is_one_off_bus = forms.BooleanField(required=False, widget=forms.HiddenInput())
@@ -179,6 +201,7 @@ class FeePaymentForm(forms.Form):
         cleaned_data = super().clean()
         bus_amount = cleaned_data.get('bus_amount') or Decimal('0.00')
         canteen_amount = cleaned_data.get('canteen_amount') or Decimal('0.00')
+        management_amount = cleaned_data.get('management_amount') or Decimal('0.00')
 
         # Backward compatibility for legacy single fee submission
         legacy_fee_type = cleaned_data.get('fee_type')
@@ -190,9 +213,12 @@ class FeePaymentForm(forms.Form):
             elif legacy_fee_type == 'CANTEEN' and canteen_amount == Decimal('0.00'):
                 canteen_amount = legacy_amount
                 cleaned_data['canteen_amount'] = canteen_amount
+            elif legacy_fee_type == 'MANAGEMENT' and management_amount == Decimal('0.00'):
+                management_amount = legacy_amount
+                cleaned_data['management_amount'] = management_amount
 
-        if bus_amount <= Decimal('0.00') and canteen_amount <= Decimal('0.00'):
-            raise forms.ValidationError("Please enter an amount greater than 0 for Bus Fee, Canteen Fee, or both.")
+        if bus_amount <= Decimal('0.00') and canteen_amount <= Decimal('0.00') and management_amount <= Decimal('0.00'):
+            raise forms.ValidationError("Please enter an amount greater than 0 for Bus Fee, Canteen Fee, or Management Fee.")
 
         # Set automatic defaults for removed fields
         if not cleaned_data.get('payment_date'):
@@ -220,6 +246,19 @@ class SchoolSettingsForm(forms.Form):
             'placeholder': '10.00'
         }),
         help_text="Standard daily meal plan fee charged to all enrolled students without a custom fee override."
+    )
+    default_management_fee = forms.DecimalField(
+        label="Default Management Fee",
+        min_value=Decimal('0.00'),
+        decimal_places=2,
+        required=False,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-input',
+            'step': '0.50',
+            'id': 'id_default_management_fee',
+            'placeholder': '0.00'
+        }),
+        help_text="Standard management fee charged to students exempt from bus and canteen fees (without a custom override)."
     )
     school_name = forms.CharField(
         label="School Name",

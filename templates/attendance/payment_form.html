@@ -794,6 +794,26 @@
                     </div>
                 </div>
 
+                <!-- Management Fee Card (shown for management-fee students or optional recording) -->
+                <div class="fee-card" id="card-management" style="margin-bottom: 1rem; border-color: hsla(38, 92%, 50%, 0.35);">
+                    <div>
+                        <div class="fee-card-header">
+                            <div>
+                                <div class="fee-card-title">📋 Management Fee</div>
+                                <div class="fee-card-sub">For students exempt from bus and lunch</div>
+                            </div>
+                            <span class="fee-rate-badge" style="background: hsla(38, 92%, 50%, 0.14); color: #b45309;">Term / Flat</span>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0.25rem;">
+                            <label class="form-label" for="{{ form.management_amount.id_for_label }}" style="font-size: 0.78rem;">Management Fee Amount ({{ CURRENCY_SYMBOL }})</label>
+                            {{ form.management_amount }}
+                            {% if form.management_amount.errors %}
+                                <div style="color: var(--danger-text); font-size: 0.78rem; margin-top: 0.2rem;">{{ form.management_amount.errors }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Real-time Grand Total Banner -->
                 <div class="total-charge-banner">
                     <div style="font-size: 0.82rem; color: var(--text-muted);">
@@ -927,6 +947,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const busSelect = document.getElementById('id_bus');
     const busAmountInput = document.getElementById('id_bus_amount');
     const canteenAmountInput = document.getElementById('id_canteen_amount');
+    const managementAmountInput = document.getElementById('id_management_amount');
     const helperText = document.getElementById('student-helper-text');
     const busHelperText = document.getElementById('bus-helper-text');
 
@@ -1144,22 +1165,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function calculateTotal() {
         const b = parseFloat(busAmountInput.value) || 0;
         const c = parseFloat(canteenAmountInput.value) || 0;
-        const sum = b + c;
+        const m = managementAmountInput ? (parseFloat(managementAmountInput.value) || 0) : 0;
+        const sum = b + c + m;
 
         liveTotalDisplay.textContent = formatMoney(sum);
 
         if (sum === 0) {
             liveTotalDisplay.style.color = 'var(--text-muted)';
-            totalSummaryText.textContent = 'Enter Bus and/or Canteen amount';
+            totalSummaryText.textContent = 'Enter Bus, Canteen, or Management Fee amount';
         } else {
             liveTotalDisplay.style.color = 'var(--primary)';
-            if (b > 0 && c > 0) {
-                totalSummaryText.textContent = `Bus: ${formatMoney(b)} + Canteen: ${formatMoney(c)}`;
-            } else if (b > 0) {
-                totalSummaryText.textContent = `Bus Fee only (${formatMoney(b)})`;
-            } else {
-                totalSummaryText.textContent = `Canteen Fee only (${formatMoney(c)})`;
-            }
+            const parts = [];
+            if (b > 0) parts.push(`Bus: ${formatMoney(b)}`);
+            if (c > 0) parts.push(`Canteen: ${formatMoney(c)}`);
+            if (m > 0) parts.push(`Management: ${formatMoney(m)}`);
+            totalSummaryText.textContent = parts.join(' + ');
         }
     }
 
@@ -1937,6 +1957,12 @@ document.addEventListener('DOMContentLoaded', () => {
         resetMultipayInput();
         calculateTotal();
     });
+    if (managementAmountInput) {
+        managementAmountInput.addEventListener('input', () => {
+            resetMultipayInput();
+            calculateTotal();
+        });
+    }
 
     classSelect.addEventListener('change', () => {
         updateStudentDropdown(classSelect.value);

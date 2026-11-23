@@ -93,7 +93,11 @@
                     {% for cr in class_reports %}
                         <tr>
                             <td>
+                                {% if user.is_superuser or user.profile and user.profile.role != 'ACCOUNTANT' %}
+                                <a href="{% url 'class_attendance_breakdown' %}?date={{ date_str }}&class={{ cr.class_name|urlencode }}" class="class-badge" style="text-decoration:none;" title="View Clocked-In &amp; Not-Clocked-In students for {{ cr.class_name }}">{{ cr.class_name }}</a>
+                                {% else %}
                                 <span class="class-badge">{{ cr.class_name }}</span>
+                                {% endif %}
                             </td>
                             <td><strong>{{ cr.total }}</strong></td>
                             <td>
@@ -271,6 +275,18 @@
                         </td>
                         <td><span style="color: var(--danger-text); font-weight: 600;">{{ currency }}{{ canteen_balance|floatformat:2 }}</span></td>
                     </tr>
+                    {% if management_students_count > 0 or management_collected > 0 %}
+                    <tr>
+                        <td><strong>Management Fee (Exempt from Bus/Lunch)</strong></td>
+                        <td>{{ management_students_count }}</td>
+                        <td>—</td>
+                        <td><span>—</span></td>
+                        <td>
+                            <span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ management_collected|floatformat:2 }}</span>
+                        </td>
+                        <td><span>—</span></td>
+                    </tr>
+                    {% endif %}
                 </tbody>
             </table>
         </div>
