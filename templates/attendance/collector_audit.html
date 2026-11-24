@@ -7,16 +7,18 @@
 <div class="page-header" style="margin-bottom: 1.25rem;">
     <div class="page-title-group">
         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
-            {% if user.profile.can_view_revenue %}
-            <a href="{% url 'payment_list' %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
-                ← Back to Payments Ledger
-            </a>
-            {% else %}
-            <a href="{% if user.profile.is_bus_fee_teacher and user.profile.primary_bus %}{% url 'bus_analytics' user.profile.primary_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
-                ← Back to {% if user.profile.is_bus_fee_teacher %}Bus Roster{% else %}Dashboard{% endif %}
-            </a>
+            {% if not is_self_view %}
+                {% if user.profile.can_view_revenue %}
+                <a href="{% url 'payment_list' %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                    ← Back to Payments Ledger
+                </a>
+                {% else %}
+                <a href="{% if user.profile.is_bus_fee_teacher and user.profile.primary_bus %}{% url 'bus_analytics' user.profile.primary_bus.pk %}{% else %}{% url 'dashboard' %}{% endif %}" style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+                    ← Back to {% if user.profile.is_bus_fee_teacher %}Bus Roster{% else %}Dashboard{% endif %}
+                </a>
+                {% endif %}
+                <span style="color: var(--border);">/</span>
             {% endif %}
-            <span style="color: var(--border);">/</span>
             <span style="font-size: 0.78rem; color: var(--text-muted);">Teacher Financial Audit</span>
         </div>
         <h2>{% if is_self_view %}My Collections &amp; Cash Handover{% else %}{{ teacher.get_full_name|default:teacher.username }}{% endif %}</h2>
