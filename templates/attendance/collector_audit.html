@@ -46,50 +46,28 @@
     </div>
 </div>
 
-<!-- Teacher Profile Summary Card -->
-<div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid var(--primary);">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
-        <div style="display: flex; align-items: center; gap: 0.85rem;">
-            <div class="student-avatar" style="width: 44px; height: 44px; flex-shrink: 0; font-size: 1rem; font-weight: 700; background: var(--primary); color: #fff;">
-                {{ teacher.first_name|default:teacher.username|slice:":1" }}{{ teacher.last_name|slice:":1" }}
-            </div>
-            <div>
-                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                    <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin: 0;">
-                        {{ teacher.get_full_name|default:teacher.username }}
-                    </h3>
-                    <span class="badge" style="background: hsla(var(--primary-hsl), 0.1); color: var(--primary); font-weight: 600; font-size: 0.72rem;">
-                        Authorized Collector
-                    </span>
-                    <span class="stat-badge {{ status_badge_class }}" style="font-size: 0.72rem;">
-                        {{ status_label }}
-                    </span>
-                </div>
-                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.2rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
-                    {% if meta.is_bus_fee_teacher %}
-                        <strong style="color: #0284c7;">🚌 Bus Route Conductor: {{ meta.assigned_bus_name }}</strong>
-                    {% elif profile.assigned_class %}
-                        <strong style="color: var(--primary);">🏫 Homeroom Teacher: {{ profile.assigned_class }}</strong>
-                    {% else %}
-                        <span>Floating Staff</span>
-                    {% endif %}
-                    <span>•</span>
-                    <span>{{ student_count }} assigned student{{ student_count|pluralize }}</span>
-                    <span>•</span>
-                    <span>Month ({{ month_name }}): <strong>{{ currency }}{{ month_total|floatformat:2 }}</strong> ({{ month_count }})</span>
-                </div>
-            </div>
-        </div>
-
-        <div style="text-align: right;">
-            <div style="font-size: 0.72rem; color: var(--text-muted);">Audited Target Date:</div>
-            <div style="font-size: 0.9rem; font-weight: 700; color: var(--text-main);">{{ target_date_str }}</div>
-        </div>
+<!-- Teacher Profile Summary Card (Removed for minimalistic teacher self-view; kept compact for Principal/Bursar audit) -->
+{% if not is_self_view %}
+<div style="margin-bottom: 1rem; font-size: 0.82rem; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+    <div>
+        <strong style="color: var(--text-main); font-size: 0.95rem;">{{ teacher.get_full_name|default:teacher.username }}</strong>
+        &middot;
+        {% if meta.is_bus_fee_teacher %}
+            <span>🚌 {{ meta.assigned_bus_name }}</span>
+        {% elif profile.assigned_class %}
+            <span>🏫 {{ profile.assigned_class }}</span>
+        {% else %}
+            <span>Authorized Collector</span>
+        {% endif %}
+        &middot;
+        <span>Month ({{ month_name }}): <strong>{{ currency }}{{ month_total|floatformat:2 }}</strong> ({{ month_count }})</span>
     </div>
+    <div><strong>{{ target_date_str }}</strong></div>
 </div>
+{% endif %}
 
-<!-- Key Financial Metrics (Target Expected, Collected Today, Cash Remittance Status, Balance Due) -->
-<div class="stats-grid" style="margin-bottom: 1.25rem;">
+<!-- Key Financial Metrics (Accounting Summary — 2x2 on Mobile) -->
+<div class="stats-grid kpi-grid-4" style="margin-bottom: 1.25rem;">
     <!-- 1. Target Expected Today -->
     <div class="stat-card" style="border-left: 3px solid var(--primary);">
         <div class="stat-header">
@@ -303,8 +281,8 @@
 </div>
 {% endif %}
 
-<!-- Actionable Unpaid Students Roster for Target Date -->
-{% if unpaid_students %}
+<!-- Actionable Unpaid Students Roster (Hidden on teacher self-view to avoid redundancy with Bus Roster & Dashboard) -->
+{% if unpaid_students and not is_self_view %}
 <div class="stat-card" style="margin-bottom: 1.25rem; padding: 1rem 1.25rem; border-left: 4px solid #f59e0b;">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
         <div>
@@ -423,142 +401,45 @@
         </span>
     </div>
 
-    <!-- The Audit Log Table -->
+    <!-- Clean Zero-Horizontal-Scroll Daily Collection Log (Desktop & Mobile) -->
     {% if audit_logs %}
-    <div class="table-responsive desktop-only">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th style="padding: 0.65rem 1rem;">Date &amp; Time Taken</th>
-                    <th>Receipt #</th>
-                    <th>Student Name</th>
-                    <th>Class</th>
-                    <th>Fee Type</th>
-                    <th>Payment Method</th>
-                    <th style="text-align: right;">Amount Taken</th>
-                    <th style="text-align: right;">Official Voucher</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for p in audit_logs %}
-                <tr>
-                    <!-- Timestamp -->
-                    <td style="padding: 0.65rem 1rem;">
-                        <div style="font-weight: 600; font-size: 0.8rem; color: var(--text-main);">
-                            {{ p.payment_date|date:"M d, Y" }}
-                        </div>
-                        <div style="font-size: 0.7rem; color: var(--text-muted);">
-                            🕒 {{ p.created_at|time:"h:i:s A" }}
-                        </div>
-                    </td>
-
-                    <!-- Receipt # -->
-                    <td>
-                        <code style="font-size: 0.76rem; color: var(--text-muted); background: var(--surface-subtle); padding: 0.15rem 0.35rem; border-radius: 3px;">
-                            {{ p.receipt_number|default:"—" }}
-                        </code>
-                    </td>
-
-                    <!-- Student Name -->
-                    <td>
-                        <div class="student-cell">
-                            <div class="student-avatar" style="width: 24px; height: 24px; font-size: 0.68rem;">
-                                {{ p.student.initials }}
-                            </div>
-                            <span style="font-weight: 600; font-size: 0.82rem;">{{ p.student.full_name }}</span>
-                        </div>
-                    </td>
-
-                    <!-- Class -->
-                    <td>
-                        <span class="class-badge" style="font-size: 0.72rem;">{{ p.student.student_class }}</span>
-                    </td>
-
-                    <!-- Fee Type -->
-                    <td>
-                        {% if p.fee_type == 'BUS' %}
-                            <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">
-                                🚌 Bus Fee{% if p.bus %} ({{ p.bus.name }}){% endif %}
-                            </span>
-                        {% else %}
-                            <span class="fee-badge fee-badge-paid" style="font-size: 0.72rem;">
-                                🍽️ Canteen Fee
-                            </span>
-                        {% endif %}
-                        {% if p.is_advance %}
-                            <span class="badge" style="font-size: 0.62rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;">
-                                {{ p.days_covered }}d Adv
-                            </span>
-                        {% endif %}
-                    </td>
-
-                    <!-- Method -->
-                    <td>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">
-                            {{ p.get_payment_method_display }}
-                        </span>
-                    </td>
-
-                    <!-- Amount -->
-                    <td style="text-align: right;">
-                        <span style="font-size: 0.88rem; font-weight: 700; color: var(--success-text);">
-                            +{{ currency }}{{ p.amount|floatformat:2 }}
-                        </span>
-                    </td>
-
-                    <!-- Voucher -->
-                    <td style="text-align: right;">
-                        <a href="{% url 'payment_receipt' p.id %}" target="_blank" class="btn-secondary" style="font-size: 0.72rem; padding: 0.25rem 0.55rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;" title="View official receipt voucher">
-                            📄 Receipt
-                        </a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Mobile Card View for Audit Log -->
-    <div class="mobile-only" style="padding: 0.75rem;">
+    <div style="display: flex; flex-direction: column;">
         {% for p in audit_logs %}
-        <div style="margin-bottom: 0.65rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-card);">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.35rem;">
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <div class="student-avatar" style="width: 28px; height: 28px; font-size: 0.7rem;">
-                        {{ p.student.initials }}
-                    </div>
-                    <div>
-                        <div style="font-weight: 700; font-size: 0.88rem; color: var(--text-main);">
-                            {{ p.student.full_name }}
-                        </div>
-                        <div style="font-size: 0.72rem; color: var(--text-muted);">
-                            {{ p.student.student_class }} &bull; {{ p.payment_date|date:"M d, Y" }}
-                        </div>
-                    </div>
+        <a href="{% url 'payment_receipt' p.id %}" target="_blank"
+           style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--border-subtle); text-decoration: none; color: inherit; transition: background 0.15s ease;"
+           onmouseover="this.style.background='var(--surface-subtle)'" onmouseout="this.style.background='transparent'"
+           title="View official receipt {{ p.receipt_number|default:'' }}">
+            <!-- Left: Time + Student Name (Line 1), Fee Type + Method (Line 2) -->
+            <div style="min-width: 0; flex: 1;">
+                <div style="display: flex; align-items: baseline; gap: 0.45rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <span style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted); flex-shrink: 0;">{{ p.created_at|time:"h:i A" }}</span>
+                    <span style="color: var(--border); flex-shrink: 0;">&middot;</span>
+                    <span style="font-weight: 700; font-size: 0.9rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis;">{{ p.student.full_name }}</span>
                 </div>
-                <div style="text-align: right;">
-                    <div style="font-size: 0.92rem; font-weight: 700; color: var(--success-text);">
-                        +{{ currency }}{{ p.amount|floatformat:2 }}
-                    </div>
-                    <span style="font-size: 0.7rem; color: var(--text-muted);">{{ p.get_payment_method_display }}</span>
-                </div>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.4rem; border-top: 1px solid var(--border-subtle); margin-top: 0.35rem;">
-                <div>
+                <div style="display: flex; align-items: center; gap: 0.4rem; margin-top: 0.25rem; flex-wrap: wrap;">
                     {% if p.fee_type == 'BUS' %}
-                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem;">🚌 Bus</span>
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem; padding: 0.1rem 0.45rem;">🚌 Bus</span>
+                    {% elif p.fee_type == 'MANAGEMENT' %}
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem; padding: 0.1rem 0.45rem;">🏛️ Mgmt</span>
                     {% else %}
-                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem;">🍽️ Lunch</span>
+                        <span class="fee-badge fee-badge-paid" style="font-size: 0.68rem; padding: 0.1rem 0.45rem;">🍽️ Lunch</span>
                     {% endif %}
+                    <span style="font-size: 0.72rem; color: var(--text-muted);">{{ p.get_payment_method_display }}</span>
                     {% if p.is_advance %}
-                        <span class="badge" style="font-size: 0.62rem; background: #ede9fe; color: #6d28d9;">{{ p.days_covered }}d Adv</span>
+                        <span class="badge" style="font-size: 0.64rem; background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;">{{ p.days_covered }}d Adv</span>
                     {% endif %}
                 </div>
-                <a href="{% url 'payment_receipt' p.id %}" target="_blank" class="btn-secondary" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; text-decoration: none;">
-                    📄 Receipt
-                </a>
             </div>
-        </div>
+            <!-- Right: Amount Recorded (Line 1), Wallet Remaining (Line 2) -->
+            <div style="text-align: right; flex-shrink: 0;">
+                <div style="font-size: 0.95rem; font-weight: 800; color: var(--success-text);">
+                    +{{ currency }}{{ p.amount|floatformat:2 }}
+                </div>
+                <div style="font-size: 0.72rem; font-weight: 600; margin-top: 0.2rem; color: {% if p.wallet_remaining > 0 %}#b45309{% else %}var(--text-muted){% endif %};">
+                    Wallet: {{ currency }}{{ p.wallet_remaining|floatformat:2 }}
+                </div>
+            </div>
+        </a>
         {% endfor %}
     </div>
 

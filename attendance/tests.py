@@ -4278,6 +4278,70 @@ class MultipayReconciliationAndTallyTests(TestCase):
         debtors_res = self.client.get(reverse('export_debtors_csv'))
         self.assertIn('GH₵', debtors_res.content.decode('utf-8-sig'))
 
+    def test_unified_wallet_single_lump_sum_auto_deducts_both_bus_and_canteen_on_clockin(self):
+        """A single UNIFIED lump-sum payment settles Day 1 Bus+Canteen and auto-deducts both on Day 2 clock-in."""
+        day1 = timezone.localdate() - datetime.timedelta(days=1)
+        day2 = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+
+        # Day 1: Teacher enters one total amount GH₵60.00 (Bus=10, Lunch=5 => Day 1=15, Wallet=45 = 3 days)
+        res_pay = self.client.post(
+            reverse('api_collect_both_fees'),
+            data=json.dumps({
+                'student_id': self.student.id,
+                'fee_type': 'UNIFIED',
+                'amount': '60.00',
+                'date': str(day1),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(res_pay.status_code, 200)
+        self.assertTrue(res_pay.json()['success'])
+        self.assertEqual(res_pay.json()['total_amount'], 60.0)
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.unified_credit_wallet, Decimal('45.00'))
+        self.assertEqual(self.student.bus_credit_wallet, Decimal('0.00'))
+        self.assertEqual(self.student.canteen_credit_wallet, Decimal('0.00'))
+        self.assertEqual(self.student.get_bus_credit_days(day1), 3)
+        self.assertEqual(self.student.get_canteen_credit_days(day1), 3)
+
+        # Day 2: Clock in -> must deduct BOTH Bus (10.00) and Canteen (5.00) from unified_credit_wallet
+        res_ci = self.client.post(
+            reverse('api_clock_in_toggle'),
+            data=json.dumps({'student_id': self.student.id, 'date': str(day2), 'action': 'clock_in'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_ci.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.unified_credit_wallet, Decimal('30.00'))
+        self.assertEqual(self.student.get_deducted_amount_for_date('BUS', day2), Decimal('10.00'))
+        self.assertEqual(self.student.get_deducted_amount_for_date('CANTEEN', day2), Decimal('5.00'))
+
+        # Verify Principal Reports shows both Bus and Canteen prepaid deductions on Day 2
+        self.client.force_login(self.principal)
+        res_rep = self.client.get(reverse('reports') + f'?date={day2}')
+        self.assertEqual(res_rep.status_code, 200)
+        self.assertEqual(res_rep.context['total_bus_prepaid'], Decimal('10.00'))
+        self.assertEqual(res_rep.context['canteen_prepaid'], Decimal('5.00'))
+
+        # Undo Day 2 clock-in -> refunds 15.00 back to unified_credit_wallet (45.00)
+        self.client.force_login(self.bus_teacher)
+        res_undo = self.client.post(
+            reverse('api_clock_in_toggle'),
+            data=json.dumps({'student_id': self.student.id, 'date': str(day2), 'action': 'undo'}),
+            content_type='application/json',
+        )
+        self.assertEqual(res_undo.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.unified_credit_wallet, Decimal('45.00'))
+
+        # Verify reconcile_wallets preserves unified_credit_wallet
+        from django.core.management import call_command
+        call_command('reconcile_wallets')
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.unified_credit_wallet, Decimal('45.00'))
+
 
 class DebtorsListAndArrearsTests(TestCase):
     """Tests for persistent multi-day Debtors List, guest bus surcharge (+2), class filtering, overdue (>3d) alerts, and FIFO clearance."""
@@ -4538,6 +4602,55 @@ class ClassAttendanceBreakdownTests(TestCase):
         # Bursar sidebar also must not show Class Attendance link
         pay_res = self.client.get(reverse('payment_list'))
         self.assertNotContains(pay_res, reverse('class_attendance_breakdown'))
+
+
+class BusRosterFixesTests(TestCase):
+    """Tests for Bus Roster Mark Unpaid UI, Debt Badges, and Bus Fleet back-link permissions for teachers."""
+
+    def setUp(self):
+        self.bus_8 = Bus.objects.create(name='East Legon Bus', fee=Decimal('8.00'), is_active=True)
+        self.bus_10 = Bus.objects.create(name='Airport Bus', fee=Decimal('10.00'), is_active=True)
+
+        self.bus_teacher = User.objects.create_user('bus_roster_t', 'brt@test.com', 'pw')
+        self.bus_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.bus_teacher.profile.can_collect_fees = True
+        self.bus_teacher.profile.assigned_bus = self.bus_8
+        self.bus_teacher.profile.save()
+
+        self.unassigned_teacher = User.objects.create_user('plain_t', 'pt@test.com', 'pw')
+        self.unassigned_teacher.profile.role = UserProfile.ROLE_TEACHER
+        self.unassigned_teacher.profile.save()
+
+        self.student = Student.objects.create(
+            first_name='Kwaku', last_name='Addo', student_class='Class 1A', bus=self.bus_8, canteen_enrolled=True
+        )
+
+    def test_assigned_bus_teacher_can_access_bus_list_while_unassigned_is_blocked(self):
+        self.client.force_login(self.bus_teacher)
+        res = self.client.get(reverse('bus_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'East Legon Bus')
+        self.assertNotContains(res, 'Airport Bus')
+
+        self.client.force_login(self.unassigned_teacher)
+        res_unassigned = self.client.get(reverse('bus_list'))
+        self.assertEqual(res_unassigned.status_code, 302)
+
+    def test_bus_analytics_renders_unpaid_buttons_and_debt_badges(self):
+        today = timezone.localdate()
+        self.client.force_login(self.bus_teacher)
+        self.client.post(
+            reverse('api_mark_unpaid'),
+            data=json.dumps({'student_id': self.student.id, 'fee_type': 'BUS', 'date': str(today)}),
+            content_type='application/json',
+        )
+
+        res = self.client.get(reverse('bus_analytics', kwargs={'pk': self.bus_8.pk}))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Mark Guest Unpaid')
+        self.assertContains(res, 'openBusMarkUnpaidModal')
+        self.assertContains(res, 'Debt (1d):')
+
 
 
 class ManagementFeeSystemTests(TestCase):

@@ -282,6 +282,7 @@ class Student(models.Model):
     )
     bus_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Available prepaid bus credit wallet balance")
     canteen_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Available prepaid canteen credit wallet balance")
+    unified_credit_wallet = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Unified prepaid wallet balance auto-deducted for Bus and Canteen")
     is_active = models.BooleanField(default=True)
     registered_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -470,21 +471,55 @@ class Student(models.Model):
             target_date = timezone.localdate()
         return self.get_daily_canteen_settled(target_date) >= self.canteen_fee_required
 
+    def get_unified_credit_balance(self, target_date=None):
+        """Available unified prepaid wallet balance as of target_date."""
+        if target_date is None:
+            target_date = timezone.localdate()
+        txs = self.credit_transactions.filter(date__lte=target_date)
+        if not txs.exists():
+            return max(Decimal('0.00'), self.unified_credit_wallet or Decimal('0.00'))
+        agg = txs.aggregate(
+            uni_top=Sum('amount', filter=Q(fee_type='UNIFIED', transaction_type='TOP_UP')),
+            bus_top=Sum('amount', filter=Q(fee_type='BUS', transaction_type='TOP_UP')),
+            bus_rev=Sum('amount', filter=Q(fee_type='BUS', transaction_type='REVERSAL')),
+            bus_ded=Sum('amount', filter=Q(fee_type='BUS', transaction_type='DEDUCTION')),
+            can_top=Sum('amount', filter=Q(fee_type='CANTEEN', transaction_type='TOP_UP')),
+            can_rev=Sum('amount', filter=Q(fee_type='CANTEEN', transaction_type='REVERSAL')),
+            can_ded=Sum('amount', filter=Q(fee_type='CANTEEN', transaction_type='DEDUCTION')),
+        )
+        uni_top = agg['uni_top'] or Decimal('0.00')
+        if uni_top <= Decimal('0.00'):
+            return Decimal('0.00')
+        bus_net = (agg['bus_top'] or Decimal('0.00')) + (agg['bus_rev'] or Decimal('0.00')) - (agg['bus_ded'] or Decimal('0.00'))
+        can_net = (agg['can_top'] or Decimal('0.00')) + (agg['can_rev'] or Decimal('0.00')) - (agg['can_ded'] or Decimal('0.00'))
+        bus_overflow = max(Decimal('0.00'), -bus_net)
+        can_overflow = max(Decimal('0.00'), -can_net)
+        return max(Decimal('0.00'), uni_top - bus_overflow - can_overflow)
+
     def get_bus_credit_balance(self, target_date=None):
-        """Available prepaid bus credit wallet balance as of target_date."""
+        """Available prepaid bus credit wallet balance (specific + unified) as of target_date."""
         if not self.bus or self.bus_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        return self.get_wallet_balance_as_of('BUS', target_date)
+        specific = self.get_wallet_balance_as_of('BUS', target_date)
+        unified = self.get_unified_credit_balance(target_date)
+        return specific + unified
 
     def get_canteen_credit_balance(self, target_date=None):
-        """Available prepaid canteen credit wallet balance as of target_date."""
+        """Available prepaid canteen credit wallet balance (specific + remaining unified after bus) as of target_date."""
         if not self.canteen_enrolled or self.canteen_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
         if target_date is None:
             target_date = timezone.localdate()
-        return self.get_wallet_balance_as_of('CANTEEN', target_date)
+        specific = self.get_wallet_balance_as_of('CANTEEN', target_date)
+        unified = self.get_unified_credit_balance(target_date)
+        if unified > Decimal('0.00') and self.bus and self.bus_fee_required > Decimal('0.00'):
+            bus_owed = max(Decimal('0.00'), self.bus_fee_required - self.get_daily_bus_settled(target_date))
+            bus_specific = self.get_wallet_balance_as_of('BUS', target_date)
+            unified_used_by_bus = min(unified, max(Decimal('0.00'), bus_owed - bus_specific))
+            unified = max(Decimal('0.00'), unified - unified_used_by_bus)
+        return specific + unified
 
     def is_bus_paid_for_date(self, target_date=None):
         """True if bus fee for target_date is already settled OR fully covered by available wallet credit."""
@@ -536,7 +571,16 @@ class Student(models.Model):
             target_date = timezone.localdate()
         settled = self.get_daily_bus_settled(target_date)
         owed_today = max(Decimal('0.00'), self.bus_fee_required - settled)
-        wallet = self.get_bus_credit_balance(target_date)
+        unified = self.get_unified_credit_balance(target_date)
+        bus_specific = self.get_wallet_balance_as_of('BUS', target_date)
+        if unified > Decimal('0.00') and bus_specific <= Decimal('0.00'):
+            can_owed = max(Decimal('0.00'), self.canteen_fee_required - self.get_daily_canteen_settled(target_date)) if self.canteen_enrolled else Decimal('0.00')
+            combined_daily = self.bus_fee_required + (self.canteen_fee_required if self.canteen_enrolled else Decimal('0.00'))
+            rem_after_today = unified - owed_today - can_owed
+            if rem_after_today >= Decimal('0.00') and combined_daily > Decimal('0.00'):
+                return int(rem_after_today // combined_daily)
+            return 0
+        wallet = bus_specific + unified
         if wallet >= owed_today:
             remaining_after_today = wallet - owed_today
             return int(remaining_after_today // self.bus_fee_required)
@@ -550,7 +594,16 @@ class Student(models.Model):
             target_date = timezone.localdate()
         settled = self.get_daily_canteen_settled(target_date)
         owed_today = max(Decimal('0.00'), self.canteen_fee_required - settled)
-        wallet = self.get_canteen_credit_balance(target_date)
+        unified = self.get_unified_credit_balance(target_date)
+        can_specific = self.get_wallet_balance_as_of('CANTEEN', target_date)
+        if unified > Decimal('0.00') and can_specific <= Decimal('0.00'):
+            bus_owed = max(Decimal('0.00'), self.bus_fee_required - self.get_daily_bus_settled(target_date)) if self.bus else Decimal('0.00')
+            combined_daily = (self.bus_fee_required if self.bus else Decimal('0.00')) + self.canteen_fee_required
+            rem_after_today = unified - bus_owed - owed_today
+            if rem_after_today >= Decimal('0.00') and combined_daily > Decimal('0.00'):
+                return int(rem_after_today // combined_daily)
+            return 0
+        wallet = can_specific + unified
         if wallet >= owed_today:
             remaining_after_today = wallet - owed_today
             return int(remaining_after_today // self.canteen_fee_required)
@@ -624,28 +677,45 @@ class Student(models.Model):
             if owed <= Decimal('0.00'):
                 return Decimal('0.00')
             wallet_field = 'bus_credit_wallet' if fee_type == 'BUS' else 'canteen_credit_wallet'
-            wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
-            if wallet <= Decimal('0.00'):
+            specific_wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
+            unified_wallet = max(Decimal('0.00'), locked.unified_credit_wallet or Decimal('0.00'))
+            total_avail = specific_wallet + unified_wallet
+            if total_avail <= Decimal('0.00'):
                 return Decimal('0.00')
-            deduct_amt = min(wallet, owed)
+            deduct_amt = min(total_avail, owed)
             if max_amount is not None:
                 deduct_amt = min(deduct_amt, max_amount)
             if deduct_amt <= Decimal('0.00'):
                 return Decimal('0.00')
-            new_wallet = wallet - deduct_amt
-            setattr(locked, wallet_field, new_wallet)
-            locked.save(update_fields=[wallet_field])
-            setattr(self, wallet_field, new_wallet)
+
+            from_specific = min(specific_wallet, deduct_amt)
+            from_unified = deduct_amt - from_specific
+            update_fields = []
+            if from_specific > Decimal('0.00'):
+                new_specific = specific_wallet - from_specific
+                setattr(locked, wallet_field, new_specific)
+                setattr(self, wallet_field, new_specific)
+                update_fields.append(wallet_field)
+            if from_unified > Decimal('0.00'):
+                new_unified = unified_wallet - from_unified
+                locked.unified_credit_wallet = new_unified
+                self.unified_credit_wallet = new_unified
+                update_fields.append('unified_credit_wallet')
+            if update_fields:
+                locked.save(update_fields=update_fields)
+
+            bal_after = (getattr(locked, wallet_field) or Decimal('0.00')) + (locked.unified_credit_wallet or Decimal('0.00'))
+            source_tag = "[Unified]" if from_unified > Decimal('0.00') and from_specific == Decimal('0.00') else ""
             CreditTransaction.objects.create(
                 student=locked,
                 fee_type=fee_type,
                 transaction_type=CreditTransaction.TYPE_DEDUCTION,
                 amount=deduct_amt,
-                balance_after=new_wallet,
+                balance_after=bal_after,
                 date=target_date,
                 clock_in=clock_in,
                 recorded_by=actor,
-                notes=f"Wallet credit applied for {target_date}",
+                notes=f"Wallet credit applied for {target_date} {source_tag}".strip(),
             )
             return deduct_amt
 
@@ -673,12 +743,23 @@ class Student(models.Model):
                 rev_sum = qs.filter(transaction_type=CreditTransaction.TYPE_REVERSAL).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
                 net_to_refund = max(Decimal('0.00'), ded_sum - rev_sum)
                 if net_to_refund > Decimal('0.00'):
-                    wallet_field = 'bus_credit_wallet' if ft == 'BUS' else 'canteen_credit_wallet'
-                    cur_wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
-                    new_wallet = cur_wallet + net_to_refund
-                    setattr(locked, wallet_field, new_wallet)
-                    locked.save(update_fields=[wallet_field])
-                    setattr(self, wallet_field, new_wallet)
+                    ded_qs = qs.filter(transaction_type=CreditTransaction.TYPE_DEDUCTION)
+                    used_unified = ded_qs.filter(notes__contains='[Unified]').exists()
+                    if used_unified:
+                        cur_uni = max(Decimal('0.00'), locked.unified_credit_wallet or Decimal('0.00'))
+                        new_wallet = cur_uni + net_to_refund
+                        locked.unified_credit_wallet = new_wallet
+                        locked.save(update_fields=['unified_credit_wallet'])
+                        self.unified_credit_wallet = new_wallet
+                        source_tag = "[Unified]"
+                    else:
+                        wallet_field = 'bus_credit_wallet' if ft == 'BUS' else 'canteen_credit_wallet'
+                        cur_wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
+                        new_wallet = cur_wallet + net_to_refund
+                        setattr(locked, wallet_field, new_wallet)
+                        locked.save(update_fields=[wallet_field])
+                        setattr(self, wallet_field, new_wallet)
+                        source_tag = ""
                     CreditTransaction.objects.create(
                         student=locked,
                         fee_type=ft,
@@ -688,7 +769,7 @@ class Student(models.Model):
                         date=target_date,
                         clock_in=None,
                         recorded_by=actor,
-                        notes=f"Reversed clock-in wallet deduction for {target_date}",
+                        notes=f"Reversed clock-in wallet deduction for {target_date} {source_tag}".strip(),
                     )
                     refunded[ft] = net_to_refund
         return refunded
@@ -764,6 +845,7 @@ class FeePayment(models.Model):
     FEE_TYPES = [
         ('BUS', 'Bus Fee'),
         ('CANTEEN', 'Canteen Fee'),
+        ('UNIFIED', 'Unified Prepaid Wallet'),
         ('MANAGEMENT', 'Management Fee'),
     ]
 
@@ -855,6 +937,7 @@ class CreditTransaction(models.Model):
     FEE_TYPES = [
         ('BUS', 'Bus Fee'),
         ('CANTEEN', 'Canteen Fee'),
+        ('UNIFIED', 'Unified Prepaid Wallet'),
         ('MANAGEMENT', 'Management Fee'),
     ]
 
@@ -883,7 +966,7 @@ class CreditTransaction(models.Model):
         return f"{self.student.full_name} [{self.fee_type}] {self.transaction_type} {self.amount:.2f} -> Bal: {self.balance_after:.2f}"
 
 
-def _credit_wallet_after_prior_debts(student, payment, excess, wallet_field, topup_notes):
+def _credit_wallet_after_prior_debts(student, payment, excess, wallet_field, topup_notes, topup_fee_type=None):
     """
     Settle any prior open DebtRecords (FIFO, date < payment.payment_date) from excess
     before crediting the remaining excess to the student's prepaid wallet.
@@ -891,17 +974,16 @@ def _credit_wallet_after_prior_debts(student, payment, excess, wallet_field, top
     if excess <= Decimal('0.00'):
         return
 
+    is_unified = (wallet_field == 'unified_credit_wallet') or (topup_fee_type == 'UNIFIED')
     if not getattr(payment, '_is_debt_settlement', False):
-        prior_debts = list(
-            DebtRecord.objects.select_for_update()
-            .filter(
-                student=student,
-                fee_type=payment.fee_type,
-                date__lt=payment.payment_date,
-                status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
-            )
-            .order_by('date', 'created_at')
+        debt_qs = DebtRecord.objects.select_for_update().filter(
+            student=student,
+            date__lt=payment.payment_date,
+            status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL],
         )
+        if not is_unified:
+            debt_qs = debt_qs.filter(fee_type=payment.fee_type)
+        prior_debts = list(debt_qs.order_by('date', 'created_at'))
         for pd in prior_debts:
             if excess <= Decimal('0.00'):
                 break
@@ -925,7 +1007,7 @@ def _credit_wallet_after_prior_debts(student, payment, excess, wallet_field, top
             setattr(payment.student, wallet_field, new_wallet)
         CreditTransaction.objects.create(
             student=student,
-            fee_type=payment.fee_type,
+            fee_type=topup_fee_type or payment.fee_type,
             transaction_type=CreditTransaction.TYPE_TOP_UP,
             amount=excess,
             balance_after=new_wallet,
@@ -948,6 +1030,7 @@ def apply_payment_to_wallet(payment):
 
     with transaction.atomic():
         student = Student.objects.select_for_update().get(pk=payment.student_id)
+        use_unified = bool(getattr(payment, '_unified_topup', False))
         if payment.fee_type == 'BUS':
             if payment.is_temporary_bus:
                 # 1-day guest rides should not auto-deduct from regular wallet,
@@ -960,17 +1043,18 @@ def apply_payment_to_wallet(payment):
                         student,
                         payment,
                         excess,
-                        'bus_credit_wallet',
+                        'unified_credit_wallet' if use_unified else 'bus_credit_wallet',
                         f"Guest bus advance credit from payment {payment.receipt_number or payment.id}",
+                        topup_fee_type='UNIFIED' if use_unified else 'BUS',
                     )
                 return
             daily_fee = student.bus_fee_required
             if daily_fee <= Decimal('0.00') and payment.bus_id:
                 daily_fee = payment.bus.fee
-            wallet_field = 'bus_credit_wallet'
+            wallet_field = 'unified_credit_wallet' if use_unified else 'bus_credit_wallet'
         else:
             daily_fee = student.canteen_fee_required
-            wallet_field = 'canteen_credit_wallet'
+            wallet_field = 'unified_credit_wallet' if use_unified else 'canteen_credit_wallet'
 
         daily_fee = max(Decimal('0.00'), daily_fee or Decimal('0.00'))
 
@@ -994,7 +1078,8 @@ def apply_payment_to_wallet(payment):
                 payment,
                 excess,
                 wallet_field,
-                f"Bulk/advance credit from payment {payment.receipt_number or payment.id}",
+                f"Unified advance credit from payment {payment.receipt_number or payment.id}" if use_unified else f"Bulk/advance credit from payment {payment.receipt_number or payment.id}",
+                topup_fee_type='UNIFIED' if use_unified else payment.fee_type,
             )
         elif payment.amount < owed_before and current_wallet > Decimal('0.00'):
             owed_after_cash = owed_before - payment.amount
@@ -1024,19 +1109,27 @@ def reverse_payment_wallet_effects(payment):
         student = Student.objects.select_for_update().filter(pk=payment.student_id).first()
         if not student:
             return
-        wallet_field = 'bus_credit_wallet' if payment.fee_type == 'BUS' else 'canteen_credit_wallet'
-        current_wallet = max(Decimal('0.00'), getattr(student, wallet_field) or Decimal('0.00'))
         txs = list(CreditTransaction.objects.filter(payment=payment))
-        delta = Decimal('0.00')
+        deltas = {'bus_credit_wallet': Decimal('0.00'), 'canteen_credit_wallet': Decimal('0.00'), 'unified_credit_wallet': Decimal('0.00')}
         for tx in txs:
+            if tx.fee_type == 'UNIFIED':
+                wf = 'unified_credit_wallet'
+            elif tx.fee_type == 'BUS':
+                wf = 'bus_credit_wallet'
+            else:
+                wf = 'canteen_credit_wallet'
             if tx.transaction_type == CreditTransaction.TYPE_TOP_UP:
-                delta -= tx.amount
+                deltas[wf] -= tx.amount
             elif tx.transaction_type == CreditTransaction.TYPE_DEDUCTION:
-                delta += tx.amount
-        if delta != Decimal('0.00'):
-            new_wallet = max(Decimal('0.00'), current_wallet + delta)
-            setattr(student, wallet_field, new_wallet)
-            student.save(update_fields=[wallet_field])
+                deltas[wf] += tx.amount
+        changed = []
+        for wf, delta in deltas.items():
+            if delta != Decimal('0.00'):
+                cur = max(Decimal('0.00'), getattr(student, wf) or Decimal('0.00'))
+                setattr(student, wf, max(Decimal('0.00'), cur + delta))
+                changed.append(wf)
+        if changed:
+            student.save(update_fields=changed)
         CreditTransaction.objects.filter(payment=payment).delete()
 
 

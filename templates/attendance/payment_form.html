@@ -701,16 +701,15 @@
                 </div>
 
                 <!-- Clean Multi-Pay Prepayment Bar -->
+                <input type="hidden" name="unified_topup" id="id_unified_topup" value="0">
                 <div class="multipay-card" style="background: var(--surface-card, #ffffff); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 0.95rem; margin-bottom: 1rem;">
                     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                        <div>
                             <label for="input-custom-multipay" style="font-size: 0.82rem; font-weight: 600; color: var(--text-main); margin: 0;">
-                                Multi-Day Lump Sum
+                                ⚡ Multi-Day Lump Sum (Unified Wallet)
                             </label>
-                            <div id="multipay-target-group" style="display: inline-flex; gap: 0.3rem; flex-wrap: wrap;">
-                                <button type="button" class="btn-secondary multipay-target-pill active" data-target="BOTH" style="font-size: 0.76rem; padding: 0.35rem 0.65rem; min-height: 36px;">Both</button>
-                                <button type="button" class="btn-secondary multipay-target-pill" data-target="BUS" style="font-size: 0.76rem; padding: 0.35rem 0.65rem; min-height: 36px;">Bus Only</button>
-                                <button type="button" class="btn-secondary multipay-target-pill" data-target="CANTEEN" style="font-size: 0.76rem; padding: 0.35rem 0.65rem; min-height: 36px;">Canteen Only</button>
+                            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.1rem;">
+                                Just enter the total amount — Bus &amp; Lunch auto-deduct on clock-in
                             </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.4rem; flex: 1; max-width: 260px; justify-content: flex-end;">
@@ -2019,56 +2018,15 @@ document.addEventListener('DOMContentLoaded', () => {
         quickSearchInput.focus();
     }
 
-    let selectedMultipayTarget = 'BOTH';
-    const multipayTargetPills = document.querySelectorAll('.multipay-target-pill');
-
-    function setMultipayTarget(target) {
-        selectedMultipayTarget = target || 'BOTH';
-        multipayTargetPills.forEach(btn => {
-            const active = btn.dataset.target === selectedMultipayTarget;
-            btn.classList.toggle('active', active);
-            btn.style.borderColor = active ? 'var(--primary)' : 'var(--border)';
-            btn.style.background = active ? 'hsla(var(--primary-hsl, 221, 83%, 53%), 0.12)' : '';
-            btn.style.color = active ? 'var(--primary)' : '';
-            btn.style.fontWeight = active ? '700' : '500';
-        });
-        const amt = parseFloat(inputCustomMultipay ? inputCustomMultipay.value : 0) || 0;
-        if (amt > 0) renderMultipayPreview(amt, false);
-    }
-
     function syncMultipayTargetForStudent(student) {
-        const selectedBusId = busSelect ? busSelect.value : '';
-        const hasBus = Boolean((selectedBusId && busesById[selectedBusId]) || (student && student.bus_id));
-        const hasCan = Boolean(student && student.canteen_enrolled);
-        multipayTargetPills.forEach(btn => {
-            const t = btn.dataset.target;
-            if (t === 'BUS') btn.style.display = hasBus ? 'inline-flex' : 'none';
-            else if (t === 'CANTEEN') btn.style.display = hasCan ? 'inline-flex' : 'none';
-            else btn.style.display = (hasBus && hasCan) ? 'inline-flex' : 'none';
-        });
-        if (hasBus && !hasCan) {
-            setMultipayTarget('BUS');
-        } else if (!hasBus && hasCan) {
-            setMultipayTarget('CANTEEN');
-        } else if (hasBus && hasCan) {
-            if (student && !student.is_bus_paid && student.is_canteen_paid) setMultipayTarget('BUS');
-            else if (student && student.is_bus_paid && !student.is_canteen_paid) setMultipayTarget('CANTEEN');
-            else setMultipayTarget('BOTH');
-        } else {
-            setMultipayTarget('BOTH');
-        }
+        const unifiedInput = document.getElementById('id_unified_topup');
+        if (unifiedInput) unifiedInput.value = '0';
     }
-
-    multipayTargetPills.forEach(btn => {
-        btn.addEventListener('click', () => setMultipayTarget(btn.dataset.target));
-    });
 
     function getDailyRates() {
         const selectedBusId = busSelect ? busSelect.value : '';
-        const rawBusFee = (selectedBusId && busesById[selectedBusId]) ? parseFloat(busesById[selectedBusId].fee) : 0;
-        const rawCanteenFee = (currentStudent && currentStudent.canteen_enrolled && currentStudent.canteen_fee) ? parseFloat(currentStudent.canteen_fee) : 0;
-        const busFee = selectedMultipayTarget === 'CANTEEN' ? 0 : rawBusFee;
-        const canteenFee = selectedMultipayTarget === 'BUS' ? 0 : rawCanteenFee;
+        const busFee = (selectedBusId && busesById[selectedBusId]) ? parseFloat(busesById[selectedBusId].fee) : 0;
+        const canteenFee = (currentStudent && currentStudent.canteen_enrolled && currentStudent.canteen_fee) ? parseFloat(currentStudent.canteen_fee) : 0;
         return { busFee, canteenFee, totalDaily: busFee + canteenFee };
     }
 
@@ -2147,6 +2105,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const { busFee, canteenFee, totalDaily } = getDailyRates();
+        const unifiedInput = document.getElementById('id_unified_topup');
+        if (unifiedInput) unifiedInput.value = '1';
 
         if (totalDaily <= 0) {
             busAmountInput.value = customAmount.toFixed(2);
@@ -2157,19 +2117,24 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (busFee > 0 && canteenFee > 0) {
-            const ratio = busFee / totalDaily;
-            const allocatedBus = Math.round((customAmount * ratio) * 100) / 100;
-            const allocatedCanteen = Math.round((customAmount - allocatedBus) * 100) / 100;
-            busAmountInput.value = allocatedBus.toFixed(2);
-            canteenAmountInput.value = allocatedCanteen.toFixed(2);
-        } else if (busFee > 0) {
-            busAmountInput.value = customAmount.toFixed(2);
-            canteenAmountInput.value = '0.00';
-        } else if (canteenFee > 0) {
-            busAmountInput.value = '0.00';
-            canteenAmountInput.value = customAmount.toFixed(2);
+        // Settle today's unpaid Bus & Canteen shares first, then route all remaining advance into Unified Wallet
+        const busOwedToday = (busFee > 0 && !currentStudent.is_bus_paid) ? (parseFloat(currentStudent.bus_balance || busFee) || busFee) : 0;
+        const canOwedToday = (canteenFee > 0 && !currentStudent.is_canteen_paid) ? (parseFloat(currentStudent.canteen_balance || canteenFee) || canteenFee) : 0;
+        let rem = customAmount;
+        let allocBus = Math.min(rem, busOwedToday);
+        rem = Math.max(0, Math.round((rem - allocBus) * 100) / 100);
+        let allocCan = Math.min(rem, canOwedToday);
+        rem = Math.max(0, Math.round((rem - allocCan) * 100) / 100);
+
+        if (rem > 0) {
+            if (busFee > 0) {
+                allocBus = Math.round((allocBus + rem) * 100) / 100;
+            } else {
+                allocCan = Math.round((allocCan + rem) * 100) / 100;
+            }
         }
+        busAmountInput.value = allocBus.toFixed(2);
+        canteenAmountInput.value = allocCan.toFixed(2);
 
         lastAppliedMultipayAmount = customAmount;
         renderMultipayPreview(customAmount, true);

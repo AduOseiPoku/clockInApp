@@ -86,9 +86,12 @@ class Command(BaseCommand):
             .order_by('date', 'created_at', 'id')
         )
         existing_tx_map = {}
+        unified_student_ids = set()
         for tx in existing_txs:
             key = (tx.student_id, tx.fee_type, tx.date, tx.transaction_type)
             existing_tx_map.setdefault(key, []).append(tx)
+            if tx.fee_type == 'UNIFIED':
+                unified_student_ids.add(tx.student_id)
 
         corrections_count = 0
         deductions_created_count = 0
@@ -96,6 +99,20 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             for student in students_list:
+                if student.id in unified_student_ids:
+                    expected_uni = student.get_unified_credit_balance()
+                    cur_uni = student.unified_credit_wallet or Decimal('0.00')
+                    if expected_uni != cur_uni:
+                        if not dry_run:
+                            student.unified_credit_wallet = expected_uni
+                            student.save(update_fields=['unified_credit_wallet'])
+                        self.stdout.write(
+                            f"  [FIX] Student {student.full_name} (UNIFIED): "
+                            f"Wallet adjusted from GH₵{cur_uni:.2f} -> GH₵{expected_uni:.2f}"
+                        )
+                        corrections_count += 1
+                    continue
+
                 s_clockins = clockins_map.get(student.id, {})
                 changed_fields = []
 
