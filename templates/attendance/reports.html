@@ -275,23 +275,56 @@
                         </td>
                         <td><span style="color: var(--danger-text); font-weight: 600;">{{ currency }}{{ canteen_balance|floatformat:2 }}</span></td>
                     </tr>
-                    {% if management_students_count > 0 or management_collected > 0 %}
-                    <tr>
-                        <td><strong>Management Fee (Exempt from Bus/Lunch)</strong></td>
-                        <td>{{ management_students_count }}</td>
-                        <td>—</td>
-                        <td><span>—</span></td>
-                        <td>
-                            <span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ management_collected|floatformat:2 }}</span>
-                        </td>
-                        <td><span>—</span></td>
-                    </tr>
-                    {% endif %}
                 </tbody>
             </table>
         </div>
     </div>
 </div>
+
+<!-- 3b. Daily Management Fee Reconciliation -->
+{% if management_students_count > 0 or management_collected > 0 %}
+<div style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+        <h3 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-main);">
+            Daily Management Fee Reconciliation (Staff / Discounted)
+        </h3>
+        {% if user.profile.is_principal %}
+        <a href="{% url 'school_settings' %}" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.65rem;">
+            ⚙️ Configure Management Fee
+        </a>
+        {% endif %}
+    </div>
+    <div class="table-card">
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Enrolled Students</th>
+                        <th>Expected</th>
+                        <th>Collected</th>
+                        <th>Outstanding</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Management Fee (Exempt from Bus/Lunch)</strong></td>
+                        <td>{{ management_students_count }}</td>
+                        <td><span>{{ currency }}{{ management_expected|floatformat:2 }}</span></td>
+                        <td>
+                            <span style="color: var(--success-text); font-weight: 600;">{{ currency }}{{ management_collected|floatformat:2 }}</span>
+                            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem;">
+                                Direct: {{ currency }}{{ management_direct|floatformat:2 }} &bull; Prepaid: {{ currency }}{{ management_prepaid|floatformat:2 }}
+                            </div>
+                        </td>
+                        <td><span style="color: var(--danger-text); font-weight: 600;">{{ currency }}{{ management_balance|floatformat:2 }}</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- 4. Combined Daily Cashier Reconciliation -->
 <div style="margin-bottom: 2rem;">
@@ -343,6 +376,24 @@
                             {% endif %}
                         </td>
                     </tr>
+                    {% if management_students_count > 0 or management_collected > 0 %}
+                    <tr>
+                        <td><strong>Management Fee (Staff / Discounted)</strong></td>
+                        <td style="text-align: right;">{{ currency }}{{ management_expected|floatformat:2 }}</td>
+                        <td style="text-align: right; color: var(--success-text); font-weight: 600;">
+                            <div>{{ currency }}{{ management_collected|floatformat:2 }}</div>
+                            <div style="font-size: 0.7rem; font-weight: 400; color: var(--text-muted);">Direct: {{ currency }}{{ management_direct|floatformat:2 }} | Prepaid: {{ currency }}{{ management_prepaid|floatformat:2 }}</div>
+                        </td>
+                        <td style="text-align: right; color: var(--danger-text); font-weight: 600;">{{ currency }}{{ management_balance|floatformat:2 }}</td>
+                        <td style="text-align: right;">
+                            {% if management_expected > 0 %}
+                                {% widthratio management_collected management_expected 100 %}%
+                            {% else %}
+                                100%
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
                 </tbody>
                 <tfoot>
                     {% if debt_clearances_today > 0 %}

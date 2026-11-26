@@ -92,6 +92,9 @@ class Command(BaseCommand):
             existing_tx_map.setdefault(key, []).append(tx)
             if tx.fee_type == 'UNIFIED':
                 unified_student_ids.add(tx.student_id)
+        for s in students_list:
+            if s.pays_management_fee or (s.id, 'MANAGEMENT') in payments_map:
+                unified_student_ids.add(s.id)
 
         corrections_count = 0
         deductions_created_count = 0
@@ -151,6 +154,7 @@ class Command(BaseCommand):
                             if fee_type == 'BUS' and p.is_temporary_bus:
                                 guest_fee = (p.bus.fee if p.bus_id and p.bus else daily_fee) or Decimal('0.00')
                                 guest_fee = max(Decimal('0.00'), guest_fee)
+                                direct_cash_on_day += min(p.amount, guest_fee)
                                 if p.amount > guest_fee:
                                     excess = max(Decimal('0.00'), p.amount - guest_fee - prior_alloc)
                                     if excess > Decimal('0.00'):

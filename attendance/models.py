@@ -354,30 +354,86 @@ class Student(models.Model):
             return self.custom_management_fee
         return get_default_management_fee()
 
-    def get_management_fee_paid(self, period=None):
-        """Total management fee payments recorded for this student in the active period."""
+    def get_management_fee_paid(self, target_date=None):
+        """Total daily management fee payments covering target_date (excludes allocations to other days' debts)."""
         if not self.pays_management_fee:
             return Decimal('0.00')
-        if period is None:
-            period = get_active_academic_period()
-        return (
-            self.payments.filter(fee_type='MANAGEMENT', period=period)
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        total = (
+            self.payments.filter(fee_type='MANAGEMENT', payment_date=target_date)
             .aggregate(total=Sum('amount'))['total']
             or Decimal('0.00')
         )
+        if total > Decimal('0.00'):
+            other_day_debt = (
+                DebtPaymentAllocation.objects.filter(
+                    payment__student=self,
+                    payment__fee_type='MANAGEMENT',
+                    payment__payment_date=target_date,
+                )
+                .exclude(debt_record__date=target_date)
+                .aggregate(total=Sum('amount_applied'))['total'] or Decimal('0.00')
+            )
+            total = max(Decimal('0.00'), total - other_day_debt)
+        return total
 
-    def get_management_fee_balance(self, period=None):
-        """Remaining management fee balance owed for the active period."""
+    def get_daily_management_settled(self, target_date=None):
+        """Total management fee settled for target_date via direct cash + wallet credit deductions."""
+        if not self.pays_management_fee:
+            return Decimal('0.00')
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        return self.get_management_fee_paid(target_date) + self.get_deducted_amount_for_date('MANAGEMENT', target_date)
+
+    def get_management_credit_balance(self, target_date=None):
+        """Available prepaid management credit wallet balance (unified wallet) as of target_date."""
         if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
             return Decimal('0.00')
-        paid = self.get_management_fee_paid(period=period)
-        return max(Decimal('0.00'), self.management_fee_required - paid)
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        return self.get_unified_credit_balance(target_date)
 
-    def is_management_fee_paid(self, period=None):
-        """True if student does not owe management fee or has settled it for the active period."""
+    def get_management_credit_days(self, target_date=None):
+        """Whole future days of management fee remaining in wallet after settling target_date."""
+        if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
+            return 0
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        wallet = self.get_management_credit_balance(target_date)
+        owed_today = max(Decimal('0.00'), self.management_fee_required - self.get_daily_management_settled(target_date))
+        if wallet > owed_today:
+            return int((wallet - owed_today) // self.management_fee_required)
+        return 0
+
+    def is_management_fee_settled_for_date(self, target_date=None):
+        """True only when target_date's management fee has been paid directly or deducted from wallet."""
         if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
             return True
-        return self.get_management_fee_paid(period=period) >= self.management_fee_required
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        return self.get_daily_management_settled(target_date) >= self.management_fee_required
+
+    def get_management_fee_balance(self, target_date=None):
+        """Cash top-up balance needed for target_date after direct payments, deductions, and wallet credit."""
+        if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
+            return Decimal('0.00')
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        settled = self.get_daily_management_settled(target_date)
+        wallet = self.get_management_credit_balance(target_date)
+        return max(Decimal('0.00'), self.management_fee_required - settled - wallet)
+
+    def is_management_fee_paid(self, target_date=None):
+        """True if student does not owe management fee or has settled/covered it for target_date."""
+        if not self.pays_management_fee or self.management_fee_required <= Decimal('0.00'):
+            return True
+        if target_date is None or isinstance(target_date, str):
+            target_date = timezone.localdate()
+        settled = self.get_daily_management_settled(target_date)
+        if settled >= self.management_fee_required:
+            return True
+        return (settled + self.get_management_credit_balance(target_date)) >= self.management_fee_required
 
     def get_daily_bus_paid(self, target_date=None):
         """Total bus payments covering target_date (excludes allocations to other days' debts)."""
@@ -480,6 +536,9 @@ class Student(models.Model):
             return max(Decimal('0.00'), self.unified_credit_wallet or Decimal('0.00'))
         agg = txs.aggregate(
             uni_top=Sum('amount', filter=Q(fee_type='UNIFIED', transaction_type='TOP_UP')),
+            mgmt_top=Sum('amount', filter=Q(fee_type='MANAGEMENT', transaction_type='TOP_UP')),
+            mgmt_rev=Sum('amount', filter=Q(fee_type='MANAGEMENT', transaction_type='REVERSAL')),
+            mgmt_ded=Sum('amount', filter=Q(fee_type='MANAGEMENT', transaction_type='DEDUCTION')),
             bus_top=Sum('amount', filter=Q(fee_type='BUS', transaction_type='TOP_UP')),
             bus_rev=Sum('amount', filter=Q(fee_type='BUS', transaction_type='REVERSAL')),
             bus_ded=Sum('amount', filter=Q(fee_type='BUS', transaction_type='DEDUCTION')),
@@ -487,7 +546,7 @@ class Student(models.Model):
             can_rev=Sum('amount', filter=Q(fee_type='CANTEEN', transaction_type='REVERSAL')),
             can_ded=Sum('amount', filter=Q(fee_type='CANTEEN', transaction_type='DEDUCTION')),
         )
-        uni_top = agg['uni_top'] or Decimal('0.00')
+        uni_top = (agg['uni_top'] or Decimal('0.00')) + (agg['mgmt_top'] or Decimal('0.00')) + (agg['mgmt_rev'] or Decimal('0.00')) - (agg['mgmt_ded'] or Decimal('0.00'))
         if uni_top <= Decimal('0.00'):
             return Decimal('0.00')
         bus_net = (agg['bus_top'] or Decimal('0.00')) + (agg['bus_rev'] or Decimal('0.00')) - (agg['bus_ded'] or Decimal('0.00'))
@@ -669,15 +728,26 @@ class Student(models.Model):
             target_date = timezone.localdate()
         with transaction.atomic():
             locked = Student.objects.select_for_update().get(pk=self.pk)
-            daily_fee = locked.bus_fee_required if fee_type == 'BUS' else locked.canteen_fee_required
+            if fee_type == 'BUS':
+                daily_fee = locked.bus_fee_required
+                settled = locked.get_daily_bus_settled(target_date)
+                wallet_field = 'bus_credit_wallet'
+            elif fee_type == 'CANTEEN':
+                daily_fee = locked.canteen_fee_required
+                settled = locked.get_daily_canteen_settled(target_date)
+                wallet_field = 'canteen_credit_wallet'
+            elif fee_type == 'MANAGEMENT':
+                daily_fee = locked.management_fee_required
+                settled = locked.get_daily_management_settled(target_date)
+                wallet_field = None
+            else:
+                return Decimal('0.00')
             if daily_fee <= Decimal('0.00'):
                 return Decimal('0.00')
-            settled = locked.get_daily_bus_settled(target_date) if fee_type == 'BUS' else locked.get_daily_canteen_settled(target_date)
             owed = max(Decimal('0.00'), daily_fee - settled)
             if owed <= Decimal('0.00'):
                 return Decimal('0.00')
-            wallet_field = 'bus_credit_wallet' if fee_type == 'BUS' else 'canteen_credit_wallet'
-            specific_wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00'))
+            specific_wallet = max(Decimal('0.00'), getattr(locked, wallet_field) or Decimal('0.00')) if wallet_field else Decimal('0.00')
             unified_wallet = max(Decimal('0.00'), locked.unified_credit_wallet or Decimal('0.00'))
             total_avail = specific_wallet + unified_wallet
             if total_avail <= Decimal('0.00'):
@@ -691,7 +761,7 @@ class Student(models.Model):
             from_specific = min(specific_wallet, deduct_amt)
             from_unified = deduct_amt - from_specific
             update_fields = []
-            if from_specific > Decimal('0.00'):
+            if from_specific > Decimal('0.00') and wallet_field:
                 new_specific = specific_wallet - from_specific
                 setattr(locked, wallet_field, new_specific)
                 setattr(self, wallet_field, new_specific)
@@ -704,7 +774,8 @@ class Student(models.Model):
             if update_fields:
                 locked.save(update_fields=update_fields)
 
-            bal_after = (getattr(locked, wallet_field) or Decimal('0.00')) + (locked.unified_credit_wallet or Decimal('0.00'))
+            spec_after = (getattr(locked, wallet_field) or Decimal('0.00')) if wallet_field else Decimal('0.00')
+            bal_after = spec_after + (locked.unified_credit_wallet or Decimal('0.00'))
             source_tag = "[Unified]" if from_unified > Decimal('0.00') and from_specific == Decimal('0.00') else ""
             CreditTransaction.objects.create(
                 student=locked,
@@ -726,10 +797,10 @@ class Student(models.Model):
         """
         if target_date is None:
             target_date = timezone.localdate()
-        refunded = {'BUS': Decimal('0.00'), 'CANTEEN': Decimal('0.00')}
+        refunded = {'BUS': Decimal('0.00'), 'CANTEEN': Decimal('0.00'), 'MANAGEMENT': Decimal('0.00')}
         with transaction.atomic():
             locked = Student.objects.select_for_update().get(pk=self.pk)
-            for ft in ('BUS', 'CANTEEN'):
+            for ft in ('BUS', 'CANTEEN', 'MANAGEMENT'):
                 qs = locked.credit_transactions.filter(fee_type=ft, date=target_date)
                 if clock_in is not None:
                     ded_sum = qs.filter(
@@ -1052,6 +1123,9 @@ def apply_payment_to_wallet(payment):
             if daily_fee <= Decimal('0.00') and payment.bus_id:
                 daily_fee = payment.bus.fee
             wallet_field = 'unified_credit_wallet' if use_unified else 'bus_credit_wallet'
+        elif payment.fee_type == 'MANAGEMENT':
+            daily_fee = student.management_fee_required
+            wallet_field = 'unified_credit_wallet'
         else:
             daily_fee = student.canteen_fee_required
             wallet_field = 'unified_credit_wallet' if use_unified else 'canteen_credit_wallet'
@@ -1236,6 +1310,8 @@ def _is_fee_already_paid_on_date(student, target_date, fee_type):
     """Check if a student has already settled a specific fee_type for target_date."""
     if fee_type == 'BUS':
         required = student.bus_fee_required
+    elif fee_type == 'MANAGEMENT':
+        required = student.management_fee_required
     else:
         required = student.canteen_fee_required
 
@@ -1274,8 +1350,8 @@ def record_unpaid_debt(student, target_date, fee_type, recorded_by=None, bus=Non
     """
     from .audit import log_activity
 
-    if fee_type not in ('BUS', 'CANTEEN'):
-        raise ValueError("Invalid fee type. Must be BUS or CANTEEN.")
+    if fee_type not in ('BUS', 'CANTEEN', 'MANAGEMENT'):
+        raise ValueError("Invalid fee type. Must be BUS, CANTEEN, or MANAGEMENT.")
 
     if _is_fee_already_paid_on_date(student, target_date, fee_type):
         raise ValueError(f"{student.full_name} has already paid {fee_type.lower()} fee for {target_date}.")
@@ -1286,6 +1362,12 @@ def record_unpaid_debt(student, target_date, fee_type, recorded_by=None, bus=Non
             raise ValueError(f"{student.full_name} is not assigned to a bus and no guest bus was selected.")
         fee_amount = effective_bus.fee or Decimal('0.00')
         is_temp = bool(is_temporary_bus or (student.bus_id and effective_bus.id != student.bus_id) or not student.bus_id)
+    elif fee_type == 'MANAGEMENT':
+        if not student.pays_management_fee:
+            raise ValueError(f"{student.full_name} is not enrolled in the management fee plan.")
+        effective_bus = None
+        fee_amount = student.management_fee_required or Decimal('0.00')
+        is_temp = False
     else:
         if not student.canteen_enrolled:
             raise ValueError(f"{student.full_name} is not enrolled in the school canteen.")
@@ -1397,6 +1479,40 @@ def reconcile_same_day_debt_on_payment(payment):
                 debt_record=open_debt,
                 amount_applied=to_apply,
             )
+
+
+def auto_clock_in_on_payment(payment):
+    """
+    Automatically clock in a student for today when a BUS or MANAGEMENT FeePayment
+    is recorded for today (excluding debt settlements and explicit opt-outs).
+    """
+    if not payment or not payment.student_id:
+        return None
+    if payment.fee_type not in ('BUS', 'MANAGEMENT'):
+        return None
+    if getattr(payment, '_is_debt_settlement', False) or getattr(payment, '_skip_auto_clockin', False):
+        return None
+    if (payment.notes or '').startswith('Debt clearance:'):
+        return None
+    if payment.amount <= Decimal('0.00'):
+        return None
+    today = timezone.localdate()
+    if payment.payment_date != today:
+        return None
+    now_time = timezone.localtime().time() if hasattr(timezone, 'localtime') else timezone.now().time()
+    try:
+        record, _ = ClockInRecord.objects.get_or_create(
+            student_id=payment.student_id,
+            date=today,
+            defaults={
+                'clock_in_time': now_time,
+                'status': 'PRESENT',
+                'recorded_by': payment.recorded_by,
+            },
+        )
+        return record
+    except IntegrityError:
+        return ClockInRecord.objects.filter(student_id=payment.student_id, date=today).first()
 
 
 def reverse_debt_allocations(payment):
@@ -1532,7 +1648,7 @@ def get_open_debt_maps(student_ids=None, student_class=None):
     """
     qs = DebtRecord.objects.filter(
         status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL]
-    ).select_related('bus', 'student', 'recorded_by').order_by('date', 'fee_type')
+    ).select_related('bus', 'student', 'student__bus', 'recorded_by').order_by('date', 'fee_type')
 
     if student_ids is not None:
         qs = qs.filter(student_id__in=student_ids)
@@ -1569,19 +1685,37 @@ def get_open_debt_maps(student_ids=None, student_class=None):
 
 def get_overdue_debtors_summary():
     """
-    Lightweight summary of all open debtors and overdue (>3 days) debtors for Admin/Bursar alerts.
+    Lightweight SQL-aggregated summary of all open debtors and overdue (>3 days) debtors
+    for Admin/Bursar alerts without hydrating DebtRecord/Student/Bus objects.
     """
-    debt_maps = get_open_debt_maps()
-    total_by_student = debt_maps['total_by_student']
-    overdue_ids = debt_maps['overdue_student_ids']
+    from django.db.models import F
 
-    total_debtors_count = len(total_by_student)
-    total_debt_amount = sum(total_by_student.values(), Decimal('0.00'))
-    overdue_debtors_count = len(overdue_ids)
-    overdue_debt_amount = sum(
-        (amt for sid, amt in total_by_student.items() if sid in overdue_ids),
-        Decimal('0.00')
+    rows = (
+        DebtRecord.objects.filter(
+            status__in=[DebtRecord.STATUS_UNPAID, DebtRecord.STATUS_PARTIAL]
+        )
+        .values('student_id')
+        .annotate(
+            days=Count('date', distinct=True),
+            total=Sum(F('amount_owed') - F('amount_paid')),
+        )
     )
+
+    total_debtors_count = 0
+    total_debt_amount = Decimal('0.00')
+    overdue_debtors_count = 0
+    overdue_debt_amount = Decimal('0.00')
+
+    for row in rows:
+        amt = max(Decimal('0.00'), row['total'] or Decimal('0.00'))
+        if amt <= Decimal('0.00'):
+            continue
+        total_debtors_count += 1
+        total_debt_amount += amt
+        if row['days'] > OVERDUE_DEBT_DAYS_THRESHOLD:
+            overdue_debtors_count += 1
+            overdue_debt_amount += amt
+
     return {
         'total_debtors_count': total_debtors_count,
         'total_debt_amount': total_debt_amount,

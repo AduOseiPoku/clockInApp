@@ -151,6 +151,28 @@
             {% endif %}
         </div>
     </div>
+
+    {% if stats.management_students_count > 0 or stats.total_management_collected > 0 %}
+    <!-- Management Fee Paid Ratio -->
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="stat-title">Today's Management Fee</span>
+        </div>
+        <div id="stat-management-count" class="stat-value">
+            {{ stats.management_paid_count }} <span style="font-size:1rem;color:var(--text-muted);font-weight:400;">/ {{ stats.management_students_count }}</span>
+        </div>
+        <div class="stat-footer">
+            <span id="stat-management-pct" class="stat-badge {% if stats.management_paid_pct >= 80 %}stat-badge-success{% else %}stat-badge-danger{% endif %}">
+                {{ stats.management_paid_pct }}% Paid
+            </span>
+            {% if user.profile and user.profile.can_view_revenue %}
+            <span id="stat-management-collected">{{ currency }}{{ stats.total_management_collected|floatformat:2 }} collected</span>
+            {% else %}
+            <span>Staff / Discounted</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 

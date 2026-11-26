@@ -8,6 +8,7 @@ from .models import (
     reverse_payment_wallet_effects,
     reconcile_same_day_debt_on_payment,
     reverse_debt_allocations,
+    auto_clock_in_on_payment,
 )
 
 @receiver(user_logged_in)
@@ -65,10 +66,11 @@ def log_user_login_failed(sender, credentials, request, **kwargs):
 
 @receiver(post_save, sender=FeePayment)
 def sync_wallet_on_payment_save(sender, instance, created, **kwargs):
-    """Apply newly created cash/MoMo payments to the student's explicit wallet and same-day debts."""
+    """Apply newly created cash/MoMo payments to the student's explicit wallet, same-day debts, and auto clock-in."""
     if created:
         apply_payment_to_wallet(instance)
         reconcile_same_day_debt_on_payment(instance)
+        auto_clock_in_on_payment(instance)
 
 
 @receiver(pre_delete, sender=FeePayment)
